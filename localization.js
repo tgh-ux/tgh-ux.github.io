@@ -236,7 +236,7 @@ const LOCALIZATION = {
 		ROLE_PARANORMALINVESTIGATOR: "Paranormal Investigator",
 		ROLE_PARANORMALINVESTIGATOR_DEFINITE: "the Paranormal Investigator",
 		ROLE_PHASE_DAY: "day role",
-		ROLE_PHASE_DUSK: "dust role",
+		ROLE_PHASE_DUSK: "dusk role",
 		ROLE_PHASE_NIGHT: "night role",
 		ROLE_PICKPOCKET: "Pickpocket",
 		ROLE_PICKPOCKET_DEFINITE: "the Pickpocket",
