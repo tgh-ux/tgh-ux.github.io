@@ -1,4 +1,4 @@
-let LANG = "SWE";
+let LANG = "ENG";
 
 const LOCALIZATION = {
 	ENG: {
