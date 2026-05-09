@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title data-loc="UI_TITLE"></title>
+    <link rel="stylesheet" href="styles.css">
+	<script src="localization.js"></script>
+	<script src="roles.js"></script>
+	<script src="settings.js"></script>
+	<script src="rules.js"></script>
+</head>
+<body>
+
+<div class="top-bar">
+    <h1 data-loc="UI_TITLE"></h1>
+
+    <select id="languageSelector">
+        <option value="SWE">Svenska</option>
+        <option value="ENG">English</option>
+    </select>
+</div>
+
+<div class="container">
+    <!-- Roles panel -->
+    <section class="panel panel-roles" data-panel="roles">
+        <div class="panel-header">
+			<span class="panel-toggle">-</span>
+            <h3 data-loc="UI_ROLESELECTION"></h3>
+			<button id="btn-reset-roles" class="panel-btn" type="button" data-loc="UI_RESET"></button>
+        </div>
+
+        <div class="panel-content roles">
+			<div class="role-search">
+				<label for="roleSelectionSearchField" data-loc="UI_SEARCH"></label>
+				<input 
+					data-loc-placeholder="UI_SEARCH_PLACEHOLDER" 
+					type="text" 
+					id="roleSelectionSearchField" 
+					oninput="filterRoles(this.value, 'roleList')" />
+			</div>
+			<div class="role-filter" id="roleFilterContainer"></div>
+			<div id="playerCountDisplay" class="player-count-display" data-loc="UI_PLAYER_COUNT"></div>
+            <!-- GUI will populate this -->
+            <div id="roleList"></div>
+        </div>
+    </section>
+
+    <!-- Prompt panel -->
+    <section class="panel panel-output" data-panel="prompt">
+        <div class="panel-header">
+			<span class="panel-toggle">-</span>
+            <h3 data-loc="UI_GENERATED_PROMPT"></h3>
+        </div>
+
+        <div class="panel-content output">
+            <textarea id="promptOutput"></textarea>
+        </div>
+    </section>
+	
+    <!-- Settings panel -->
+    <section class="panel panel-settings" data-panel="settings" data-collapsed="true">
+        <div class="panel-header">
+			<span class="panel-toggle">+</span>
+            <h3 data-loc="UI_SETTING"></h3>
+			<button id="btn-reset-settings" class="panel-btn" type="button" data-loc="UI_RESET"></button>
+        </div>
+
+        <div class="panel-content">
+            <!-- GUI will populate this -->
+            <div id="settings-list"></div>
+        </div>
+    </section>
+
+    <!-- Role description panel -->
+    <section class="panel panel-role-descriptions" data-panel="role-descriptions"  data-collapsed="true">
+        <div class="panel-header">
+			<span class="panel-toggle">+</span>
+            <h3 data-loc="UI_ROLEDESCRIPTIONS"></h3>
+			<button class="print-button" onclick="printRoleDescriptions()" type="button" data-loc="UI_PRINT"></button>
+        </div>
+
+        <div class="panel-content role-descriptions">
+			<div class="role-search">
+				<label for="roleDescriptionSearchField" data-loc="UI_SEARCH"></label>
+				<input 
+					data-loc-placeholder="UI_SEARCH_PLACEHOLDER" 
+					type="text" 
+					id="roleDescriptionSearchField" 
+					oninput="filterRoles(this.value, 'roleDescriptionList')" />
+			</div>
+            <!-- GUI will populate this -->
+            <div id="roleDescriptionList"></div>
+        </div>
+    </section>
+
+    <!-- Rules panel -->
+    <section class="panel panel-rules" data-panel="rules"  data-collapsed="true">
+        <div class="panel-header">
+			<span class="panel-toggle">+</span>
+            <h3 data-loc="UI_GAMERULES"></h3>
+			<button class="print-button" onclick="printRules()" type="button" data-loc="UI_PRINT"></button>
+        </div>
+
+        <div class="panel-content rules">
+			<div id="rulesText" data-loc-html="UI_RULES_FULL"></div>
+        </div>
+    </section>
+</div>
+
+<div id="roleOverlay" class="role-overlay hidden">
+    <div class="role-overlay-backdrop"></div>
+
+    <div class="role-overlay-panel">
+        <button id="roleOverlayClose" class="role-overlay-close">×</button>
+        <div id="roleOverlayContent"></div>
+    </div>
+</div>
+
+<div id="scaleDebug">
+    <span id="scaleDebugValue">–</span>
+</div>
+
+<!-- Logic -->
+<!-- GUI only -->
+<script src="gui.js" defer></script>
+
+</body>
+</html>
