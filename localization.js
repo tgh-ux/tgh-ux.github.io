@@ -1090,7 +1090,7 @@ function saveLanguage(lang) {
 }
 
 function loadLanguage() {
-    return localStorage.getItem("onuww_lang") || "SWE";
+    return localStorage.getItem("onuww_lang") || "ENG";
 }
 
 function setLocalizationLanguage(lang) {
