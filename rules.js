@@ -351,6 +351,31 @@ const TURN_ORDER = [
 const RNG_CACHE = Object.create(null);
 
 const EXECUTORS = {
+	formatListString: (ctx, items, isOr = true) => {
+		if (!Array.isArray(items) || items.length === 0) {
+			return "";
+		}
+
+		if (items.length === 1) {
+			return String(items[0]);
+		}
+
+		const joinWord = LocR(isOr ? "LIST_OR" : "LIST_AND", ctx);
+
+		if (items.length === 2) {
+			return `${items[0]} ${joinWord} ${items[1]}`;
+		}
+
+		return ( items.slice(0, -1).join(", ") + ` ${joinWord} ` + items[items.length - 1] );
+	},
+	listRolesWithTag: (ctx, tag, isOr = true) => {
+		const roles = getRolesWithTag(ctx, tag)
+			.filter(role => ctx.isPresent(role.id))
+			.map(role => LocR(role.nameKey, ctx));
+			
+		return EXECUTORS.formatListString(ctx, roles, isOr);
+	},
+	/*
 	listRolesWithTag: (ctx, tag, isOr = true) => {
 		const roles = getRolesWithTag(ctx, tag)
 			.filter(role => ctx.isPresent(role.id))
@@ -366,6 +391,7 @@ const EXECUTORS = {
 			roles[roles.length - 1]
 		);
 	},
+	*/
 	MorticianRandomEvent: (ctx, doppelganger = false) => {
 		const weights = [
 			{ id: "PROMPT_SHARED_VIEW_PLAYER_NEIGHBOR_LEFT",  weight: getSettingInt(ctx, "mortician.neighbor", 1) / 2 },
@@ -459,7 +485,9 @@ const EXECUTORS = {
 		prompt = prompt + mode;
 		let data = {};
 		if (mode === "SPECIFIC") {
-			data = { specific_player_number: (Math.floor(getCachedRandom("oracle.view_player.specific_player_number") * ctx.player_count) + 1).toString() };
+			const result = EXECUTORS.RandomPlayers(ctx, "oracle.view_player", 1);
+			data = { specific_player_number: result };
+			//data = { specific_player_number: (Math.floor(getCachedRandom("oracle.view_player.specific_player_number") * ctx.player_count) + 1).toString() };
 		}
 		
 		return LocR(prompt, { ...ctx, ...data });
@@ -534,7 +562,9 @@ const EXECUTORS = {
 		let prompt = "PROMPT_SHARED_VIEW_" + (mode ?? "PLAYER_NEIGHBOR_ANY");
 		let data = {};
 		if (mode === "PLAYER_SPECIFIC") {
-			data = { specific_player_number: (Math.floor(getCachedRandom(setting_node + ".specific_player_number") * ctx.player_count) + 1).toString() };
+			const result = EXECUTORS.RandomPlayers(ctx, setting_node, 1);
+			data = { specific_player_number: result };
+			//data = { specific_player_number: (Math.floor(getCachedRandom(setting_node + ".specific_player_number") * ctx.player_count) + 1).toString() };
 		}
 		
 		return LocR(prompt, { ...ctx, ...data })
@@ -559,14 +589,7 @@ const EXECUTORS = {
 				prompt = prompt + (view_double ? "_BOTH" : "_ANY");
 				break;
 			case "SPECIFIC":
-				const arr = Array.from({ length: ctx.player_count }, (_, i) => i);
-				const result = [];
-
-				for (let i = 0; i < (view_double ? 2 : 1); i++) {
-					const p = Math.floor( getCachedRandom("psychic.specific_player_number_" + i) * arr.length );
-					result.push(arr.splice(p, 1)[0] + 1);
-				}
-
+				const result = EXECUTORS.RandomPlayers(ctx, "psychic.specific", view_double ? 2 : 1);
 				data = { specific_player_number: result.toString() };
 				break;
 			default:
@@ -674,16 +697,7 @@ const EXECUTORS = {
 	},
 	EmpathPlayerList: (ctx, isDoppelganger = false) => {
 		const rndKey = "empath" + (isDoppelganger ? "_doppelganger" : "");
-		const playerCount = Math.min(Math.floor(0.25 * ctx.player_count + 1), 4);	//TODO: Change from constants to settings values
-		let all_players = Array.from({length: 10}, (_, i) => i + 1)
-		let players = [];
-		
-		for (let i = 0; i < playerCount; i++) {
-			const idx = Math.floor(getCachedRandom(rndKey + ".player_" + i) * all_players.length);
-			players.push(all_players.splice(idx, 1)[0]);
-		}
-		
-		return players.sort((a,b) => { return a-b; }).toString();
+		return EXECUTORS.RandomPlayers(ctx, rndKey, 1, 4);
 	},
 	EmpathPlayerAction: (ctx, isDoppelganger = false) => {
 		const rndKey = "empath" + (isDoppelganger ? "_doppelganger" : "");
@@ -730,6 +744,45 @@ const EXECUTORS = {
 	IfPresent: (ctx, role, prompt) => { return ctx.isPresent(role) ? LocR(prompt, ctx) : ""; },
 	IfAnyWithTag: (ctx, tag, prompt) => { return ctx.anyWithTag(tag) ? LocR(prompt, ctx) : ""; },
 	ListRolesWithTag: (ctx, tag, isOr = true) => { return EXECUTORS.listRolesWithTag(ctx, tag, isOr); },
+	RandomPlayers: (ctx, rndKey, min, max) => {		
+		function parseArg(arg) {
+			if (typeof arg === "string" && arg.endsWith("%")) {
+				const p = parseFloat(arg) / 100.0;
+				return Math.ceil(ctx.player_count * p);
+			}
+			
+			if (typeof arg === "number" && Number.isInteger(arg)) {
+				return arg;
+			}
+
+			return null;
+		}
+
+		let minAbs = parseArg(min) ?? 1;
+		let maxAbs = parseArg(max) ?? minAbs;
+
+		if (minAbs > maxAbs) {
+			[minAbs, maxAbs] = [maxAbs, minAbs];
+		}
+
+		minAbs = Math.min(minAbs, ctx.player_count);
+		maxAbs = Math.min(maxAbs, ctx.player_count);
+		
+		const playerCount = Math.floor(getCachedRandom(rndKey) * (maxAbs - minAbs + 1)) + minAbs;
+		
+		console.log(min + ", " + max + ", " + minAbs + ", " + maxAbs + ", " + playerCount);
+		
+		let all_players = Array.from({length: ctx.player_count}, (_, i) => i + 1)
+		let players = [];
+		
+		for (let i = 0; i < playerCount; i++) {
+			const idx = Math.floor(getCachedRandom(rndKey + ".player_" + i) * all_players.length);
+			players.push(all_players.splice(idx, 1)[0]);
+		}
+		
+		//return players.sort((a,b) => { return a-b; }).toString();
+		return EXECUTORS.formatListString(ctx, players.sort((a, b) => a - b).map(String), false);
+	},
 }
 
 

@@ -1,4 +1,4 @@
-let LANG = "ENG";
+let LANG = "SWE";
 
 const LOCALIZATION = {
 	ENG: {
@@ -72,8 +72,9 @@ const LOCALIZATION = {
 		PROMPT_GREMLIN: "{ROLE_GREMLIN}, wake up. {PROMPT_GREMLIN_ACTION} {ROLE_GREMLIN}, go to sleep.",
 		PROMPT_GREMLIN_ACTION: "Swap either two other players' marks or two other players' cards, without looking at them.",
 		PROMPT_GREMLIN_DOPPELGANGER: "{ROLE_DOPPELGANGER}, if you saw {ROLE_GREMLIN_DEFINITE}, wake up. {PROMPT_GREMLIN_ACTION} {ROLE_DOPPELGANGER}, go to sleep.",
-		PROMPT_INSOMNIAC: "{ROLE_INSOMNIAC}, wake up. Look at your own card. {ROLE_INSOMNIAC}, go to sleep.",
-		PROMPT_INSOMNIAC_DOPPELGANGER: "{ROLE_DOPPELGANGER}, if you saw {ROLE_INSOMNIAC_DEFINITE}, wake up. Look at your own card. {ROLE_DOPPELGANGER}, go to sleep.",
+		PROMPT_INSOMNIAC: "{ROLE_INSOMNIAC}, wake up. {PROMPT_INSOMNIAC_ACTION} {ROLE_INSOMNIAC}, go to sleep.",
+		PROMPT_INSOMNIAC_ACTION: "Look at your own card.",
+		PROMPT_INSOMNIAC_DOPPELGANGER: "{ROLE_DOPPELGANGER}, if you saw {ROLE_INSOMNIAC_DEFINITE}, wake up. {PROMPT_INSOMNIAC_ACTION} {ROLE_DOPPELGANGER}, go to sleep.",
 		PROMPT_INSTIGATOR: "{ROLE_INSTIGATOR}, wake up. Replace another player's mark with {ROLE_INSTIGATOR_DEFINITE}'s mark. {ROLE_INSTIGATOR}, go to sleep.",
 		PROMPT_LEADER: "{ROLE_LEADER}, wake up. {TEAM_ALIEN_PLURAL}, hold out a thumb so {ROLE_LEADER_DEFINITE} can see. {IfPresent:'FEUDINGALIENS','PROMPT_LEADER_FEUDINGALIENS'} {ROLE_LEADER}, go to sleep. {IfDoppelgangerPresent:'PROMPT_LEADER_DOPPELGANGER'} {TEAM_ALIEN_PLURAL}, put your thumbs down.",
 		PROMPT_LEADER_DOPPELGANGER: "{ROLE_DOPPELGANGER}, if you saw {ROLE_LEADER_DEFINITE}, wake up. {TEAM_ALIEN_PLURAL}, keep your thumbs out so {ROLE_DOPPELGANGER} can see. {ROLE_DOPPELGANGER}, go to sleep.",
@@ -516,8 +517,9 @@ const LOCALIZATION = {
 		PROMPT_GREMLIN: "{ROLE_GREMLIN}, vakna. {PROMPT_GREMLIN_ACTION} {ROLE_GREMLIN}, somna.",
 		PROMPT_GREMLIN_ACTION: "Byt plats på två andra spelares märken eller två andra spelares kort, utan att titta på något av dem.",
 		PROMPT_GREMLIN_DOPPELGANGER: "{ROLE_DOPPELGANGER}, om du såg {ROLE_GREMLIN_DEFINITE}, vakna. {PROMPT_GREMLIN_ACTION} {ROLE_DOPPELGANGER}, somna.",
-		PROMPT_INSOMNIAC: "{ROLE_INSOMNIAC}, vakna. Titta på ditt eget kort. {ROLE_INSOMNIAC}, somna.",
-		PROMPT_INSOMNIAC_DOPPELGANGER: "{ROLE_DOPPELGANGER}, om du såg {ROLE_INSOMNIAC_DEFINITE}, vakna. Titta på ditt eget kort. {ROLE_DOPPELGANGER}, somna.",
+		PROMPT_INSOMNIAC: "{ROLE_INSOMNIAC}, vakna. {PROMPT_INSOMNIAC_ACTION} {ROLE_INSOMNIAC}, somna.",
+		PROMPT_INSOMNIAC_ACTION: "Titta på ditt eget kort.",
+		PROMPT_INSOMNIAC_DOPPELGANGER: "{ROLE_DOPPELGANGER}, om du såg {ROLE_INSOMNIAC_DEFINITE}, vakna. {PROMPT_INSOMNIAC_ACTION} {ROLE_DOPPELGANGER}, somna.",
 		PROMPT_INSTIGATOR: "{ROLE_INSTIGATOR}, vakna. Byt ut en annan spelares märke mot {ROLE_INSTIGATOR_DEFINITE}s märke. {ROLE_INSTIGATOR}, somna.",
 		PROMPT_LEADER: "{ROLE_LEADER}, vakna. {TEAM_ALIEN_PLURAL}, håll ut en tumme så att {ROLE_LEADER_DEFINITE} kan se. {IfPresent:'FEUDINGALIENS','PROMPT_LEADER_FEUDINGALIENS'} {ROLE_LEADER}, somna. {IfDoppelgangerPresent:'PROMPT_LEADER_DOPPELGANGER'} {TEAM_ALIEN_PLURAL}, dra tillbaka tummarna.",
 		PROMPT_LEADER_DOPPELGANGER: "{ROLE_DOPPELGANGER}, om du såg {ROLE_LEADER_DEFINITE}, vakna. {TEAM_ALIEN_PLURAL}, fortsätt hålla ut tummarna så att {ROLE_DOPPELGANGER} kan se. {ROLE_DOPPELGANGER}, somna.",
@@ -566,9 +568,6 @@ const LOCALIZATION = {
 		PROMPT_REVEALER_ACTION: "Vänd en annan spelares kort ansiktet upp. {IfAnyWithTag:'REVEALER_HIDDEN_ROLE','PROMPT_REVEALER_HIDDEN_ROLE'}.",
 		PROMPT_REVEALER_DOPPELGANGER: "{ROLE_DOPPELGANGER}, om du såg {ROLE_REVEALER_DEFINITE}, vakna. {PROMPT_REVEALER_ACTION} {ROLE_DOPPELGANGER}, somna.",
 		PROMPT_REVEALER_HIDDEN_ROLE: "Om kortet är: {ListRolesWithTag:'REVEALER_HIDDEN_ROLE'}, vänd kortet tillbaka med ansiktet ner",
-		PROMPT_RIPPLE: "{RippleRandomEvent}",
-		PROMPT_RIPPLE_FALLBACK: " ",	//Empty string, something went wrong so just ignore the ripple
-		PROMPT_RIPPLE_NONE: "<Berättare: ignorera följande om inte {ROLE_ORACLE_DEFINITE} valt att tvinga fram en krusning> {RippleRandomEvent:true}",
 		PROMPT_ROBBER: "{ROLE_ROBBER}, vakna. {PROMPT_ROBBER_ACTION} {ROLE_ROBBER}, somna.",
 		PROMPT_ROBBER_ACTION: "Du kan välja att stjäla en annan spelares kort och ersätta det med ditt kort. Titta sedan på kortet du stal. Du ska inte vakna när din nya roll ropas upp.",
 		PROMPT_SEER: "{ROLE_SEER}, vakna. Du kan titta på en annan spelares kort, eller två av mittenkorten. {ROLE_SEER}, somna.",
@@ -886,7 +885,27 @@ const LOCALIZATION = {
 		UI_WINCONDITION_TEAM_VAMPIRE: "Vinner om ingen {TEAM_VAMPIRE} röstas ut.",
 		UI_WINCONDITION_TEAM_VILLAGE: "Vinner om minst en {TEAM_WEREWOLF}, {TEAM_VAMPIRE} eller {TEAM_ALIEN} röstas ut.",
 		UI_WINCONDITION_TEAM_WEREWOLF: "Vinner om ingen {TEAM_WEREWOLF} röstas ut.",
-		UI_WINCONDITION_VARIABLE_NOTE: "Kortets vinstvilkor kan förändras, som vid kopiering av en annan roll.",		
+		UI_WINCONDITION_VARIABLE_NOTE: "Kortets vinstvilkor kan förändras, som vid kopiering av en annan roll.",
+		
+		
+		
+		PROMPT_RIPPLE: "{RippleRandomEvent}",
+		PROMPT_RIPPLE_FALLBACK: " ",	//Empty string, something went wrong so just ignore the ripple
+		PROMPT_RIPPLE_NONE: "<Berättare: ignorera följande om inte {ROLE_ORACLE_DEFINITE} valt att tvinga fram en krusning> {RippleRandomEvent:true}",
+		PROMPT_RIPPLE_PREFIX: "Det har inträffat en krusning i rum-tiden.",
+		PROMPT_RIPPLE_ONE_MINUTE: "{PROMPT_RIPPLE_PREFIX} Ni har endast en minut på er innan ni måste rösta.",
+		PROMPT_RIPPLE_INSOMNIAC: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1,'20%'}, vakna. {PROMPT_INSOMNIAC_ACTION}",
+		PROMPT_RIPPLE_MUTED: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1,'20%'} får inte prata till efter omröstningen.",
+		PROMPT_RIPPLE_REBUKED: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1,'20%'} måste vända sig från bordet till efter omröstningen.",
+		PROMPT_RIPPLE_TROUBLEMAKER: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1}, vakna. {PROMPT_TROUBLEMAKER_ACTION}",
+		PROMPT_RIPPLE_ROBBER: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1}, vakna. {PROMPT_ROBBER_ACTION}",
+		PROMPT_RIPPLE_WITCH: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1}, vakna. {PROMPT_WITCH_ACTION}",
+		PROMPT_RIPPLE_REVEALER: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1}, vakna. {PROMPT_REVEALER_ACTION}",
+		PROMPT_RIPPLE_DRUNK: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1}, vakna. {PROMPT_DRUNK_ACTION}",
+		PROMPT_RIPPLE_VIEW_PLAYER: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1}, vakna. Du får titta på kort för spelare {RandomPlayers:'ripple2',1}",
+		PROMPT_RIPPLE_DUAL_VIEW_PLAYER: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1}, vakna. Du får titta på kort för spelare {RandomPlayers:'ripple2',2}",
+		PROMPT_RIPPLE_DOUBLE_VOTE: "{PROMPT_RIPPLE_PREFIX} Spelare {RandomPlayers:'ripple',1,'20%'}, får under omröstningen använda båda händer för att rösta för dubbla röster.",
+		
 	},
 };
 
@@ -1090,7 +1109,7 @@ function saveLanguage(lang) {
 }
 
 function loadLanguage() {
-    return localStorage.getItem("onuww_lang") || "ENG";
+    return localStorage.getItem("onuww_lang") || "SWE";
 }
 
 function setLocalizationLanguage(lang) {
