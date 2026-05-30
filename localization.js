@@ -1,4 +1,4 @@
-let LANG = "SWE";
+let LANG = "ENG";
 
 const LOCALIZATION = {
 	ENG: {
@@ -1109,7 +1109,7 @@ function saveLanguage(lang) {
 }
 
 function loadLanguage() {
-    return localStorage.getItem("onuww_lang") || "SWE";
+    return localStorage.getItem("onuww_lang") || "ENG";
 }
 
 function setLocalizationLanguage(lang) {
