@@ -2237,7 +2237,7 @@ const Localization = (() => {
 	}
 
 	function _loadLanguage() {
-		LANG = localStorage.getItem(LANGUAGE_STORE) || "SWE";
+		LANG = localStorage.getItem(LANGUAGE_STORE) || LANG;
 	}
 
 	function _parseTemplateArg(value) {
