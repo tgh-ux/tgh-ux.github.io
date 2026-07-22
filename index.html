@@ -9,15 +9,42 @@
 	<script src="roles.js"></script>
 	<script src="settings.js"></script>
 	<script src="rules.js"></script>
+	<script src="interpreter.js"></script>
 </head>
 <body>
+
+<!-- Day timer: floating pill (collapsed) / full-width panel (expanded), always mounted regardless of page scroll -->
+<div id="dayTimerSpacer" class="day-timer-spacer"></div>
+<div id="dayTimer" class="day-timer">
+	<button type="button" id="dayTimerPill" class="day-timer-pill">
+		<span id="dayTimerPillText" class="day-timer-pill-text">00:00</span>
+	</button>
+
+	<div id="dayTimerPanel" class="day-timer-panel">
+		<div class="day-timer-panel-inner">
+			<div class="day-timer-controls">
+				<div class="day-timer-row">
+					<button type="button" id="dayTimerMinus30" class="day-timer-btn">−30s</button>
+					<input type="text" id="dayTimerDisplay" class="day-timer-display" value="00:00" inputmode="numeric" autocomplete="off" />
+					<button type="button" id="dayTimerPlus30" class="day-timer-btn">+30s</button>
+				</div>
+				<div class="day-timer-row">
+					<button type="button" id="dayTimerStop" class="day-timer-btn day-timer-btn-icon" aria-label="Stop">⏹</button>
+					<button type="button" id="dayTimerToggle" class="day-timer-btn day-timer-btn-icon day-timer-btn-primary" aria-label="Start"></button>
+				</div>
+			</div>
+		</div>
+
+		<button type="button" id="dayTimerCollapseTab" class="day-timer-collapse-tab" aria-label="Collapse">▲</button>
+	</div>
+</div>
 
 <div class="top-bar">
     <h1 data-loc="UI_TITLE"></h1>
 
     <select id="languageSelector">
-        <option value="ENG">English</option>
         <option value="SWE">Svenska</option>
+        <option value="ENG">English</option>
     </select>
 </div>
 
@@ -33,16 +60,12 @@
         <div class="panel-content roles">
 			<div class="role-search">
 				<label for="roleSelectionSearchField" data-loc="UI_SEARCH"></label>
-				<input 
-					data-loc-placeholder="UI_SEARCH_PLACEHOLDER" 
-					type="text" 
-					id="roleSelectionSearchField" 
-					oninput="filterRoles(this.value, 'roleList')" />
+				<input data-loc-placeholder="UI_SEARCH_PLACEHOLDER" type="text" id="roleSelectionSearchField" />
 			</div>
-			<div class="role-filter" id="roleFilterContainer"></div>
-			<div id="playerCountDisplay" class="player-count-display" data-loc="UI_PLAYER_COUNT"></div>
+			<div class="selection-filter" id="roleFilterContainer"></div>
+			<div id="playerCountDisplay" class="selection-player-count" data-loc="UI_PLAYER_COUNT"></div>
             <!-- GUI will populate this -->
-            <div id="roleList"></div>
+            <div id="selectionList"></div>
         </div>
     </section>
 
@@ -51,10 +74,11 @@
         <div class="panel-header">
 			<span class="panel-toggle">-</span>
             <h3 data-loc="UI_GENERATED_PROMPT"></h3>
+			<button id="btn-rerandomize" class="panel-btn" type="button" data-loc="UI_RERANDOMIZE"></button>
         </div>
 
         <div class="panel-content output">
-            <textarea id="promptOutput"></textarea>
+            <textarea id="promptOutput" rows="6"></textarea>
         </div>
     </section>
 	
@@ -68,7 +92,7 @@
 
         <div class="panel-content">
             <!-- GUI will populate this -->
-            <div id="settings-list"></div>
+            <div id="settingsList"></div>
         </div>
     </section>
 
@@ -77,29 +101,42 @@
         <div class="panel-header">
 			<span class="panel-toggle">+</span>
             <h3 data-loc="UI_ROLEDESCRIPTIONS"></h3>
-			<button class="print-button" onclick="printRoleDescriptions()" type="button" data-loc="UI_PRINT"></button>
+			<button id="btn-print-descriptions" class="print-button" type="button" data-loc="UI_PRINT"></button>
         </div>
 
         <div class="panel-content role-descriptions">
 			<div class="role-search">
 				<label for="roleDescriptionSearchField" data-loc="UI_SEARCH"></label>
-				<input 
-					data-loc-placeholder="UI_SEARCH_PLACEHOLDER" 
-					type="text" 
-					id="roleDescriptionSearchField" 
-					oninput="filterRoles(this.value, 'roleDescriptionList')" />
+				<input data-loc-placeholder="UI_SEARCH_PLACEHOLDER" type="text" id="roleDescriptionSearchField" />
 			</div>
             <!-- GUI will populate this -->
-            <div id="roleDescriptionList"></div>
+            <div id="descriptionList"></div>
         </div>
     </section>
+
+	<!-- Token descriptions panel -->
+	<section class="panel panel-token-descriptions" data-panel="token-descriptions" data-collapsed="true">
+		<div class="panel-header">
+			<span class="panel-toggle">+</span>
+			<h3 data-loc="UI_TOKENDESCRIPTIONS"></h3>
+			<button id="btn-print-tokens" class="print-button" type="button" data-loc="UI_PRINT"></button>
+		</div>
+
+		<div class="panel-content token-descriptions">
+			<div class="role-search">
+				<label for="tokenDescriptionSearchField" data-loc="UI_SEARCH"></label>
+				<input data-loc-placeholder="UI_SEARCH_PLACEHOLDER" type="text" id="tokenDescriptionSearchField" />
+			</div>
+			<div id="tokenDescriptionList"></div>
+		</div>
+	</section>
 
     <!-- Rules panel -->
     <section class="panel panel-rules" data-panel="rules"  data-collapsed="true">
         <div class="panel-header">
 			<span class="panel-toggle">+</span>
             <h3 data-loc="UI_GAMERULES"></h3>
-			<button class="print-button" onclick="printRules()" type="button" data-loc="UI_PRINT"></button>
+			<button id="btn-print-rules" class="print-button" type="button" data-loc="UI_PRINT"></button>
         </div>
 
         <div class="panel-content rules">
@@ -108,17 +145,13 @@
     </section>
 </div>
 
-<div id="roleOverlay" class="role-overlay hidden">
-    <div class="role-overlay-backdrop"></div>
+<div id="modalOverlay" class="modal-overlay hidden">
+    <div class="modal-overlay-backdrop"></div>
 
-    <div class="role-overlay-panel">
-        <button id="roleOverlayClose" class="role-overlay-close">×</button>
-        <div id="roleOverlayContent"></div>
+    <div class="modal-overlay-panel">
+        <button id="modalOverlayClose" class="modal-overlay-close">×</button>
+        <div id="modalOverlayContainer"></div>
     </div>
-</div>
-
-<div id="scaleDebug">
-    <span id="scaleDebugValue">–</span>
 </div>
 
 <!-- Logic -->

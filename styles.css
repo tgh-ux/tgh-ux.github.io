@@ -3,1022 +3,1437 @@
    ========================= */
 
 :root {
-    --icon-scale: 0.75;				/* fixed icon size reduction factor from sprite sheet */
-    --tile-scale: 1.0;				/* selection tiles scale */
-    --description-tile-scale: 1.0;	/* role descriptions scale */
+	--selection-tile-scale: 1.0;	/* Selection tiles scale */
+	--description-tile-scale: 1.0;	/* Role descriptions tile scale */
 	
-	/* Logical sprite cell size (px). Change if sprite sheet changes.
-	   Does NOT directly control layout; tile-scale does. */
-    --icon-sprite-width: 160;
-    --icon-sprite-height: 200;
-	--icon-columns: 15;
-	--icon-rows: 5;
+	/* Data for the sprites used
+	   Assumes tightly packed cells with no gaps, scale is controlled by sprite-scale (and also tile-scale for the full tile on which the icon is placed)
+	   columns and row values are used to calculate the size of the sheet based on the width and height defined
+	   If sprite sheet changes, change corresponding values
+	*/	
+	
+	/* Role sprites, used in selection and description tiles for the roles */
+	--role-sprite-width: 160;
+	--role-sprite-height: 200;
+	--role-sprite-columns: 15;
+	--role-sprite-rows: 5;
+	--role-sprite-scale: 0.75;
+	--role-sprite-sheet: url("Sprites/sprites_roles.png");
+	--role-context-scale: 1.0;		/* generic role sprite scale, adjusts depending on where it is used */
+
+	/* Card sprites, used in the modal descriptions overlay when a selection tile is pushed and held */
+	--card-sprite-width: 246;
+	--card-sprite-height: 346;
+	--card-sprite-columns: 15;
+	--card-sprite-rows: 6;
+	--card-sprite-scale: 0.6;
+	--card-sprite-sheet: url("Sprites/sprites_cards_swe.jpg");	/* Switched in JS to match language, e.g. "card_icons_<LANG>.jpg" */
+	--card-context-scale: 1.0;		/* generic card sprite scale, adjusts depending on where it is used */
+	
+	/* Token sprites, used in the token description panel */
+	--token-sprite-width: 200;
+	--token-sprite-height: 200;
+	--token-sprite-columns: 5;
+	--token-sprite-rows: 5;
+	--token-sprite-scale: 0.5;
+	--token-sprite-sheet: url("Sprites/sprites_tokens_swe.png");
+	--token-context-scale: 1.0;	/* generic token sprite scale, adjusts depending on where it is used */
 }
 
 body {
-    font-family: sans-serif;
-    background: #f2f2f2;
-    margin: 20px;
+	font-family: sans-serif;
+	background: #f2f2f2;
+	margin: 20px;
 }
 
 h1 {
-    margin-bottom: 10px;
+	margin-bottom: 10px;
 }
 
 .top-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 10px;
 }
 
 #languageSelector {
-    font-size: 0.9rem;
-    padding: 4px 6px;
+	font-size: 0.9rem;
+	padding: 4px 6px;
 }
 
+#promptOutput {
+	width: 100%;
+	font-family: monospace;
+	resize: none;	  /* optional: remove manual resize */
+	overflow: hidden;  /* required for auto-grow */
+}
+
+
+
+
+
 /* =========================
-   Layout
+   General layout
    ========================= */
 
+/* Main page panel layout */
 .container {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
 }
 
+
+
+
+
 /* =========================
-   Panel base
+   Panels
    ========================= */
 
 .panel {
-    background: #fff;
-    border-radius: 6px;
-    overflow: hidden;
-    border: 1px solid #ddd;
+	background: #fff;
+	border-radius: 6px;
+	overflow: hidden;
+	border: 1px solid #ddd;
 }
-
-/* Placeholder until settings exist */
-/*
-.panel-settings {
-    display: none; 
-}
-*/
-
-/* =========================
-   Panel header
-   ========================= */
 
 .panel-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    background-color: #f7f7f7;
-    border-bottom: 1px solid #ddd;
-    cursor: pointer;
-    user-select: none;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 14px;
+	background-color: #f7f7f7;
+	border-bottom: 1px solid #ddd;
+	cursor: pointer;
+	user-select: none;
 }
 
 .panel-header:hover {
-    background-color: #f0f0f0;
+	background-color: #f0f0f0;
 }
 
 .panel-header h3 {
-    margin: 0;
-    font-size: 1rem;
+	margin: 0;
+	font-size: 1rem;
 }
 
 .panel-toggle {
-    font-size: 1.2rem;
-    line-height: 1;
-    width: 1.2em;
-    text-align: center;
-    flex-shrink: 0;
+	font-size: 1.2rem;
+	line-height: 1;
+	width: 1.2em;
+	text-align: center;
+	flex-shrink: 0;
 }
-
-/* =========================
-   Panel content
-   ========================= */
 
 .panel-content {
-    padding: 14px;
+	padding: 14px;
 }
 
+
+
+
+
 /* =========================
-   Shared icon sprite base
+   Sprites
    ========================= */
 
-.role-icon-base {
-    width: calc(var(--icon-sprite-width) * 1px * var(--icon-scale));
-    height: calc(var(--icon-sprite-height) * 1px * var(--icon-scale));
-    background-position:
-        calc(var(--icon-x) * var(--icon-scale))
-        calc(var(--icon-y) * var(--icon-scale));
-    background-size:
-        calc(var(--icon-sprite-width) * var(--icon-columns) * 1px * var(--icon-scale))
-        calc(var(--icon-sprite-height) * var(--icon-rows) * 1px * var(--icon-scale));
+/* Base sprite class */
+.sprite {
+	background-repeat: no-repeat;
+	flex-shrink: 0;
+}
+/* Sprite for a role (character portrait) only on a transparent background, used in role selection and description sections */
+.role-sprite {
+	width: calc(var(--role-sprite-width) * 1px * var(--role-sprite-scale) * var(--role-context-scale));
+	height: calc(var(--role-sprite-height) * 1px * var(--role-sprite-scale) * var(--role-context-scale));
+	background-position:
+		calc(var(--role-sprite-x) * var(--role-sprite-scale) * var(--role-context-scale))
+		calc(var(--role-sprite-y) * var(--role-sprite-scale) * var(--role-context-scale));
+	background-size:
+		calc(var(--role-sprite-width) * var(--role-sprite-columns) * 1px * var(--role-sprite-scale) * var(--role-context-scale))
+		calc(var(--role-sprite-height) * var(--role-sprite-rows) * 1px * var(--role-sprite-scale) * var(--role-context-scale));
 		
-    flex-shrink: 0;
-    background-image: url("icons.png");
-    background-repeat: no-repeat;
-    border-radius: 4px;
+	background-image: var(--role-sprite-sheet);
+	border-radius: 4px;
 }
+/* Sprite for a full playing card, used in the description overlay popup */
+.card-sprite {
+	width: calc(var(--card-sprite-width) * 1px * var(--card-sprite-scale) * var(--card-context-scale));
+	height: calc(var(--card-sprite-height) * 1px * var(--card-sprite-scale) * var(--card-context-scale));
+	background-position:
+		calc(var(--card-sprite-x) * var(--card-sprite-scale) * var(--card-context-scale))
+		calc(var(--card-sprite-y) * var(--card-sprite-scale) * var(--card-context-scale));
+	background-size:
+		calc(var(--card-sprite-width) * var(--card-sprite-columns) * 1px * var(--card-sprite-scale) * var(--card-context-scale))
+		calc(var(--card-sprite-height) * var(--card-sprite-rows) * 1px * var(--card-sprite-scale) * var(--card-context-scale));
+
+	background-image: var(--card-sprite-sheet);
+}
+/* Sprite for a token playing chip on a transparent background, used in the token description panel */
+.token-sprite {
+	width: calc(var(--token-sprite-width) * 1px * var(--token-sprite-scale) * var(--token-context-scale));
+	height: calc(var(--token-sprite-height) * 1px * var(--token-sprite-scale) * var(--token-context-scale));
+	background-position:
+		calc(var(--token-sprite-x) * var(--token-sprite-scale) * var(--token-context-scale))
+		calc(var(--token-sprite-y) * var(--token-sprite-scale) * var(--token-context-scale));
+	background-size:
+		calc(var(--token-sprite-width) * var(--token-sprite-columns) * 1px * var(--token-sprite-scale) * var(--token-context-scale))
+		calc(var(--token-sprite-height) * var(--token-sprite-rows) * 1px * var(--token-sprite-scale) * var(--token-context-scale));
+
+	background-image: var(--token-sprite-sheet);
+	border-radius: 4px;
+}
+/* Contextual scaling for the token sprite depending on where it is used */
+.token-tile .token-sprite {
+	--token-context-scale: var(--description-tile-scale);
+}
+/* Contextual scaling for the role sprite depending on where it is used */
+.selection-tile .role-sprite {
+	--role-context-scale: var(--selection-tile-scale);
+}
+.description-tile .role-sprite {
+	--role-context-scale: var(--description-tile-scale);
+}
+
+
+
+
 
 /* =========================
-   Prompt builder – role selection
+   Token description
    ========================= */
 
-#roleList {
-    display: grid;
-    grid-template-columns: repeat(
-        auto-fill,
-        minmax(
-			calc(var(--icon-sprite-width) * 1px * var(--tile-scale)),
-            1fr
-        )
-    );
-    gap: calc(6px * var(--tile-scale));
+/* Layout for the list of token description tiles */
+#tokenDescriptionList {
+	display: grid;
+	gap: 12px;
+	grid-template-columns: 1fr;
+}
+@media (min-width: 600px) {
+	#tokenDescriptionList {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+@media (min-width: 1100px) {
+	#tokenDescriptionList {
+		grid-template-columns: repeat(3, 1fr);
+	}
+}
+@media (min-width: 1600px) {
+	#tokenDescriptionList {
+		grid-template-columns: repeat(4, 1fr);
+	}
+}
+/* Token description tile containing a token sprite icon, name, and description text */
+.token-tile {
+	display: flex;
+	gap: calc(12px * var(--description-tile-scale));
+	padding: calc(12px * var(--description-tile-scale));
+	background: #fff;
+	border-radius: calc(6px * var(--description-tile-scale));
+	border: 1px solid #ddd;
+	break-inside: avoid;
+	page-break-inside: avoid;
+}
+.token-tile .token-sprite {
+	background-color: #fafafa;
+}
+.token-tile-info {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.token-tile-name {
+	font-size: calc(1.1em * var(--description-tile-scale));
+	font-weight: 600;
+}
+.token-tile-description {
+	font-size: calc(0.9em * var(--description-tile-scale));
+	line-height: 1.35;
+}
+.token-tile-usedby {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	font-size: calc(0.85em * var(--description-tile-scale));
+	color: #555;
+	background: #f6f6f6;
+	padding: 4px 6px;
+	border-radius: 4px;
+	width: fit-content;
 }
 
-.role-tile {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: calc(6px * var(--tile-scale));
-    border-radius: calc(8px * var(--tile-scale));
-    border: 1px solid #ccc;
+
+
+
+
+/* =========================
+   Role selection
+   ========================= */
+
+/* Layout for the list of role selection tiles */
+#selectionList {
+	display: grid;
+	grid-template-columns: repeat(
+		auto-fill,
+		minmax(
+			calc(var(--role-sprite-width) * 1px * var(--selection-tile-scale)),
+			1fr
+		)
+	);
+	gap: calc(6px * var(--selection-tile-scale));
+}
+/* Selection tile containing a role sprite icon, a role name text, and a counter if applicable */
+.selection-tile {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: calc(6px * var(--selection-tile-scale));
+	border-radius: calc(8px * var(--selection-tile-scale));
+	border: 1px solid #ccc;
 	
 	position: relative;
 }
+/* Selection tile (selected) */
+.selection-tile.selected {
+	border-color: #3aa655;
+	background-color: #f0faf3;
+}
+/* Selection tile role sprite icon (selected) */
+.selection-tile.selected .role-sprite {
+	filter: none;
+	opacity: 1;
+}
+/* Selection tile (unselected) */
+.selection-tile.unselected {
+	border-color: #ccc;
+	background-color: #fafafa;
+}
+/* Selection tile role sprite icon (unselected) */
+.selection-tile.unselected .role-sprite {
+	filter: grayscale(100%) brightness(0.9);
+	opacity: 0.7;
+}
+/* Role name text on selection tile */
+.selection-tile-name {
+	font-size: calc(1.25rem * var(--selection-tile-scale));
+	text-align: center;
+}
+/* Corner badge for the selection tile used by roles with multiple card instances */
+.selection-selected-count {	
+	position: absolute !important;
+	top: calc(4px * var(--selection-tile-scale));
+	left: calc(6px * var(--selection-tile-scale));
 
-.role-tile.unselected {
-    border-color: #ccc;
-    background-color: #fafafa;
+	font-size: calc(1.5rem * var(--selection-tile-scale));
+	line-height: 1;
+
+	padding: calc(2px * var(--selection-tile-scale)) calc(5px * var(--selection-tile-scale));
+	border-radius: calc(10px * var(--selection-tile-scale));
+
+	background: rgba(0, 0, 0, 0.75);
+	color: #fff;
+
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+
+	pointer-events: none; /* avoids click interference */
+}
+/* Player count text */
+.selection-player-count {
+	font-size: calc(0.95rem);
+	font-weight: 600;
+	color: #444;
+
+	margin-bottom: 8px;
 }
 
-.role-tile.selected {
-    border-color: #3aa655;
-    background-color: #f0faf3;
-}
-
-/* Icon inside role selection tile */
-.role-tile .role-icon {
-    width: calc(var(--icon-sprite-width) * 1px * var(--icon-scale) * var(--tile-scale));
-    height: calc(var(--icon-sprite-height) * 1px * var(--icon-scale) * var(--tile-scale));
-    background-size:
-        calc(var(--icon-sprite-width) * var(--icon-columns) * 1px * var(--icon-scale) * var(--tile-scale))
-        calc(var(--icon-sprite-height) * var(--icon-rows) * 1px * var(--icon-scale) * var(--tile-scale));
-    background-position:
-        calc(var(--icon-x) * var(--icon-scale) * var(--tile-scale))
-        calc(var(--icon-y) * var(--icon-scale) * var(--tile-scale));
-	
-    filter: grayscale(100%) brightness(0.9);
-    opacity: 0.7;
-}
-
-.role-tile.selected .role-icon {
-    filter: none;
-    opacity: 1;
-}
-
-.role-tile-name {
-    font-size: calc(1.25rem * var(--tile-scale));
-    text-align: center;
-}
-
-/* Count badge */
-.role-count {
-    position: absolute !important;
-    top: calc(4px * var(--tile-scale));
-    left: calc(6px * var(--tile-scale));
-
-    font-size: calc(1.5rem * var(--tile-scale));
-    line-height: 1;
-
-    padding: calc(2px * var(--tile-scale)) calc(5px * var(--tile-scale));
-    border-radius: calc(10px * var(--tile-scale));
-
-    background: rgba(0, 0, 0, 0.75);
-    color: #fff;
-
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-
-    pointer-events: none; /* avoids click interference */
-}
-
-.player-count-display {
-    font-size: font-size: calc(0.95rem * var(--tile-scale));
-    font-weight: 600;
-    color: #444;
-
-    margin-bottom: 8px;
-}
-
-/* Tag selection filters */
-.role-filter {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-    gap: 8px;
-    margin-bottom: 10px;
-}
-
-.ruleset-tile {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-
-    padding: 8px;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-
-    background-color: #fafafa;
-    cursor: pointer;
-    user-select: none;
-	
-	min-width: 0;
-}
-
-/* Selected state (match role tiles) */
-.ruleset-tile.selected {
-    border-color: #3aa655;
-    background-color: #f0faf3;
-}
-
-/* Unselected (muted) */
-.ruleset-tile.unselected {
-    opacity: 0.7;
-}
-
-.ruleset-name {
-    font-size: 0.9rem;
-    text-align: center;
-	
-    white-space: normal;        /* allow wrapping */
-    word-break: break-word;     /* break long words if needed */
-    overflow-wrap: anywhere;    /* aggressive fallback */
-}
-
-.ruleset-group {
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    padding: 8px 10px 10px 10px;
-    margin-bottom: 10px;
-	background: #fafafa;
-}
-
-/* Legend styling */
-.ruleset-group-legend {
-	background: #fff;
-    font-size: 0.9rem;
-    font-weight: 600;
-    padding: 0 6px;
-    color: #444;
-}
-
-.ruleset-group-tiles {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-    gap: 6px;
-}
-
-/* Adaptive layout */
-@media (max-width: 900px) and (orientation: landscape) {
-    .role-filter {
-        grid-template-columns: 1fr;
-    }
-}
 
 
 /* =========================
-   Prompt output
+   Role selection disabled roles (used to mark non-eligible roles and prevent selection)
    ========================= */
 
-#promptOutput {
-    width: 100%;
-    font-family: monospace;
-    resize: none;      /* optional: remove manual resize */
-    overflow: hidden;  /* required for auto-grow */
+/* Class to signify that a role in the selection section is disabled and cannot be selected */
+.selection-role-disabled {
+	cursor: not-allowed;
 }
-
-/* =========================
-   Role descriptions (manual)
-   ========================= */
-
-#roleDescriptionList {
-    display: grid;
-    gap: 12px;
-    grid-template-columns: 1fr;
+/* Adds background color to disabled roles */
+.selection-tile.selection-role-disabled {
+	background-color: rgba(255, 0, 0, 0.15);
 }
-
-@media (min-width: 600px) {
-    #roleDescriptionList {
-        grid-template-columns: repeat(2, 1fr);
-    }
-}
-
-@media (min-width: 1100px) {
-    #roleDescriptionList {
-        grid-template-columns: repeat(3, 1fr);
-    }
-}
-
-@media (min-width: 1600px) {
-    #roleDescriptionList {
-        grid-template-columns: repeat(4, 1fr);
-    }
-}
-
-.role-entry {
-    display: flex;
-    gap: calc(12px * var(--description-tile-scale));
-    padding: calc(12px * var(--description-tile-scale));
-    background: #fff;
-    border-radius: calc(6px * var(--description-tile-scale));
-    border: 1px solid #ddd;
-    break-inside: avoid;
-    page-break-inside: avoid;
-}
-
-.role-entry .role-icon {
-    background-color: #fafafa;
-    width: calc(var(--icon-sprite-width) * 1px * var(--icon-scale) * var(--description-tile-scale));
-    height: calc(var(--icon-sprite-height) * 1px * var(--icon-scale) * var(--description-tile-scale));
-
-    background-position:
-        calc(var(--icon-x) * var(--icon-scale) * var(--description-tile-scale))
-        calc(var(--icon-y) * var(--icon-scale) * var(--description-tile-scale));
-
-    background-size:
-        calc(var(--icon-sprite-width) * var(--icon-columns) * 1px * var(--icon-scale) * var(--description-tile-scale))
-        calc(var(--icon-sprite-height) * var(--icon-rows) * 1px * var(--icon-scale) * var(--description-tile-scale));
-}
-
-.role-description-name {
-    font-size: calc(1.1em * var(--description-tile-scale));
-}
-
-.role-info {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.role-header {
-    font-size: 1.1em;
-    font-weight: 600;
-}
-
-.role-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    font-size: calc(0.85em * var(--description-tile-scale));
-    color: #555;
-    background: #f6f6f6;
-    padding: 4px 6px;
-    border-radius: 4px;
-    width: fit-content;
-}
-
-.role-meta > *::after {
-    content: "·";
-    margin-left: 8px;
-}
-
-.role-meta > *:last-child::after {
-    content: "";
-}
-
-.role-phase {
-    font-size: 0.9em;
-    color: #444;
-}
-
-.role-team {
-    font-style: italic;
-    color: #666;
-}
-
-.team-variable {
-    font-weight: 500;
-    color: #8a4c00;
-}
-
-.role-rules {
-    margin-top: 6px;
-    padding-top: 6px;
-    border-top: 1px solid #eee;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.role-ability,
-.win-condition {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    font-size: calc(0.9em * var(--description-tile-scale));
-    line-height: 1.35;
-}
-
-.role-ability::before {
-    content: "▶";
-    color: #2f6f9f;
-    font-weight: bold;
-}
-
-.win-condition::before {
-    content: "★";
-    color: #9f6b2f;
-    font-weight: bold;
-}
-
-/* =========================
-   Role description overlay (long press selection)
-   ========================= */
-
-.role-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-	
-    -webkit-user-select: none;
-    user-select: none;
-    -webkit-touch-callout: none;
-}
-
-.role-overlay.hidden {
-    display: none;
-}
-
-.role-overlay-backdrop {
-    position: absolute;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-}
-
-.role-overlay-panel {
-    position: relative;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-
-    max-width: 600px;
-    width: min(90vw, 600px);
-    max-height: 80vh;
-
-    background: #fff;
-    border-radius: 8px;
-    border: 1px solid #ddd;
-
-    overflow-y: auto;
-	
-    padding: 10px;
-    padding-top: 40px; /* space for the button */
-}
-
-.role-overlay-close {
-    position: absolute;
-
-    top: 0px;
-    right: 0px;
-
-    width: 40px;
-    height: 40px;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    font-size: 32px;
-    line-height: 1;
-
-    border: none;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.1);
-
-    cursor: pointer;
-
-    z-index: 2;
-}
-
-/* =========================
-   Role search and selection filtering
-   ========================= */
-
-.role-hidden,
-.role-filtered-out {
-    display: none !important;
-}
-
-.role-disabled {
-    cursor: not-allowed;
-}
-
-.role-tile.role-disabled {
-    background-color: rgba(255, 0, 0, 0.15);
-}
-
-.role-disabled .role-icon {
+/* Grays and fades tile elements for disabled roles */
+.selection-role-disabled .role-sprite {
 	opacity: 0.6;
-    filter: grayscale(100%);
+	filter: grayscale(100%);
+}
+.selection-role-disabled .selection-tile-name {
+	opacity: 0.6;
 }
 
-.role-disabled .role-tile-name {
-    opacity: 0.6;
+
+
+
+
+/* =========================
+   Role description
+   ========================= */
+
+/* Layout for the list of role description tiles */
+#descriptionList {
+	display: grid;
+	gap: 12px;
+	grid-template-columns: 1fr;
+}
+/* Adaptive layout for role description list tiling */
+@media (min-width: 600px) {
+	#descriptionList {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+@media (min-width: 1100px) {
+	#descriptionList {
+		grid-template-columns: repeat(3, 1fr);
+	}
+}
+@media (min-width: 1600px) {
+	#descriptionList {
+		grid-template-columns: repeat(4, 1fr);
+	}
+}
+/* Description tile containing a role sprite icon, a role name text, and various info like team, ability and win condition */
+.description-tile {
+	display: flex;
+	gap: calc(12px * var(--description-tile-scale));
+	padding: calc(12px * var(--description-tile-scale));
+	background: #fff;
+	border-radius: calc(6px * var(--description-tile-scale));
+	border: 1px solid #ddd;
+	break-inside: avoid;
+	page-break-inside: avoid;
+}
+/* Description tile role sprite icon */
+.description-tile .role-sprite {
+	background-color: #fafafa;
+}
+/* Description tile role name */
+.description-tile-name {
+	font-size: calc(1.1em * var(--description-tile-scale));
+}
+/* Description tile info container */
+.description-tile-info {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+/* Description tile info header */
+.description-tile-header {
+	font-size: 1.1em;
+	font-weight: 600;
+}
+/* Description tile role meta info container */
+.description-tile-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	font-size: calc(0.85em * var(--description-tile-scale));
+	color: #555;
+	background: #f6f6f6;
+	padding: 4px 6px;
+	border-radius: 4px;
+	width: fit-content;
+}
+.description-tile-meta > *::after {
+	content: "·";
+	margin-left: 8px;
+}
+.description-tile-meta > *:last-child::after {
+	content: "";
+}
+/* Description tile role phase text */
+.description-tile-phase {
+	font-size: 0.9em;
+	color: #444;
+}
+/* Description tile role team text */
+.description-tile-team {
+	font-style: italic;
+	color: #666;
+}
+/* Description tile role variable team suffix text */
+.description-tile-team-variable {
+	font-weight: 500;
+	color: #8a4c00;
+}
+/* Description tile role rules container */
+.description-tile-rules {
+	margin-top: 6px;
+	padding-top: 6px;
+	border-top: 1px solid #eee;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+/* Description tile role ability and win condition rules text */
+.description-tile-ability,
+.description-tile-wincondition {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	font-size: calc(0.9em * var(--description-tile-scale));
+	line-height: 1.35;
+}
+.description-tile-ability::before {
+	content: "▶";
+	color: #2f6f9f;
+	font-weight: bold;
+}
+.description-tile-wincondition::before {
+	content: "★";
+	color: #9f6b2f;
+	font-weight: bold;
 }
 
-.role-disabled.selected {
-    outline: 2px solid rgba(255, 0, 0, 0.5);
+
+
+
+
+/* =========================
+   Role visibility
+   ========================= */
+
+/* Class to denote a hidden element, used for selection and description tiles */
+.is-hidden {
+	display: none !important;
 }
 
-.role-search {
-    display: flex;
-    align-items: center;
-    gap: 8px;
 
-    margin-bottom: 12px;
+
+	/* =========================
+	   Role selection tag filters
+	   ========================= */
+
+	/* Main panel layout */
+	.selection-filter {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+		gap: 8px;
+		margin-bottom: 10px;
+	}
+	/* Tag group panel layout */
+	.selection-filter-group {
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		padding: 8px 10px 10px 10px;
+		margin-bottom: 10px;
+		background: #fafafa;
+	}
+	/* Tag group header text */
+	.selection-filter-group-header {
+		background: #fff;
+		font-size: 0.9rem;
+		font-weight: 600;
+		padding: 0 6px;
+		color: #444;
+	}
+	/* Options panel layout (all options within a tag group) */
+	.selection-filter-options {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+		gap: 6px;
+	}
+	/* Option panel layout (individual option element) */
+	.selection-filter-option {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+
+		padding: 8px;
+		border-radius: 6px;
+		border: 1px solid #ccc;
+
+		background-color: #fafafa;
+		cursor: pointer;
+		user-select: none;
+		
+		min-width: 0;
+	}
+	.selection-filter-option.selected {
+		border-color: #3aa655;
+		background-color: #f0faf3;
+	}
+	.selection-filter-option.unselected {
+		opacity: 0.7;
+	}
+	/* Filter group tile option name */
+	.selection-filter-option-name {
+		font-size: 0.9rem;
+		text-align: center;
+		white-space: normal;		/* allow wrapping */
+		word-break: break-word;	 /* break long words if needed */
+		overflow-wrap: anywhere;	/* aggressive fallback */
+	}
+	/* Adaptive layout */
+	@media (max-width: 900px) and (orientation: landscape) {
+		.selection-filter {
+			grid-template-columns: 1fr;
+		}
+	}
+
+
+
+
+
+	/* =========================
+	   Role search, filters visible tiles for selection and description sections
+	   ========================= */
+
+	/* Search panel layout */
+	.role-search {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+
+		margin-bottom: 12px;
+	}
+	/* Search elements layout */
+	.role-search label {
+		font-size: 0.9em;
+		color: #555;
+		white-space: nowrap;
+	}
+	.role-search input[type="text"] {
+		flex: 1;
+
+		padding: 6px 8px;
+		font-size: 0.95em;
+
+		border: 1px solid #ccc;
+		border-radius: 4px;
+
+		background: #fff;
+	}
+	.role-search input[type="text"]:focus {
+		outline: none;
+		border-color: #3aa655;
+		box-shadow: 0 0 0 1px rgba(58, 166, 85, 0.25);
+	}
+
+
+
+
+
+/* =========================
+   Day timer
+   ========================= */
+
+/* Reserves layout space at the top of the page equal to the expanded panel's height, so expanding pushes real content down.
+   Height is set by JS (updateDayTimerSpacer) to match the panel's actual rendered height, since it may wrap on narrow screens. */
+.day-timer-spacer {
+	height: 0;
+	transition: height 0.15s ease;
 }
 
-.role-search label {
-    font-size: 0.9em;
-    color: #555;
-    white-space: nowrap;
+/* Floating pill shown while collapsed - fixed to the very top edge, centered, overlaying the page without affecting layout */
+.day-timer-pill {
+	position: fixed;
+	top: 0;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 10000;	/* Above the modal overlay (9999), so it stays visible during role/error lookups */
+
+	min-width: 90px;
+	min-height: 44px;	/* comfortable touch target even though the content is small */
+	padding: 6px 18px;
+
+	display: flex;
+	align-items: center;
+	justify-content: center;
+
+	background: #2b3a67;
+	color: #fff;
+	border: none;
+	border-radius: 0 0 10px 10px;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+
+	font-size: 1.1rem;
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+	cursor: pointer;
+	user-select: none;
 }
 
-.role-search input[type="text"] {
-    flex: 1;
-
-    padding: 6px 8px;
-    font-size: 0.95em;
-
-    border: 1px solid #ccc;
-    border-radius: 4px;
-
-    background: #fff;
+body.day-timer-expanded .day-timer-pill {
+	display: none;
 }
 
-.role-search input[type="text"]:focus {
-    outline: none;
-    border-color: #3aa655;
-    box-shadow: 0 0 0 1px rgba(58, 166, 85, 0.25);
+/* Full-width panel shown while expanded - pushes the rest of the page down via .day-timer-spacer */
+.day-timer-panel {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100%;
+	z-index: 10000;	/* Above the modal overlay (9999), consistent with the collapsed pill */
+
+	display: none;
+	justify-content: center;
+
+	background: #2b3a67;
+	color: #fff;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+body.day-timer-expanded .day-timer-panel {
+	display: flex;
+}
+
+.day-timer-panel-inner {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 20px;
+	max-width: 100%;
+}
+
+/* Each row (time+adjust, then playback controls) is centered independently, rather than relying on flex-wrap to break a single row cleanly */
+.day-timer-row {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 12px;
+}
+
+/* Large MM:SS field, editable only while stopped/paused (disabled while running via JS) */
+.day-timer-display {
+	width: 4.5ch;
+	background: transparent;
+	border: none;
+	color: #fff;
+
+	font-size: 2rem;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	text-align: center;
+}
+.day-timer-display:disabled {
+	opacity: 1;	/* keep it readable while running, just non-interactive */
+	cursor: default;
+}
+.day-timer-display:focus {
+	outline: 1px solid rgba(255, 255, 255, 0.6);
+	border-radius: 4px;
+}
+
+.day-timer-btn {
+	padding: 8px 14px;
+	min-height: 40px;	/* comfortable touch target */
+
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+	border: 1px solid rgba(255, 255, 255, 0.3);
+	border-radius: 6px;
+
+	font-size: 0.95rem;
+	cursor: pointer;
+}
+.day-timer-btn:hover {
+	background: rgba(255, 255, 255, 0.2);
+}
+
+/* Round icon-only variant used for the play/pause/stop glyph buttons */
+.day-timer-btn-icon {
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 1.3rem;
+	line-height: 1;
+}
+
+.day-timer-btn-primary {
+	background: #3aa655;
+	border-color: #3aa655;
+	font-weight: 600;
+}
+.day-timer-btn-primary:hover {
+	background: #33914b;
+}
+
+/* Small tab hanging off the panel's bottom edge - the only control that collapses it */
+.day-timer-collapse-tab {
+	position: absolute;
+	bottom: -22px;
+	left: 50%;
+	transform: translateX(-50%);
+
+	width: 44px;
+	height: 22px;
+
+	display: flex;
+	align-items: center;
+	justify-content: center;
+
+	background: #2b3a67;
+	color: #fff;
+	border: none;
+	border-radius: 0 0 8px 8px;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+
+	font-size: 0.8rem;
+	line-height: 1;
+	cursor: pointer;
+}
+
+
+
+
+
+/* =========================
+   Role description overlay popup (long press selection)
+   ========================= */
+
+/* Description overlay layout */
+.modal-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+}
+.modal-overlay.hidden {
+	display: none;
+}
+/* Backdrop for the overlay, fading main page behind popup and allowing clicking outside it to close */
+.modal-overlay-backdrop {
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.5);
+}
+/* Description overlay panel layout */
+.modal-overlay-panel {
+	position: relative;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+
+	max-width: 600px;
+	width: min(90vw, 600px);
+	max-height: 80vh;
+
+	background: #fff;
+	border-radius: 8px;
+	border: 1px solid #ddd;
+
+	overflow-y: auto;
+	
+	padding: 10px;
+	padding-top: 40px; /* space for the button */
+}
+/* Description overlay close button (X) */
+.modal-overlay-close {
+	position: absolute;
+
+	top: 0px;
+	right: 0px;
+
+	width: 40px;
+	height: 40px;
+
+	display: flex;
+	align-items: center;
+	justify-content: center;
+
+	font-size: 32px;
+	line-height: 1;
+
+	border: none;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.1);
+
+	cursor: pointer;
+
+	z-index: 2;
+}
+/* Description overlay card panel layout */
+.description-overlay-cards {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 8px;
+}
+/* Stacks the modal's components top-to-bottom instead of left-to-right */
+.modal-overlay-panel .description-tile {
+	flex-direction: column;
+}
+
+
+
+/* Container for the modal's "Places:" token row, shown below the role description text */
+.description-overlay-tokens-container {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	margin-top: 10px;
+	padding-top: 10px;
+	border-top: 1px solid #eee;
+}
+.description-overlay-tokens-header {
+	font-size: calc(0.85em * var(--description-tile-scale));
+	font-weight: 600;
+	color: #555;
+}
+.description-overlay-tokens {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 10px;
+}
+.description-overlay-tokens.is-expanded {
+	flex-wrap: nowrap;
+}
+.description-overlay-tokens.is-expanded .modal-token-tile {
+	flex: 1 1 0;
+}
+/* A single token icon+description pair within the modal */
+.modal-token-tile {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	grid-template-areas: "icon text";
+	align-items: center;
+	column-gap: 8px;
+	padding: 6px 8px;
+	background: #fff;
+	border: 1px solid #ddd;
+	border-radius: 6px;
+
+	--token-context-scale: calc(var(--description-tile-scale) * 0.75);
+}
+.modal-token-tile .token-sprite {
+	grid-area: icon;
+	align-self: center;
+	background-color: #fafafa;
+}
+.modal-token-tile-text {
+	grid-area: text;
+	min-width: 0;			/* lets wrapped text shrink below its own content width */
+	padding: 2px 4px 2px 0;
+}
+.modal-token-tile-header {
+	margin: 0 0 2px 0;
+	font-weight: 600;
+	font-size: calc(0.85em * var(--description-tile-scale));
+}
+.modal-token-tile-description {
+	font-size: calc(0.8em * var(--description-tile-scale));
+	line-height: 1.3;
+	overflow-wrap: break-word;
+}
+/* Collapsed form: icon only, smaller, no border/background */
+.modal-token-tile.is-collapsed {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px;
+	border: none;
+	background: transparent;
+	cursor: pointer;
+}
+.modal-token-tile.is-collapsed.is-selected {
+	background: #e0c3f0;
+	box-shadow: 0 0 0 2px #7a3f9f;
+	border-radius: 50%;
+}
+/* Container for the single expanded detail tile shown below the collapsed icon row when one is clicked */
+.modal-token-detail {
+	margin-top: 8px;
+}
+.modal-token-detail.is-hidden {
+	display: none;
 }
 
 
 
 /* =========================
-   Print
+   Settings tree UI 
+   ========================= */
+
+/* Root container for the whole settings tree */
+#settingsList {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	position: relative;
+}
+
+/* Shared row layout used by both items and headers */
+.settings-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 6px;
+	border-radius: 6px;
+	background: transparent;
+	user-select: none;
+}
+	/* Highlight on hover */
+	.settings-row:hover {
+		background: #f6f6f6;
+	}
+	/* Fixed width for weight/percent number inputs */
+	.settings-row input[type="number"] {
+		width: 64px;
+	}
+	/* Fixed size for toggle checkboxes */
+	.settings-row input[type="checkbox"] {
+		width: 18px;
+		height: 18px;
+	}
+
+/* Static expand/collapse arrow glyph */
+.settings-row-disclosure {
+	width: 18px;
+	height: 18px;
+	flex-shrink: 0;
+	text-align: center;
+	font-size: 0.95rem;
+	line-height: 1;
+	opacity: 0.85;
+}
+
+/* A row's localized text label */
+.settings-row-label {
+	flex: 1;
+	min-width: 0;
+	font-size: 0.92rem;
+	line-height: 1.25;
+}
+
+/* Font modifications applied from the settings tree definition */
+.settings-font-bold {
+	font-weight: 700;
+}
+.settings-font-italic {
+	font-style: italic;
+}
+.settings-font-underline {
+	text-decoration: underline;
+}
+.settings-font-muted {
+	opacity: 0.7;
+}
+
+/* Shared collapsible wrapper holding a node's children */
+.settings-childrenwrap {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+/* Container for a header-type node: no control, always has children */
+.settings-header {
+	border: 1px solid #ddd;
+	border-radius: 6px;
+	overflow: hidden;
+	background: #fff;
+}
+	/* Header row override: heavier padding and background */
+	.settings-header > .settings-row {
+		gap: 10px;
+		padding: 8px 12px;
+		border-radius: 0;
+		background: #f4f4f4;
+		border-bottom: 1px solid #ddd;
+	}
+	
+	/* Header row hover override */
+	.settings-header > .settings-row:hover {
+		background: #ededed;
+	}
+	
+	/* Header title override: bold, slightly larger */
+	.settings-header > .settings-row > .settings-row-label {
+		font-weight: 600;
+		font-size: 0.95rem;
+	}
+	
+	/* Header children override: padding instead of indent */
+	.settings-header > .settings-childrenwrap {
+		padding: 6px 8px;
+	}
+
+/* Container for a leaf/branch node with its own control */
+.settings-item {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+	/* Item children override: tree-style indent with a left border */
+	.settings-item > .settings-childrenwrap {
+		margin-left: 16px;
+		padding-left: 8px;
+		border-left: 2px solid #eee;
+	}
+
+/* Layout for the control area at the end of a row */
+.settings-row-controls {
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: auto;
+	align-items: center;
+	gap: 8px;
+}
+
+/* Secondary info/label text shown before the control, e.g. a weight's percentage */
+.settings-controls-info {
+	width: 44px;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	opacity: 0.75;
+}
+
+/* Wrapper positioning the actual input control */
+.settings-controls-wrap {
+	display: flex;
+	justify-content: flex-end;
+}
+
+/* Empty placeholder occupying the disclosure's space when a row has no children */
+.settings-row-spacer {
+	width: 18px;
+	height: 18px;
+	flex-shrink: 0;
+	display: block;
+}
+
+/* Computed percentage readout next to a weight input */
+.settings-weight-label {
+	width: 42px;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	opacity: 0.75;
+}
+
+/* Layout wrapping a weight input together with its icon */
+.settings-weight-input {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+/* Icon shown next to a weight input */
+.settings-weight-icon {
+	font-size: 0.9em;
+	line-height: 1;
+	opacity: 0.65;
+	user-select: none;
+}
+
+/* Shared box styling for items belonging to the same weight group */
+.settings-item.settings-weightbox {
+	border-left: 1px solid #e1e1e1;
+	border-right: 1px solid #e1e1e1;
+	border-radius: 0;
+	background: transparent;	/* Never paint the container itself */
+}
+
+/* Rounds and borders the top edge of a weight group's first item */
+.settings-item.settings-weightbox-top {
+	border-top: 1px solid #e1e1e1;
+	border-top-left-radius: 6px;
+	border-top-right-radius: 6px;
+}
+
+/* Rounds and borders the bottom edge of a weight group's last item */
+.settings-item.settings-weightbox-bottom {
+	border-bottom: 1px solid #e1e1e1;
+	border-bottom-left-radius: 6px;
+	border-bottom-right-radius: 6px;
+}
+
+/* Paint the visible box using the rows instead */
+.settings-item.settings-weightbox > .settings-row {
+	background: rgba(0, 0, 0, 0.012);
+}
+
+	/* Hover override matching the boxed group's background */
+	.settings-item.settings-weightbox > .settings-row:hover {
+		background: rgba(0, 0, 0, 0.03);
+	}
+	
+	/* Weight box overrides for validation errors */
+	.settings-item.settings-weightbox-error {
+		border-left-color: #e0aaaa;
+		border-right-color: #e0aaaa;
+	}
+	.settings-item.settings-weightbox-error.settings-weightbox-top {
+		border-top-color: #e0aaaa;
+	}
+	.settings-item.settings-weightbox-error.settings-weightbox-bottom {
+		border-bottom-color: #e0aaaa;
+	}
+	.settings-item.settings-weightbox-error > .settings-row {
+		background: rgba(192, 32, 32, 0.06);
+	}
+		.settings-item.settings-weightbox-error > .settings-row:hover {
+			background: rgba(192, 32, 32, 0.11);
+		}
+	
+
+/* Layout wrapping a percent input */
+.settings-percent-input {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+}
+
+	/* Renders the "%" suffix after a percent input */
+	.settings-percent-input::after {
+		content: "%";
+		position: absolute;
+		right: 18px;
+		top: 50%;
+		transform: translateY(-50%);
+		opacity: 0.7;
+		pointer-events: none;
+		font-size: 0.9em;
+	}
+
+/* Separator item, a horizontal line without controls or children */
+.settings-separator {
+	
+}
+
+	/* Tighter vertical padding for a separator row */
+	.settings-separator > .settings-row {
+		padding-top: 2px;
+		padding-bottom: 2px;
+	}
+
+	/* Disables the hover highlight on separator rows */
+	.settings-separator > .settings-row:hover {
+		background: transparent;
+	}
+
+/* The horizontal divider line itself */
+.settings-separator-line {
+	height: 1px;
+	background: #e6e6e6;
+	flex: 1;
+	border-radius: 1px;
+}
+
+
+
+
+
+/* =========================
+   Printing
    ========================= */
 
 @media print {
 
-    /* =========================
-       Visibility control
-       ========================= */
+	/* =========================
+	   Visibility control
+	   ========================= */
 
-    /* Elements explicitly marked as non-printable */
-    .do-not-print {
-        display: none !important;
-    }
+	/* Elements explicitly marked as non-printable */
+	.do-not-print {
+		display: none !important;
+	}
 
-    /* Ensure collapsed panels print their contents */
-    .panel-content {
-        display: block !important;
-    }
+	/* Ensure collapsed panels print their contents */
+	.panel-content {
+		display: block !important;
+	}
 
-    /* =========================
-       Global print reset
-       ========================= */
+	/* =========================
+	   Global print reset
+	   ========================= */
 
-    body {
-        background: white !important;
-        color: black !important;
-        margin: 0;
-    }
+	body {
+		background: white !important;
+		color: black !important;
+		margin: 0;
+	}
 
-    /* Avoid unexpected clipping */
-    html, body {
-        overflow: visible !important;
-    }
+	/* Avoid unexpected clipping */
+	html, body {
+		overflow: visible !important;
+	}
 
-    /* =========================
-       Panel cleanup
-       ========================= */
+	/* =========================
+	   Panel cleanup
+	   ========================= */
 
-    .panel {
-        background: white !important;
-        border: none !important;
-        box-shadow: none !important;
-    }
+	.panel {
+		background: white !important;
+		border: none !important;
+		box-shadow: none !important;
+	}
 
-    /* =========================
-       Role description layout
-       ========================= */
+	/* =========================
+	   Role description layout
+	   ========================= */
 
-    #roleDescriptionList {
-        /*grid-template-columns: repeat(4, 1fr);*/
-        gap: 10px;
-    }
+	#descriptionList {
+		/*grid-template-columns: repeat(4, 1fr);*/
+		gap: 10px;
+	}
 
-    .role-entry {
-        background: white !important;
-        border: 1px solid #000;
-        break-inside: avoid;
-        page-break-inside: avoid;
-    }
+	.description-tile {
+		background: white !important;
+		border: 1px solid #000;
+		break-inside: avoid;
+		page-break-inside: avoid;
+	}
 
-    /* =========================
-       Metadata & rules
-       ========================= */
+	/* =========================
+	   Metadata & rules
+	   ========================= */
 
-    .role-meta {
-        background: none !important;
-        padding: 0;
-    }
+	.description-tile-meta {
+		background: none !important;
+		padding: 0;
+	}
 
-    /* =========================
-       Icon handling
-       ========================= */
+	/* =========================
+	   Icon handling
+	   ========================= */
 
-    .role-icon {
-        /*filter: grayscale(100%) contrast(120%) !important;*/
+	.role-sprite {
+		/*filter: grayscale(100%) contrast(120%) !important;*/
 		filter: contrast(120%) !important;
-        background-color: transparent !important;
-    }
+		background-color: transparent !important;
+	}
 
-    /* =========================
-       Typography safeguards
-       ========================= */
+	/* =========================
+	   Typography safeguards
+	   ========================= */
 
-    h1, h2, h3, h4 {
-        color: black !important;
-    }
-
-    /* Prevent interactive affordances from leaking into print */
-    button,
-    input,
-    textarea {
-        border: none !important;
-        box-shadow: none !important;
-    }
-}
-
-/* =========================
-   Scale debug overlay
-   ========================= */
-
-#scaleDebug {
-    display: none;
-    position: fixed;
-    bottom: 8px;
-    right: 8px;
-    z-index: 9999;
-
-    font-family: monospace;
-    font-size: 12px;
-    line-height: 1.2;
-
-    padding: 4px 6px;
-    border-radius: 4px;
-
-    background: rgba(0, 0, 0, 0.7);
-    color: #fff;
-
-    pointer-events: none; /* never blocks clicks */
-}
-
-
-
-
-/* =========================
-   Settings tree UI (NEW)
-   ========================= */
-
-#settings-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-/* -------------------------
-   Header groups (type: header)
-   ------------------------- */
-
-.setting-group2 {
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    overflow: hidden;
-    background: #fff;
-}
-
-.setting-group-header2 {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-
-    padding: 8px 12px;
-
-    background: #f4f4f4;
-    border-bottom: 1px solid #ddd;
-
-    cursor: pointer;
-    user-select: none;
-}
-
-.setting-group-header2:hover {
-    background: #ededed;
-}
-
-.setting-group-toggle2 {
-    width: 1.2em;
-    text-align: center;
-    flex-shrink: 0;
-    font-size: 0.95em;
-    opacity: 0.85;
-}
-
-.setting-group-title2 {
-    font-weight: 600;
-    font-size: 0.95rem;
-}
-
-.setting-group-body2 {
-    padding: 6px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-
-/* -------------------------
-   Setting rows (weight/toggle/percent)
-   ------------------------- */
-
-.setting-item2 {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.setting-row2 {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-
-    padding: 4px 6px;
-    border-radius: 6px;
-
-    background: transparent;
-}
-
-.setting-row2 input[type="number"] {
-    width: 48px;
-}
-
-.setting-row2 input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-}
-
-.setting-row2:hover {
-    background: #f6f6f6;
-}
-
-.setting-label2 {
-    flex: 1;
-    min-width: 0;
-    font-size: 0.92rem;
-    line-height: 1.25;
-}
-
-/* Right side control container */
-.setting-control2 {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: auto;
-    align-items: center;
-    gap: 8px;
-}
-
-.setting-meta2 {
-    width: 44px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    opacity: 0.75;
-}
-
-.setting-input2 {
-    display: flex;
-    justify-content: flex-end;
-}
-
-/* -------------------------
-   Disclosure button
-   ------------------------- */
-
-.setting-disclosure2,
-.setting-disclosure-spacer2 {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-}
-
-.setting-disclosure-spacer2 {
-    display: block;
-}
-
-.setting-disclosure2 {
-    border: none;
-    background: transparent;
-    border-radius: 4px;
-
-    cursor: pointer;
-    user-select: none;
-
-    font-size: 0.95rem;
-    line-height: 1;
-
-    opacity: 0.85;
-}
-
-.setting-disclosure2:hover {
-    background: rgba(0, 0, 0, 0.06);
-    opacity: 1;
-}
-
-/* -------------------------
-   Children container (indent + guide line)
-   ------------------------- */
-
-.setting-children2 {
-    margin-left: 16px;      /* aligns under the label, after disclosure */
-    padding-left: 8px;
-    border-left: 2px solid #eee;
-
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-
-/* -------------------------
-   Weight / percent UI (reused concepts)
-   ------------------------- */
-
-.setting-weight-pct {
-    width: 42px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    opacity: 0.75;
-}
-
-/* -------------------------
-   Error UI (keeps your existing logic)
-   ------------------------- */
-
-.setting-errors {
-    margin-left: 32px; /* aligns with content after disclosure */
-    padding: 6px 8px;
-
-    border-radius: 6px;
-    background: #fff3f3;
-    border: 1px solid #f2bcbc;
-
-    color: #7a1e1e;
-    font-size: 0.85rem;
-
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.setting-error-line {
-    line-height: 1.25;
-}
-
-/* -------------------------
-   Separator rows
-   ------------------------- */
-
-.setting-separator-item2 .setting-row2 {
-    padding-top: 2px;
-    padding-bottom: 2px;
-}
-
-.setting-separator-item2 .setting-row2:hover {
-    background: transparent;
+	h1, h2, h3, h4 {
+		color: black !important;
+	}
 	
-}
-
-.setting-separator-line2 {
-    height: 1px;
-    background: #e6e6e6;
-    flex: 1;
-    border-radius: 1px;
-}
-
-/* -------------------------
-   Manual text styling
-   ------------------------- */
-
-.setting-text-bold {
-    font-weight: 700;
-}
-
-.setting-text-italic {
-    font-style: italic;
-}
-
-.setting-text-underline {
-    text-decoration: underline;
-}
-
-.setting-text-muted {
-    opacity: 0.7;
-}
-
-
-/* -------------------------
-   Weight group "mini containers" (FIXED)
-   ------------------------- */
-
-/* The box is applied to the whole setting item, so it includes children */
-.setting-item2.wg-box {
-    border-left: 1px solid #e1e1e1;
-    border-right: 1px solid #e1e1e1;
-    border-radius: 0;
-
-    /* subtle fill */
-    background: rgba(0, 0, 0, 0.012);
-}
-
-/* First row in the group */
-.setting-item2.wg-box-first {
-    border-top: 1px solid #e1e1e1;
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
-}
-
-/* Last row in the group */
-.setting-item2.wg-box-last {
-    border-bottom: 1px solid #e1e1e1;
-    border-bottom-left-radius: 6px;
-    border-bottom-right-radius: 6px;
-}
-
-/* Ensure the row itself stays transparent so the background looks unified */
-.setting-item2.wg-box > .setting-row2 {
-    background: transparent;
-}
-
-/* Hover should still work, but only on the row */
-.setting-item2.wg-box > .setting-row2:hover {
-    background: rgba(0, 0, 0, 0.03);
-}
-
-.setting-item2.wg-box > .setting-children2 {
-    margin-left: 16px;
-    padding-left: 8px;
+	button,
+	input,
+	textarea,
+	select {
+		display: none !important;
+	}
 }
 
 
 
-/* -------------------------
-   Percent field with inline % sign
-   ------------------------- */
 
-.setting-percent-field2 {
-    position: relative;
-    display: inline-flex;
+
+/* ==========================================
+   Validation
+   ========================================== */
+
+.settings-validation-indicator {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	/*margin-left: 8px;*/
+	margin-left: auto;
+	padding: 1px 6px;
+	border-radius: 999px;
+	background: rgba(192, 32, 32, 0.08);
+	color: #a33;
+	font-weight: 600;
+	user-select: none;
+	cursor: default;
+}
+
+.settings-validation-icon {
+	line-height: 1;
+}
+
+.settings-validation-count {
+	min-width: 1ch;
+	text-align: center;
+}
+
+.settings-validation-overlay {
+	min-width: 420px;
+	max-width: 700px;
+}
+
+.settings-validation-overlay h2 {
+	margin: 0 0 18px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid #ddd;
+
+	font-size: 1.4rem;
+	font-weight: 600;
+}
+
+.settings-validation-entry {
+	padding: 10px 0;
+}
+
+.settings-validation-entry + .settings-validation-entry {
+	border-top: 1px solid #eee;
+}
+
+.settings-validation-option {
+	font-weight: 600;
+	color: #b02020;
+	margin-bottom: 4px;
+}
+
+.settings-validation-message {
+	padding-left: 18px;
+	line-height: 1.4;
+	color: #444;
+}
+
+
+
+
+
+
+
+
+
+/* ==========================================
+   Prompt navigation
+   ========================================== */
+
+.prompt-navigation {
+    display: flex;
+	flex-wrap: wrap;
     align-items: center;
-}
-
-.setting-percent-field2::after {
-    content: "%";
-    position: absolute;
-    right: 18px;
-    top: 50%;
-    transform: translateY(-50%);
-    opacity: 0.7;
-    pointer-events: none;
-    font-size: 0.9em;
-}
-
-/* -------------------------
-   Weight input with icon
-   ------------------------- */
-
-.setting-weight-field2 {
-    display: inline-flex;
-    align-items: center;
+	justify-content: center;
     gap: 6px;
+	margin-bottom: 10px;
 }
 
-.setting-weight-icon2 {
-    font-size: 0.9em;
-    line-height: 1;
-    opacity: 0.65;
-    user-select: none;
+.prompt-navigation-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+
+    white-space: nowrap;
+}
+
+.prompt-navigation-button {
+    padding: 2px 6px;
+    min-width: 28px;
+}
+
+.prompt-navigation-counter {
+    min-width: 4.5em;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
 }

@@ -1,1574 +1,2144 @@
-const roleCounts = new Map(); // roleId → count
+//Required hold time to open role description overlay from the role selection tile
+const LONG_PRESS_DELAY = 300;
+//Selected roles persistent storage key
+const SELECTED_ROLES_STORE = "onuw_roles";
+//Selected tag filters persistent storage key
+const TAG_FILTERS_STORE = "onuw_tag_filters";
+
+//Map of currently selected roles with instance count
+//setRoleCount() ensures that roles with no instances are deleted from the map
+const roleCounts = new Map(); // roleId -> count
+
+//Callback table for how to handle different error types in relation to the DOM elements
+const VALIDATION_RENDERERS = {
+	value: renderValueError,
+	weightGroupSum: renderWeightGroupError,
+};
+
+//Tracks push and hold interactions with role selection tiles
+let activeSelectionPointerId = null;
+
+//Prompt display data
+let renderedTurns = [];
+let currentTurn = 0;
+let showSingleTurn = false;
+
+//Day timer persistent storage key
+const DAY_TIMER_STORE = "onuw_day_timer";
+//How often the display redraws while the timer is running. Purely cosmetic - the authoritative end time is a wall-clock timestamp, so this has no effect on accuracy
+const DAY_TIMER_TICK_INTERVAL = 150;
+//Seconds adjusted by the day timer's +/- buttons
+const DAY_TIMER_ADJUST_STEP = 30;
+//Default duration (seconds) the very first time the page is opened, before anything has been configured
+const DAY_TIMER_DEFAULT_DURATION = 300;
+
+//Day timer lifecycle state
+let dayTimerState = "stopped"; // "stopped" | "running" | "paused"
+//The duration to fall back to when reset via the stop button, in seconds
+let dayTimerDuration = DAY_TIMER_DEFAULT_DURATION;
+//Remaining time in seconds - authoritative only while stopped/paused; while running it's derived from dayTimerTargetTimestamp instead
+let dayTimerRemaining = dayTimerDuration;
+//Wall-clock timestamp (ms) at which the timer reaches zero, set only while running. Using a fixed end time (rather than decrementing a counter) keeps the timer accurate across tab throttling/backgrounding
+let dayTimerTargetTimestamp = null;
+//Whether the expanded panel is currently open
+let dayTimerExpanded = false;
+//Handle for the redraw interval, only active while running
+let dayTimerIntervalId = null;
 
 //Tags to add as a filter at role selection. Each group is an AND relationship, tags within groups is an OR relationship
 const TAG_FILTER_GROUPS = [
-    {
-        id: "ruleset",
-        label: "UI_FILTER_RULESET",
-        tags: [
-            { tag: "RULESET_BASIC", label: "UI_FILTER_RULESET_BASIC", default: true },
-            { tag: "RULESET_ADVANCED", label: "UI_FILTER_RULESET_ADVANCED" },
-            { tag: "RULESET_ALIEN", label: "UI_FILTER_RULESET_ALIEN" },
-            { tag: "RULESET_VAMPIRE", label: "UI_FILTER_RULESET_VAMPIRE" },
-        ]
-    },
-    {
-        id: "complexity",
-        label: "UI_FILTER_COMPLEXITY",
-        tags: [
-            { tag: "COMPLEXITY_EASY", label: "UI_FILTER_COMPLEXITY_EASY", default: true },
-            { tag: "COMPLEXITY_MEDIUM", label: "UI_FILTER_COMPLEXITY_MEDIUM", default: true },
-            { tag: "COMPLEXITY_HARD", label: "UI_FILTER_COMPLEXITY_HARD" },
-        ]
-    }
+	{
+		id: "ruleset",
+		textKey: "UI_FILTER_RULESET",
+		tags: [
+			{ tag: "RULESET_BASIC", textKey: "UI_FILTER_RULESET_BASIC", default: true },
+			{ tag: "RULESET_ADVANCED", textKey: "UI_FILTER_RULESET_ADVANCED" },
+			{ tag: "RULESET_ALIEN", textKey: "UI_FILTER_RULESET_ALIEN" },
+			{ tag: "RULESET_VAMPIRE", textKey: "UI_FILTER_RULESET_VAMPIRE" },
+		]
+	},
+	{
+		id: "complexity",
+		textKey: "UI_FILTER_COMPLEXITY",
+		tags: [
+			{ tag: "COMPLEXITY_EASY", textKey: "UI_FILTER_COMPLEXITY_EASY", default: true },
+			{ tag: "COMPLEXITY_MEDIUM", textKey: "UI_FILTER_COMPLEXITY_MEDIUM", default: true },
+			{ tag: "COMPLEXITY_HARD", textKey: "UI_FILTER_COMPLEXITY_HARD" },
+		]
+	}
 ];
 
+//Sprite sheets with fallbacks for those that contained localization, updated when language is set
+const LOCALIZED_SPRITE_SHEETS = [
+	{
+		cssVar: "--card-sprite-sheet",
+		path: "Sprites/sprites_cards_%LANGUAGE%.jpg",
+		fallbackPath: "Sprites/sprites_cards_swe.jpg",
+	},
+	{
+		cssVar: "--token-sprite-sheet",
+		path: "Sprites/sprites_tokens_%LANGUAGE%.png",
+		fallbackPath: "Sprites/sprites_tokens_swe.png",
+	},
+];
+
+
+
+
+
 /* =========================
-   Shared helpers
+   Localization
    ========================= */
 
-function setLanguage(lang) {
-	setLocalizationLanguage(lang);
-	window.location.reload();
+//Sets the page language
+function setGUILanguage(lang) {
+	setGUISpriteLanguage(lang);
+	document.getElementById("languageSelector").value = lang;
+}
+//Sets any localized sprite sheets in the CSS based on selected language
+function setGUISpriteLanguage(lang) {
+	LOCALIZED_SPRITE_SHEETS.forEach((sheetData)  => {
+		const sheetPath = sheetData.path.replace(/%LANGUAGE%/, lang.toLowerCase());
+		const img = new Image();
+		
+		//Set the path if image is loaded successfully
+		img.onload = () => {
+			document.documentElement.style.setProperty(sheetData.cssVar, `url("${sheetPath}")`);
+		};
+		
+		//If image fails to load (e.g. missing asset), use the fallback asset
+		img.onerror = () => {
+			console.warn("Unable to load localized asset '" + sheetPath + "' for sprite sheet '" + sheetData.cssVar + "'");
+			
+			if (!sheetData.fallbackPath) {
+				console.error("No fallback asset defined");
+				return;
+			}
+			
+			console.warn("Attempting to use fallback asset '" + sheetData.fallbackPath + "'");
+			const fallbackImg = new Image();
+			
+			fallbackImg.onload = () => {
+				document.documentElement.style.setProperty(sheetData.cssVar, `url("${sheetData.fallbackPath}")`);
+			};
+			
+			fallbackImg.onerror = () => {
+				console.error("Unable to load fallback asset '" + sheetData.fallbackPath + "'");
+			}
+			
+			fallbackImg.src = sheetData.fallbackPath;
+		};
+		
+		img.src = sheetPath;
+	});
+}
+//Localizes elements declared in HTML late
+function localizeStaticContent() {
+	document.querySelectorAll("[data-loc]").forEach(el => {
+		const key = el.dataset.loc;
+		el.textContent = Localization.localize(key);
+	});
+	
+	document.querySelectorAll("[data-loc-placeholder]").forEach(el => {
+		const key = el.dataset.locPlaceholder;
+		el.placeholder = Localization.localize(key);
+	});
+	
+	document.querySelectorAll("[data-loc-html]").forEach(el => {
+		const key = el.dataset.locHtml;
+		el.innerHTML = Localization.localize(key);
+	});
+	
+	const titleEl = document.querySelector("title[data-loc]");
+	if (titleEl) {
+		titleEl.textContent = Localization.localize(titleEl.dataset.loc);
+	}
 }
 
-function saveRolesToStorage() {
-    const roles = Object.fromEntries(roleCounts);
-    localStorage.setItem("onuww_roles", JSON.stringify(roles));
+
+
+
+/* =========================
+   Persistent storage
+   ========================= */
+
+//Saves selected roles to persistent storage
+function saveSelectedRoles() {
+	const roles = Object.fromEntries(roleCounts);
+	localStorage.setItem(SELECTED_ROLES_STORE, JSON.stringify(roles));
 }
+//Loads selected roles from persistent storage, updating selected role counter
+//Called once on page load, deferring updating GUI to the init process
+function loadSelectedRoles() {
+	const raw = localStorage.getItem(SELECTED_ROLES_STORE);
+	if (!raw) return;
 
-function loadRolesFromStorage() {
-    const raw = localStorage.getItem("onuww_roles");
-    if (!raw) return;
-
-    try {
-        const roles = JSON.parse(raw);
+	try {
+		const roles = JSON.parse(raw);
 		
 		console.group("Loaded role selection");
 
-        for (const [roleId, count] of Object.entries(roles)) {
-            if (ROLES[roleId]) {
+		for (const [roleId, count] of Object.entries(roles)) {
+			if (Roles.isEnabled(roleId)) {
 				if (count > 0) {
-					console.log("Enabling role " + roleId + " from storage (count: " + count + ")");
+					console.log("\t" + roleId + ": " + count);
 				}
-                roleCounts.set(roleId, count);
-            }
-        }
+				setRoleCount(roleId, count);
+			} else {
+				console.warn("\t" + roleId + " is diabled, ignoring attempt to load");
+			}
+		}
 		console.groupEnd();
 		
-    } catch {
-        // ignore corrupted data
-    }
+	} catch {
+		// ignore corrupted data
+		console.warn("Unable to load selected roles from storage");
+	}
 }
-
-function getRoleSearchName(role) {
-    // Used for search filtering. Keep consistent across all panels.
-    return Loc(role.nameKey).toLowerCase();
+//Saves selected tag filters to persistent storage
+function saveTagFilters() {
+	const filters = getSelectedTagFilters();
+	localStorage.setItem(TAG_FILTERS_STORE, JSON.stringify(filters));
 }
+//Loads selected tag filters from persistent storage
+//Called once directly after tag filters have been loaded
+function loadTagFilters() {
+	const raw = localStorage.getItem(TAG_FILTERS_STORE);
+	if (!raw) return;
 
-function getIconSpriteSize() {
-    const styles = getComputedStyle(document.documentElement);
-    return {
-        width: parseFloat(styles.getPropertyValue("--icon-sprite-width")),
-        height: parseFloat(styles.getPropertyValue("--icon-sprite-height"))
-    };
+	try {
+		const filters = JSON.parse(raw);
+
+		document.querySelectorAll(".selection-filter-option").forEach(tile => {
+			const group = tile.dataset.group;
+			const tag = tile.dataset.tag;
+
+			const selected = filters[group]?.includes(tag) ?? false;
+
+			tile.classList.toggle("selected", selected);
+			tile.classList.toggle("unselected", !selected);
+		});
+
+	} catch {
+		console.warn("Unable to load tag filters from storage");
+	}
 }
-
-function applyRoleIconOffset(el, role) {
-    const { width, height } = getIconSpriteSize();
-
-    el.style.setProperty("--icon-x", `${-role.icon.x * width}px`);
-    el.style.setProperty("--icon-y", `${-role.icon.y * height}px`);
+//Saves the day timer state to persistent storage
+function saveDayTimer() {
+	const data = {
+		state: dayTimerState,
+		duration: dayTimerDuration,
+		remaining: getDayTimerRemainingSeconds(),
+		targetTimestamp: dayTimerTargetTimestamp,
+	};
+	localStorage.setItem(DAY_TIMER_STORE, JSON.stringify(data));
 }
+//Loads the day timer state from persistent storage, resuming a running timer based on wall-clock time so a reload (or the tab having been closed) doesn't lose progress
+//Called once on page load, deferring updating GUI to the init process
+function loadDayTimer() {
+	const raw = localStorage.getItem(DAY_TIMER_STORE);
+	if (!raw) return;
 
-function createRoleIcon(role) {
-    const icon = document.createElement("div");
-    icon.className = "role-icon role-icon-base";
-    applyRoleIconOffset(icon, role);
-    return icon;
-}
+	try {
+		const data = JSON.parse(raw);
 
-function createRoleRootEl(role, className, container) {
-    const el = document.createElement("div");
-    el.className = className;
-    el.dataset.roleName = getRoleSearchName(role);
-	el.dataset.roleId = role.id;
+		dayTimerDuration = Number.isFinite(data.duration) ? data.duration : DAY_TIMER_DEFAULT_DURATION;
 
-    if (container === "tiles") {
-        el.dataset.roleId = role.id;
-    }
+		if (data.state === "running" && typeof data.targetTimestamp === "number") {
+			const remaining = Math.max(0, Math.round((data.targetTimestamp - Date.now()) / 1000));
 
-    return el;
-}
-
-function roleIsEnabled(role) {
-    return !getRole(role)?.disable;
-}
-
-function getSortedRoles() {
-	const roles = Object.values(ROLES).filter(roleIsEnabled);
-
-	const mapped = roles.map(role => { return { role, name: Loc(role.nameKey) }; });
-
-	mapped.sort((a, b) => { return a.name.localeCompare(b.name, LANG); });
-
-	return mapped.map(x => x.role);
-}
-
-function applyTextStyleClasses(labelEl, node) {
-    const styles = node.textStyle;
-
-    if (!styles) return;
-
-    const list = Array.isArray(styles) ? styles : [styles];
-
-    for (const s of list) {
-        if (s === "bold") labelEl.classList.add("setting-text-bold");
-        else if (s === "italic") labelEl.classList.add("setting-text-italic");
-        else if (s === "underline") labelEl.classList.add("setting-text-underline");
-        else if (s === "muted") labelEl.classList.add("setting-text-muted");
-    }
-}
-
-function updateRoleTileVisual(tile, count, role, selectedRoleIds) {
-	const available = roleIsAvailable(role, selectedRoleIds);
-	tile.classList.toggle("role-disabled", !available);
-	
-    tile.classList.toggle("selected", count > 0);
-    tile.classList.toggle("unselected", count === 0);
-
-    const badge = tile.querySelector(".role-count");
-    if (!badge) return;
-
-    const isMulti = role.maxCount > 1;
-
-    if (!isMulti || count === 0) {
-        badge.style.display = "none";
-    } else {
-        badge.style.display = "";
-        badge.textContent = count + (role.maxCount != role.minCount ? "/" + role.maxCount : "");
-    }
-}
-
-function getPlayerCount() {
-	let totalRoles = 0;
-	let extraCenter = 0;
-
-	for (const [roleId, count] of roleCounts.entries()) {
-		totalRoles += count;
-
-		const role = ROLES[roleId];
-		if (role && role.extraCenterCards) {
-			extraCenter += role.extraCenterCards * count;
+			if (remaining > 0) {
+				dayTimerState = "running";
+				dayTimerTargetTimestamp = data.targetTimestamp;
+			} else {
+				//Timer would have already run out while the page was closed/reloaded
+				dayTimerState = "stopped";
+				dayTimerRemaining = 0;
+			}
+		} else if (data.state === "paused") {
+			dayTimerState = "paused";
+			dayTimerRemaining = Math.max(0, Number.isFinite(data.remaining) ? data.remaining : dayTimerDuration);
+		} else {
+			dayTimerState = "stopped";
+			dayTimerRemaining = dayTimerDuration;
 		}
+
+	} catch {
+		console.warn("Unable to load day timer from storage");
+	}
+}
+
+
+
+/* =========================
+   Role utility functions
+   ========================= */
+
+//Retrieves a sorted list of all tokens that are enabled
+function getEnabledTokensSorted() {
+	const TOKEN_TYPE_ORDER = ["artifact", "mark", "shield"];
+	
+	const tokens = Roles.getAllEnabledTokens();
+	const lang = Localization.getLanguage();
+
+	const localizedTokens = tokens.map(token => ({
+		token,
+		name: Localization.localize(token.nameKey)
+	}));
+
+	localizedTokens.sort((a, b) =>
+		TOKEN_TYPE_ORDER.indexOf(a.token.type) - TOKEN_TYPE_ORDER.indexOf(b.token.type) ||
+		a.name.localeCompare(b.name, lang)
+	);
+
+	return localizedTokens.map(entry => entry.token);
+}
+//Retrieves a localized lowercase text, used by the search function for comparisons against search term
+function getTokenSearchText(token) {
+	return Localization.localize(token.nameKey).toLowerCase();
+}
+//Creates a base token tile shared by (future) token views
+function createTokenTile(token, ...classes) {
+	const el = document.createElement("div");
+	el.classList.add(...classes);
+	el.dataset.tokenName = getTokenSearchText(token);	//Normalized token name used for search/filtering
+	el.dataset.tokenId = token.id;	//Used for identification of associated token
+
+	return el;
+}
+//Retrieves a sorted list of all roles that are enabled
+function getEnabledRolesSorted() {
+	const roles = Roles.getAllEnabled();
+	const lang = Localization.getLanguage();
+
+	const localizedRoles = roles.map(role => ({
+		role,
+		name: Localization.localize(role.nameKey)
+	}));
+
+	localizedRoles.sort((a, b) =>
+		a.name.localeCompare(b.name, lang)
+	);
+
+	return localizedRoles.map(entry => entry.role);
+}
+//Retrieves a list of all currently selected roles
+function getSelectedRoleIds() {
+	return Array.from(roleCounts.keys());
+}
+//Retrieves the number of players supported by the current selection
+function getPlayerCount() {
+	return Roles.calculatePlayerCount(roleCounts);
+}
+//Retrieves a localized lowercase text, used by the search function for comparisons against search term
+function getRoleSearchText(role) {
+	return Localization.localize(role.nameKey).toLowerCase();
+}
+//Retrieves the number of selected role instances
+function getRoleCount(roleId) {
+	return roleCounts.get(roleId) ?? 0;
+}
+//Sets the number of selected role instances
+function setRoleCount(roleId, value) {
+	if (value <= 0)
+		roleCounts.delete(roleId);
+	else
+		roleCounts.set(roleId, value);
+}
+//Returns true if at least one instance of the role is selected, else false
+function roleIsSelected(roleId) {
+	return getRoleCount(roleId) > 0;
+}
+//Returns true if at least one role is selected, else false
+function isAnyRoleSelected() {
+	return roleCounts.size > 0;
+}
+//Returns the localized, comma-separated list of role names that use a given token
+function getTokenUsedByText(token) {
+	return Roles.getRolesUsingToken(token).map(roleId => Localization.localize(Roles.getNameKey(roleId))).join(", ");
+}
+//Returns a localized, comma-separated list of role names from an array of roleIDs
+function getRoleList(roleIds) {
+	return roleIds.map(roleId => Localization.localize(Roles.getNameKey(roleId))).join(", ");
+}
+
+
+/* =========================
+   DOM construction
+   ========================= */
+
+function buildPromptNavigationControls() {
+	const content = document.querySelector(".panel-output > .panel-content");
+	const outputBox = document.getElementById("promptOutput");
+
+    const nav = document.createElement("div");
+    nav.className = "prompt-navigation";
+
+    // Single-turn checkbox
+    const label = document.createElement("label");
+    label.className = "prompt-navigation-toggle";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+	checkbox.checked = showSingleTurn;
+    checkbox.id = "promptSingleTurn";
+
+    const text = document.createElement("span");
+    text.textContent = Localization.localize("UI_PROMPT_SINGLETURN");
+
+    label.append(checkbox, text);
+
+    // First
+    const first = document.createElement("button");
+    first.id = "promptFirst";
+    first.className = "prompt-navigation-button";
+    first.type = "button";
+    first.textContent = "⏮";
+	first.dataset.action = "first";
+
+    // Previous
+    const previous = document.createElement("button");
+    previous.id = "promptPrevious";
+    previous.className = "prompt-navigation-button";
+    previous.type = "button";
+    previous.textContent = "◀";
+	previous.dataset.action = "prev";
+
+    // Counter
+    const counter = document.createElement("span");
+    counter.id = "promptCounter";
+    counter.className = "prompt-navigation-counter";
+    counter.textContent = "1 / 1";
+
+    // Next
+    const next = document.createElement("button");
+    next.id = "promptNext";
+    next.className = "prompt-navigation-button";
+    next.type = "button";
+    next.textContent = "▶";
+	next.dataset.action = "next";
+
+    // Last
+    const last = document.createElement("button");
+    last.id = "promptLast";
+    last.className = "prompt-navigation-button";
+    last.type = "button";
+    last.textContent = "⏭";
+	last.dataset.action = "last";
+
+    nav.append(label, first, previous, counter, next, last);
+    content.insertBefore(nav, outputBox);
+}
+
+	/* =========================
+	   Sprites
+	   ========================= */
+	
+	//Retrieves the CSS attributes of a sprite sheet matching the type parameter
+	function getSpriteData(type) {
+		const styles = getComputedStyle(document.documentElement);
+		
+		return {
+			width: parseFloat(styles.getPropertyValue(`--${type}-sprite-width`)),
+			height: parseFloat(styles.getPropertyValue(`--${type}-sprite-height`)),
+			scale: parseFloat(styles.getPropertyValue(`--${type}-sprite-scale`)),
+			columns: parseInt(styles.getPropertyValue(`--${type}-sprite-columns`), 10),
+			rows: parseInt(styles.getPropertyValue(`--${type}-sprite-rows`), 10)
+		};
+	}
+	//Sets the absolute offset on an icon element within a sprite sheet where the desired sprite with abstract coordinates x and y is located
+	function applySpriteOffset(el, type, position) {
+		const { width, height } = getSpriteData(type);
+		
+		el.style.setProperty(`--${type}-sprite-x`, `${-position.x * width}px`);
+		el.style.setProperty(`--${type}-sprite-y`, `${-position.y * height}px`);
+	}
+	//Creates an icon element containing a sprite image from a sprite sheet
+	function createSprite(type, position, ...classes) {
+		const el = document.createElement("div");
+		
+		el.classList.add(
+			"sprite",
+			`${type}-sprite`,
+			...classes
+		);
+
+		applySpriteOffset(el, type, position);
+
+		return el;
+	}
+	//Shorthand helper for creating a role portrait icon
+	function createRoleIcon(role) {
+		return createSprite("role", Roles.getPortraitIcon(role));
+	}
+	//Shorthand helper for creating a full playing card icon
+	function createCardIcon(card) {
+		return createSprite("card", card);
+	}
+	//Shorthand helper for creating a token icon
+	function createTokenIcon(token) {
+		return createSprite("token", Roles.getTokenIcon(token));
+	}
+
+	/* =========================
+	   Tile construction
+	   ========================= */
+
+	//Creates a base role tile shared by the selection and description views
+	function createRoleTile(role, ...classes) {
+		const el = document.createElement("div");
+		el.classList.add(...classes);
+		el.dataset.roleName = getRoleSearchText(role);	//Normalized role name used for search/filtering
+		el.dataset.roleId = role.id;	//Used for identification of associated role
+
+		return el;
+	}
+	//Creates and populates a role selection tile
+	function buildSelectionListTile(role) {
+		const container = document.getElementById("selectionList");
+		const tile = createRoleTile(role, "selection-tile", "unselected");
+		const icon = createRoleIcon(role);
+		const label = document.createElement("div");
+		label.className = "selection-tile-name";
+		label.textContent = Localization.localize(role.nameKey);
+		const count = document.createElement("div");
+		count.className = "selection-selected-count";
+		count.style.display = "none";
+		
+		tile.append(icon, label, count);
+		container.appendChild(tile);
+		
+		return tile;
+	}
+	//Adds listeners to a tile (selection) to support click to select and hold to open description overlay
+	function applySelectionTileListeners(tile, role) {
+		const MAX_DISTANCE = 10;
+		let pressTimer = null;
+		let longPressTriggered = false;
+		let startX = 0;
+		let startY = 0;
+		
+		function cancelLongpress() {
+			clearTimeout(pressTimer);
+			pressTimer = null;
+		}
+
+		tile.addEventListener("pointerdown", (e) => {
+			activeSelectionPointerId = e.pointerId;
+			startX = e.clientX;
+			startY = e.clientY;
+			longPressTriggered = false;
+
+			pressTimer = setTimeout(() => {
+				longPressTriggered = true;
+				onOpenModalRoleDescription(role);
+			}, LONG_PRESS_DELAY);
+		});
+
+		tile.addEventListener("pointermove", (e) => {
+			if (!pressTimer) return;
+
+			if (Math.hypot(e.clientX - startX, e.clientY - startY) > MAX_DISTANCE) {
+				cancelLongpress();
+			}
+		});
+
+		tile.addEventListener("pointerup", (e) => {
+			if (e.pointerId !== activeSelectionPointerId) return;
+
+			cancelLongpress();
+
+			if (!longPressTriggered) {
+				onSelectionTileClicked(role);
+			}
+
+			activeSelectionPointerId = null;
+		});
+
+		tile.addEventListener("pointerleave", cancelLongpress);
+		tile.addEventListener("pointercancel", cancelLongpress);
+	}
+	//Returns the localized team text for a role
+	function getDescriptionTeamText(role) {
+		let team = Localization.localize(role.team);
+		
+		if (team && role.tags?.includes("CAN_CHANGE_ALIGNMENT")) {
+			team += Localization.localize("TEAM_VARIABLE_SUFFIX");
+		}
+
+		return team;
+	}
+	//Returns the localized active phase text for a role
+	function getDescriptionPhaseText(role) {
+		switch (role.phase) {
+			case "NIGHT":
+				return Localization.localize("PHASE_NIGHT_ROLE");
+			case "DAY":
+				return Localization.localize("PHASE_DAY_ROLE");
+			case "DUSK":
+				return Localization.localize("PHASE_DUSK_ROLE");
+		}
+		
+		console.warn("Unknown phase " + role.phase + " for role " + role.id + " when fetching description");
+		return "";
+	}
+	//Assembles and returns the localized composite win condition description text for a role
+	function getDescriptionWinConditionText(role) {
+		const roleKey = `UI_WINCONDITION_${role.id}`;
+		if (Localization.hasKey(roleKey)) {
+			return Localization.localize(roleKey);
+		}
+
+		const teamKey = `UI_WINCONDITION_${role.team}`;
+		let base;
+
+		if (Localization.hasKey(teamKey)) {
+			base = Localization.localize(teamKey);
+		} else {
+			console.warn(`Missing team win condition: ${teamKey} (role: ${role.id})`);
+			base = "";
+		}
+
+		if (role.tags?.includes("CAN_CHANGE_ALIGNMENT")) {
+			base += (base ? " " : "") + Localization.localize("UI_WINCONDITION_VARIABLE_NOTE");
+		}
+
+		return base;
+	}
+	//Populates a role description tile. Used by both the description list and description overlay, defers icon elements to caller
+	function populateDescriptionTile(tile, role) {
+		const name = document.createElement("div");
+		name.className = "description-tile-name";
+		name.textContent = Localization.localize(role.nameKey);
+
+		const header = document.createElement("div");
+		header.className = "description-tile-header";
+		header.append(name);
+
+		const phase = document.createElement("div");
+		phase.className = "description-tile-phase";
+		phase.textContent = getDescriptionPhaseText(role);
+
+		const team = document.createElement("div");
+		team.className = "description-tile-team";
+		team.textContent = Localization.localize("TEAM_PREFIX") + ": " + getDescriptionTeamText(role);
+		if (Roles.hasTag(role, "CAN_CHANGE_ALIGNMENT")) {
+			team.classList.add("description-tile-team-variable");
+		}
+
+		const meta = document.createElement("div");
+		meta.className = "description-tile-meta";
+		meta.append(phase, team);
+
+		const ability = document.createElement("div");
+		ability.className = "description-tile-ability";
+		ability.textContent = Localization.localize(role.abilityKey);
+
+		const rules = document.createElement("div");
+		rules.className = "description-tile-rules";
+		rules.append(ability);
+
+		const winCondition = document.createElement("div");
+		winCondition.className = "description-tile-wincondition";
+		winCondition.textContent = getDescriptionWinConditionText(role);
+		rules.append(winCondition);
+		
+		const info = document.createElement("div");
+		info.className = "description-tile-info";
+		info.append(header, meta, rules);
+		
+		tile.append(info);
+		
+		return tile;
+	}
+	//Creates a role description tile
+	function buildDescriptionListTile(role) {
+		const container = document.getElementById("descriptionList");
+		const tile = createRoleTile(role, "description-tile");
+		const icon = createRoleIcon(role);
+		
+		tile.append(icon);
+		populateDescriptionTile(tile, role);
+		container.appendChild(tile);
+		
+		return tile;
+	}
+	//Populates a token description tile
+	function populateTokenDescriptionTile(tile, token) {
+		const name = document.createElement("div");
+		name.className = "token-tile-name";
+		name.textContent = Localization.localize(token.nameKey);
+
+		const info = document.createElement("div");
+		info.className = "token-tile-info";
+		info.append(name);
+
+		const usedByRoles = Roles.getRolesUsingToken(token);
+		if (usedByRoles.length > 0) {
+			const usedBy = document.createElement("div");
+			usedBy.className = "token-tile-usedby";
+			usedBy.textContent = Localization.localize("UI_USEDBY_PREFIX") + ": " + getRoleList(usedByRoles);
+			info.append(usedBy);
+		}
+
+		const description = document.createElement("div");
+		description.className = "token-tile-description";
+		description.textContent = Localization.localize(token.abilityKey);
+		info.append(description);
+
+		tile.append(info);
+
+		return tile;
+	}
+	//Creates a token description tile
+	function buildTokenDescriptionListTile(token) {
+		const container = document.getElementById("tokenDescriptionList");
+		const tile = createTokenTile(token, "token-tile");
+		const icon = createTokenIcon(token);
+
+		tile.append(icon);
+		populateTokenDescriptionTile(tile, token);
+		container.appendChild(tile);
+
+		return tile;
+	}
+
+
+	/* =========================
+	   Modal overlay construction
+	   ========================= */
+
+	//Builds the collapsed token icon row with click-to-reveal detail, returning the detail container to append alongside it
+	function buildCollapsedTokenIcons(tokens, listContainer) {
+		const detail = document.createElement("div");
+		detail.className = "modal-token-detail is-hidden";
+
+		function showDetail(token, tileEl) {
+			listContainer.querySelectorAll(".modal-token-tile.is-selected").forEach(t => t.classList.remove("is-selected"));
+			tileEl.classList.add("is-selected");
+
+			detail.replaceChildren(createModalTokenTile(token, false));
+			detail.classList.remove("is-hidden");
+		}
+
+		function hideDetail() {
+			listContainer.querySelectorAll(".modal-token-tile.is-selected").forEach(t => t.classList.remove("is-selected"));
+			detail.replaceChildren();
+			detail.classList.add("is-hidden");
+		}
+
+		tokens.forEach(token => {
+			const tile = createModalTokenTile(token, true);
+			tile.addEventListener("click", () => {
+				if (tile.classList.contains("is-selected")) {
+					hideDetail();
+				} else {
+					showDetail(token, tile);
+				}
+			});
+			listContainer.appendChild(tile);
+		});
+		
+		//Auto-select the first token so the modal opens at its final size, rather than resizing (and potentially triggering scroll) on first click
+		const firstTile = listContainer.querySelector(".modal-token-tile");
+		if (firstTile) {
+			showDetail(tokens[0], firstTile);
+		}
+
+		return detail;
+	}
+	//Creates a small tile pairing a token's icon with its description, or just the icon when collapsed
+	function createModalTokenTile(token, collapsed) {
+		const tile = document.createElement("div");
+		tile.className = "modal-token-tile" + (collapsed ? " is-collapsed" : "");
+
+		const icon = createTokenIcon(token);
+		tile.append(icon);
+
+		if (!collapsed) {
+			const text = document.createElement("div");
+			text.className = "modal-token-tile-text";
+
+			const header = document.createElement("div");
+			header.className = "modal-token-tile-header";
+			header.textContent = Localization.localize(token.nameKey);
+			text.append(header);
+
+			const description = document.createElement("div");
+			description.className = "modal-token-tile-description";
+			description.textContent = Localization.localize(token.abilityKey);
+			text.append(description);
+
+			tile.append(text);
+		}
+
+		return tile;
+	}
+	//Creates a role description tile for the modal overlay
+	function buildModalRoleDescription(role) {
+		const MAX_MODAL_TOKEN_DESCRIPTIONS = 2;
+		
+		const container = document.getElementById("modalOverlayContainer");
+		
+		container.replaceChildren();
+		
+		const tile = createRoleTile(role, "description-tile");
+
+		const cardIcons = document.createElement("div");
+		cardIcons.className = "description-overlay-cards";
+		for (const card of Roles.getCardIcons(role)) {
+			cardIcons.appendChild(createCardIcon(card));
+		}
+		tile.append(cardIcons);
+
+		populateDescriptionTile(tile, role);
+
+		const tokens = Roles.getTokensUsedByRole(role);
+		if (tokens.length > 0) {
+			const collapsed = tokens.length > MAX_MODAL_TOKEN_DESCRIPTIONS;
+
+			const tokenSection = document.createElement("div");
+			tokenSection.className = "description-overlay-tokens-container";
+
+			const tokenHeader = document.createElement("div");
+			tokenHeader.className = "description-overlay-tokens-header";
+			tokenHeader.textContent = Localization.localize("UI_TOKENS_PLACES");
+			tokenSection.append(tokenHeader);
+
+			const tokenList = document.createElement("div");
+			tokenList.className = "description-overlay-tokens" + (collapsed ? "" : " is-expanded");
+			tokenSection.append(tokenList);
+			
+			if (collapsed) {
+				const detail = buildCollapsedTokenIcons(tokens, tokenList);
+				tokenSection.append(detail);
+			} else {
+				tokens.forEach(token => tokenList.appendChild(createModalTokenTile(token, collapsed)));
+			}
+
+			tile.append(tokenSection);
+		}
+		
+		container.appendChild(tile);
+	}
+	//Creates and populates the modal overlay with a validation result panel
+	function buildModalErrorPanel(errors) {
+		const container = document.getElementById("modalOverlayContainer");
+
+		container.replaceChildren();
+
+		const panel = document.createElement("div");
+		panel.className = "settings-validation-overlay";
+
+		const heading = document.createElement("h2");
+		heading.textContent = Localization.localize("UI_SETTING_VALIDATION_ERROR");
+
+		panel.appendChild(heading);
+
+		for (const err of errors) {
+			const entry = document.createElement("div");
+			entry.className = "settings-validation-entry";
+
+			const option = document.createElement("div");
+			option.className = "settings-validation-option";
+			let optionTextContent = "";
+			for (let i = 0; i < err.optionKey.length; i++) {
+				optionTextContent += Localization.localize(err.optionKey[i]);
+				if (i < err.optionKey.length-1)
+					optionTextContent += " > ";
+			}
+			option.textContent = optionTextContent;
+
+			const message = document.createElement("div");
+			message.className = "settings-validation-message";
+			message.textContent = Localization.localize(err.messageKey);
+
+			entry.append(option, message);
+			panel.appendChild(entry);
+		}
+
+		container.appendChild(panel);
 	}
 	
-	return Math.max(0, totalRoles - (3 + extraCenter));
+	
+	/* =========================
+	   Selection tag filter construction
+	   ========================= */
+	
+	//Creates and populates a selection tag filter group tile
+	function createSelectionTagFilterTile(groupId, tag, textKey, defaultState) {
+		const tile = document.createElement("div");
+		tile.className = "selection-filter-option";
+		tile.classList.add(defaultState ? "selected" : "unselected");
+		tile.dataset.tag = tag;
+		tile.dataset.group = groupId;
+		
+		const label = document.createElement("div");
+		label.className = "selection-filter-option-name";
+		label.textContent = Localization.localize(textKey);
+
+		tile.appendChild(label);
+		tile.addEventListener("click", onTagFilterClicked);
+		
+		return tile;
+	}
+	//Creates and populates a selection tag filter group
+	function createSelectionTagFilterGroup(groupId, textKey, tags) {
+		const group = document.createElement("fieldset");
+		group.className = "selection-filter-group";
+
+		const legend = document.createElement("legend");
+		legend.className = "selection-filter-group-header";
+		legend.textContent = Localization.localize(textKey);
+		
+		const tileContainer = document.createElement("div");
+		tileContainer.className = "selection-filter-options";
+		
+		group.appendChild(legend);
+		group.appendChild(tileContainer);
+		
+		tags.forEach(filter => {
+			const tile = createSelectionTagFilterTile(groupId, filter.tag, filter.textKey, !!filter.default)
+			tileContainer.appendChild(tile);
+		});
+		
+		return group;
+	}
+	//Builds the selection tag filter elements
+	function buildSelectionTagFilters() {
+		const container = document.getElementById("roleFilterContainer");
+		container.innerHTML = "";
+		
+		TAG_FILTER_GROUPS.forEach(groupData => {
+			const group = createSelectionTagFilterGroup(groupData.id, groupData.textKey, groupData.tags);
+			container.appendChild(group);
+		});
+	}
+
+	/* =========================
+	   Settings
+	   ========================= */
+
+	function applyTextStyleClasses(label, node) {
+		for (const style of Settings.getNodeTextStyles(node)) {
+			label.classList.add("settings-font-" + style);
+		}
+	}
+
+	function createSettingChildrenWrap(node, depth) {
+		const wrap = document.createElement("div");
+		wrap.className = "settings-childrenwrap";
+		wrap.dataset.depth = String(depth + 1);
+		wrap.style.display = "none";
+		wrap.dataset.collapsed = "true";
+
+		for (const childNode of Settings.getChildren(node)) {
+			wrap.appendChild(createSettingNode(childNode, depth + 1));
+		}
+		
+		return wrap;
+	}
+
+	function createWeightInput(node, item) {
+		const input = document.createElement("input");
+		input.type = "number";
+		input.min = "0";
+		input.step = "1";
+		input.value = String(Settings.getValue(node.oid));
+		input.dataset.settingOid = node.oid;
+
+		input.addEventListener("input", () => {
+			let v = parseInt(input.value, 10);
+			if (!Number.isFinite(v) || v < 0) v = 0;
+
+			input.value = String(v);
+			Settings.setValue(node.oid, v);
+			
+			if (item.parentElement) {
+				updateWeightGroupPercentages(item.parentElement);
+			}
+			
+			updateSettingsUI();
+		});
+
+		return input;
+	}
+
+	function createPercentInput(node) {
+		const input = document.createElement("input");
+		input.type = "number";
+		input.min = "0";
+		input.max = "100";
+		input.step = "1";
+		input.value = String(Settings.getValue(node.oid));
+		input.dataset.settingOid = node.oid;
+
+		input.addEventListener("input", () => {
+			let v = parseInt(input.value, 10);
+			if (!Number.isFinite(v) || v < 0) v = 0;
+			if (v > 100) v = 100;
+
+			input.value = String(v);
+			Settings.setValue(node.oid, v);
+			updateSettingsUI();
+		});
+
+		return input;
+	}
+
+	function createToggleInput(node) {
+		const input = document.createElement("input");
+		input.type = "checkbox";
+		input.checked = Boolean(Settings.getValue(node.oid));
+		input.dataset.settingOid = node.oid;
+
+		input.addEventListener("change", () => {
+			Settings.setValue(node.oid, input.checked);
+			updateSettingsUI();
+		});
+
+		return input;
+	}
+
+	function createSettingControls(node, item) {
+		const control = document.createElement("div");
+		control.className = "settings-row-controls";
+
+		const info = document.createElement("span");
+		info.className = "settings-controls-info";
+		info.textContent = "";
+
+		const wrap = document.createElement("div");
+		wrap.className = "settings-controls-wrap";
+		
+		switch (node.type) {
+			case "label":
+			case "separator":
+				break;
+				
+			case "weight": {
+				const icon = document.createElement("span");
+				icon.className = "settings-weight-icon";
+				icon.textContent = "⚖"; // can be changed later
+				
+				const weightWrap = document.createElement("div");
+				weightWrap.className = "settings-weight-input";
+				
+				info.classList.add("settings-weight-label");
+				info.dataset.settingOid = node.oid;
+
+				weightWrap.append(icon, createWeightInput(node, item));
+				wrap.appendChild(weightWrap);
+				break;
+			}
+			case "percent": {
+				const percentWrap = document.createElement("div");
+				percentWrap.className = "settings-percent-input";
+				percentWrap.appendChild(createPercentInput(node));
+
+				wrap.appendChild(percentWrap);
+				break;
+			}
+			case "toggle": {
+				wrap.appendChild(createToggleInput(node));
+				break;
+			}
+			default:
+				break;
+		}
+		
+		control.append(info, wrap);
+		
+		return control;
+	}
+
+	function createSettingErrorIndicator() {
+		const indicator = document.createElement("div");
+		indicator.className = "settings-validation-indicator";
+		indicator.style.display = "none";
+
+		const icon = document.createElement("span");
+		icon.className = "settings-validation-icon";
+		icon.textContent = "⚠";
+
+		const count = document.createElement("span");
+		count.className = "settings-validation-count";
+
+		indicator.append(icon, count);
+		
+		indicator.addEventListener("click", onErrorIndicatorClicked);
+
+		return indicator;
+	}
+
+	function createSettingNode(node, depth) {
+		function createDisclosureIndicator() {
+			const indicator = document.createElement("div");
+			indicator.className = "settings-row-disclosure";
+			indicator.textContent = "▶";
+			indicator.dataset.expanded = "false";
+			return indicator;
+		}
+		function createSpacer() {
+			const spacer = document.createElement("div");
+			spacer.className = "settings-row-spacer";
+			return spacer;
+		}
+		
+		const SETTING_NODE_VARIANTS = {
+			item: {
+				itemClass: "settings-item",
+				hasControl: true,
+			},
+			header: {
+				itemClass: "settings-header",
+				hasControl: false,
+			},
+		};
+		
+		const isSeparator = node.type === "separator";
+		const isHeader = node.type === "header";
+		const hasChildren = Settings.hasChildren(node);
+		const variant = SETTING_NODE_VARIANTS[isHeader ? "header" : "item"];
+
+		const item = document.createElement("div");
+		item.className = isSeparator ? `${variant.itemClass} settings-separator` : variant.itemClass;
+		item.dataset.settingOid = node.oid;
+		item.dataset.depth = String(depth);
+		item.dataset.hasChildren = hasChildren ? "true" : "false";
+		if (node.weightGroupId != null)
+			item.dataset.weightGroupId = String(node.weightGroupId);
+		
+		const row = document.createElement("div");
+		row.className = "settings-row";
+		
+		item.appendChild(row);
+		
+		//Insert either an empty space indentation, or a disclosure indicator for collapsible rows with children
+		const leadingElement = (hasChildren && !isSeparator) ? createDisclosureIndicator() : createSpacer();
+		row.appendChild(leadingElement);
+		
+		if (isSeparator) {
+			//This is a separator, so no extras or children are required
+			const line = document.createElement("div");
+			line.className = "settings-separator-line";
+			row.appendChild(line);
+			return item;
+		}
+		
+		// Label
+		const label = document.createElement("div");
+		label.className = "settings-row-label";
+		label.textContent = Localization.localize(node.textKey);	
+		
+		applyTextStyleClasses(label, node);
+		row.appendChild(label);
+		
+		row.appendChild(createSettingErrorIndicator());
+
+		// Control (headers never have one)
+		if (variant.hasControl) {
+			row.appendChild(createSettingControls(node, item));
+		}
+
+		if (hasChildren) {
+			const childrenWrap = createSettingChildrenWrap(node, depth);
+			applyWeightGroupBorders(childrenWrap);
+			updateWeightGroupPercentages(childrenWrap);
+			item.appendChild(childrenWrap);
+			row.addEventListener("click", e => onSettingsBranchClicked(e, childrenWrap));
+		}
+
+		return item;
+	}
+
+	function buildSettingsUI() {
+		const settingsList = document.getElementById("settingsList");
+		
+		for (const rootNode of Settings.getRootNodes()) {
+			settingsList.appendChild(createSettingNode(rootNode, 0));
+		}
+		
+		const settings_header = document.querySelector(".panel-settings > .panel-header");
+		const indicator = createSettingErrorIndicator();
+		indicator.id = "settingsPanelValidationIndicator";
+		settings_header.appendChild(indicator);
+
+		//Ensure UI state is correct
+		updateSettingsValidationUI();
+	}
+
+	function getItemsByWeightGroup(wrap) {
+		const weightGroups = new Map();
+		
+		for (const item of wrap.children) {
+			const weightGroupId = item.dataset.weightGroupId;
+			
+			if (weightGroupId === undefined) continue;
+			
+			if (weightGroups.has(weightGroupId))
+				weightGroups.get(weightGroupId).push(item);
+			else
+				weightGroups.set(weightGroupId, [ item ]);
+		}
+
+		return weightGroups;
+	}
+
+	function applyWeightGroupBorders(wrap) {
+		const weightGroups = getItemsByWeightGroup(wrap);
+		
+		for (const items of weightGroups.values()) {
+			if (items.length <= 1) continue;	//If single item in group, no need to box it
+			
+			items[0].classList.add("settings-weightbox", "settings-weightbox-top");	//Add to first item
+			items[items.length-1].classList.add("settings-weightbox", "settings-weightbox-bottom");	//Add to last item
+			
+			for (let i = 1; i < items.length-1; i++)
+				items[i].classList.add("settings-weightbox", "settings-weightbox-middle");	//Add to all middle items
+		}
+	}
+
+
+
+
+
+/* =========================
+   DOM updates
+   ========================= */
+
+function updateRolesUI() {
+	// Resolve invalid selections (including chains)
+	while (sanitizeRoleSelection()) {};
+
+	// Update all tiles
+	document.querySelectorAll(".selection-tile").forEach(tile => {
+		const roleId = tile.dataset.roleId;
+		const count = getRoleCount(roleId);
+		updateRoleTileVisual(tile, count, roleId);
+	});
+
+	updatePlayerCountDisplay();
+	updateDescriptionVisibility();
+	updateSelectionVisibility();
+	updateTokenDescriptionVisibility();
+	
+	const errors = Settings.validate({ selectedRoles: roleCounts });
+	updateSettingsValidationUI(errors);
+	saveSelectedRoles();
+	updatePrompt(Settings.filterRelevant(errors, roleCounts));
 }
 
-function getSelectedRoleIds() {
-    return Array.from(roleCounts.entries())
-        .filter(([_, count]) => count > 0)
-        .map(([id]) => id);
+//Ensures that all selected roles are actually selectable, e.g. if a role is deselected that another role depends on
+function sanitizeRoleSelection() {
+	let selectedRoleIds = getSelectedRoleIds();
+	let changed = false;
+
+	for (const roleId of selectedRoleIds) {
+		if (!Roles.isSelectable(roleId, roleCounts)) {
+			setRoleCount(roleId, 0);
+			changed = true;
+		}
+	}
+
+	return changed;
+}
+
+function updateRoleTileVisual(tile, count, roleId) {
+	const selectable = Roles.isSelectable(roleId, roleCounts);
+	tile.classList.toggle("selection-role-disabled", !selectable);
+	tile.classList.toggle("selected", count > 0);
+	tile.classList.toggle("unselected", count === 0);
+
+	const badge = tile.querySelector(".selection-selected-count");
+	if (!badge) return;
+	
+	const { minCount, maxCount } = Roles.getMinMax(roleId);
+	if (maxCount <= 1 || count === 0) {
+		badge.style.display = "none";
+	} else {
+		badge.style.display = "";
+		badge.textContent = count + (maxCount != minCount ? "/" + maxCount : "");
+	}
 }
 
 function updatePlayerCountDisplay() {
-    const el = document.getElementById("playerCountDisplay");
-    if (!el) return;
+	const el = document.getElementById("playerCountDisplay");
+	if (!el) return;
 
-    el.textContent = Loc("UI_PLAYER_COUNT") + " " + getPlayerCount().toString();
+	el.textContent = Localization.localize("UI_PLAYER_COUNT") + " " + getPlayerCount().toString();
 }
 
-function sanitizeRoleSelection(selectedRoleIds) {
-    let changed = false;
-
-    for (const roleId of selectedRoleIds) {
-        const role = ROLES[roleId];
-
-        if (!roleIsAvailable(role, selectedRoleIds)) {
-            roleCounts.set(roleId, 0);
-            changed = true;
-        }
-    }
-
-    return changed;
+function updateTileVisibility(tiles, searchTerm, isVisibleCallback, searchAttr = "roleName") {
+	tiles.forEach(tile => {
+		let visible = true;
+		
+		if (searchTerm) {
+			visible = tile.dataset[searchAttr].includes(searchTerm);
+		} else {
+			visible = isVisibleCallback(tile);
+		}
+		
+		tile.classList.toggle("is-hidden", !visible);
+	});
 }
 
-function updateRolesUI() {
-    let selectedRoleIds = getSelectedRoleIds();
+function updateDescriptionVisibility() {
+	const searchTerm = document.getElementById("roleDescriptionSearchField").value.toLowerCase().trim();
+	const tiles = document.querySelectorAll(".description-tile");
+	const hasSelection = isAnyRoleSelected();
 
-    // Resolve invalid selections (including chains)
-    let changed;
-    do {
-        changed = sanitizeRoleSelection(selectedRoleIds);
-        if (changed) {
-            selectedRoleIds = getSelectedRoleIds();
-        }
-    } while (changed);
-
-    // Update all tiles
-    document.querySelectorAll(".role-tile").forEach(tile => {
-        const roleId = tile.dataset.roleId;
-        const role = ROLES[roleId];
-        const count = roleCounts.get(roleId) ?? 0;
-
-        updateRoleTileVisual(tile, count, role, selectedRoleIds);
-    });
-
-    updatePlayerCountDisplay();
-    applySelectionFilter();
-	applyRoleTileFilter();
-	saveRolesToStorage();
-    updatePrompt();
+	updateTileVisibility(tiles, searchTerm, tile => !hasSelection || roleIsSelected(tile.dataset.roleId))
 }
 
-function roleIsAvailable(role, selectedRoles) {
-    if (role.disable) return false;
-    if (!role.prereq) return true;
+function updateTokenDescriptionVisibility() {
+	const searchTerm = document.getElementById("tokenDescriptionSearchField").value.toLowerCase().trim();
+	const tiles = document.querySelectorAll(".token-tile");
+	const hasSelection = isAnyRoleSelected();
+	const selectedRoleIds = getSelectedRoleIds();
 
-    return evaluatePrereq(role.prereq, selectedRoles);
-}
-
-function evaluatePrereq(node, selectedRoles) {
-    if (!node) return true;
-
-    const hasAny = node.any !== undefined;
-    const hasAll = node.all !== undefined;
-    const hasType = node.type !== undefined;
-
-    // --- Validation ---
-    if (hasAny && hasAll) {
-        console.warn("Invalid prereq node (both 'any' and 'all'):", node);
-        return false;
-    }
-
-    if (!hasAny && !hasAll && !hasType) {
-        console.warn("Invalid prereq node (no type/op):", node);
-        return false;
-    }
-
-    // --- Leaf nodes FIRST ---
-    if (hasType) {
-        const values = node.any || node.all;
-
-        if (!Array.isArray(values)) {
-            console.warn("Leaf node missing values:", node);
-            return false;
-        }
-
-        switch (node.type) {
-            case "role":
-                return node.all
-                    ? values.every(r => selectedRoles.includes(r))
-                    : values.some(r => selectedRoles.includes(r));
-
-            case "team":
-                return node.all
-                    ? values.every(team =>
-                        selectedRoles.some(r => ROLES[r].team === team)
-                    )
-                    : values.some(team =>
-                        selectedRoles.some(r => ROLES[r].team === team)
-                    );
-
-            case "tag":
-                return node.all
-                    ? values.every(tag =>
-                        selectedRoles.some(r => roleHasTag(r, tag))
-                    )
-                    : values.some(tag =>
-                        selectedRoles.some(r => roleHasTag(r, tag))
-                    );
-
-            default:
-                console.warn("Unknown prereq type:", node.type);
-                return false;
-        }
-    }
-
-    // --- Logical nodes AFTER ---
-    if (hasAny) {
-        return node.any.some(child =>
-            evaluatePrereq(child, selectedRoles)
-        );
-    }
-
-    if (hasAll) {
-        return node.all.every(child =>
-            evaluatePrereq(child, selectedRoles)
-        );
-    }
-
-    return false;
+	updateTileVisibility(
+		tiles,
+		searchTerm,
+		tile => !hasSelection || Roles.isTokenActive(tile.dataset.tokenId, selectedRoleIds),
+		"tokenName"
+	);
 }
 
 function getSelectedTagFilters() {
-    const result = {};
+	const result = {};
 
-    document.querySelectorAll(".ruleset-tile.selected").forEach(tile => {
-        const groupId = tile.dataset.group;
-        const tag = tile.dataset.tag;
+	document.querySelectorAll(".selection-filter-option.selected").forEach(tile => {
+		const groupId = tile.dataset.group;
+		const tag = tile.dataset.tag;
 
-        if (!result[groupId]) {
-            result[groupId] = [];
-        }
+		if (!result[groupId]) {
+			result[groupId] = [];
+		}
 
-        result[groupId].push(tag);
-    });
+		result[groupId].push(tag);
+	});
 
-    return result;
+	return result;
 }
 
-function roleMatchesAllFilterGroups(role, groupedFilters) {
-    // Iterate over each group (ruleset, complexity, etc.)
-    for (const groupId in groupedFilters) {
-        const selectedTags = groupedFilters[groupId];
+function roleMatchesAllFilterGroups(roleId, groupedFilters) {
+	// Iterate over each group (ruleset, complexity, etc.)
+	for (const groupId in groupedFilters) {
+		const selectedTags = groupedFilters[groupId];
 
-        // If no tags selected in this group → ignore it
-        if (!selectedTags || selectedTags.length === 0) continue;
+		// If no tags selected in this group → ignore it
+		if (!selectedTags || selectedTags.length === 0) continue;
 
-        // Role must match at least one tag in this group (OR)
-        const matchesGroup = selectedTags.some(tag =>
-            roleHasTag(role.id, tag)
-        );
+		// Role must match at least one tag in this group (OR)
+		const matchesGroup = selectedTags.some(tag =>
+			Roles.hasTag(roleId, tag)
+		);
 
-        // If it fails any group → overall failure (AND)
-        if (!matchesGroup) {
-            return false;
-        }
+		// If it fails any group → overall failure (AND)
+		if (!matchesGroup) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+function updateSelectionVisibility() {
+	const searchTerm = document.getElementById("roleSelectionSearchField").value.toLowerCase().trim();
+	const tiles = document.querySelectorAll(".selection-tile");
+	const tagFilters = getSelectedTagFilters();
+	
+	updateTileVisibility(tiles, searchTerm, tile => {
+		const roleId = tile.dataset.roleId;
+		return roleMatchesAllFilterGroups(roleId, tagFilters) || roleIsSelected(roleId);
+	});
+}
+//Toggles a tag filter tile between selected and unselected
+function toggleTagFilterTileState(tile) {
+	const isSelected = tile.classList.contains("selected");
+	setTagFilterTileState(tile, !isSelected);
+}
+//Sets the tag filter tile status and updates the selection UI
+function setTagFilterTileState(tile, isSelected) {
+	tile.classList.toggle("selected", isSelected);
+	tile.classList.toggle("unselected", !isSelected);
+	updateSelectionVisibility();
+}
+
+function updatePromptNavigation() {
+	const label = document.getElementById("promptCounter");
+	if (showSingleTurn) {
+		label.textContent = (renderedTurns.length > 0) ? `${currentTurn+1} / ${renderedTurns.length}` : "-";
+	} else {
+		label.textContent = "-";
+	}
+	
+	document.getElementById("promptFirst").disabled = !showSingleTurn || currentTurn <= 0;
+	document.getElementById("promptPrevious").disabled = !showSingleTurn || currentTurn <= 0;
+	document.getElementById("promptNext").disabled = !showSingleTurn || currentTurn >= renderedTurns.length - 1;
+	document.getElementById("promptLast").disabled = !showSingleTurn || currentTurn >= renderedTurns.length - 1;
+}
+
+function renderPrompt() {
+    const outputBox = document.getElementById("promptOutput");
+
+    if (!showSingleTurn) {
+        outputBox.value = renderedTurns.map(t => t.text).join("\n\n");
+    }
+    else {
+        outputBox.value = renderedTurns[currentTurn]?.text ?? "";
     }
 
-    return true;
+    updatePromptNavigation();
+    resizePromptBox();
 }
 
-function setRulesetTileState(tile, isSelected) {
-    tile.classList.toggle("selected", isSelected);
-    tile.classList.toggle("unselected", !isSelected);
-}
+function updatePrompt(relevantErrors) {
+	function _showPromptUnavailable(message) {
+		renderedTurns = [];
+		currentTurn = 0;
 
-function localizeStaticContent() {
-    document.querySelectorAll("[data-loc]").forEach(el => {
-        const key = el.dataset.loc;
-        el.textContent = Loc(key);
-    });
+		document.getElementById("promptOutput").value = message;
+
+		updatePromptNavigation();
+		resizePromptBox();
+	}
 	
-    document.querySelectorAll("[data-loc-placeholder]").forEach(el => {
-        const key = el.dataset.locPlaceholder;
-        el.placeholder = Loc(key);
-    });
+	if (relevantErrors && relevantErrors.length > 0) {
+		console.warn("Invalid settings for current role selection:", relevantErrors);
+		_showPromptUnavailable(Localization.localize("UI_PROMPT_ERROR_INVALID_SETTINGS"));
+		return;
+	}
+
+	try {
+		const { turns, insufficientPlayers } = Rules.buildPrompt(new Map(roleCounts));
+
+		if (insufficientPlayers) {
+			_showPromptUnavailable(Localization.localize("UI_PROMPT_ERROR_INSUFFICIENT_PLAYERS"));
+			return;
+		}
+
+		renderedTurns = Interpreter.renderAll(turns);
+
+		//Success path - currentTurn is preserved, only clamped if now out of range
+		currentTurn = Math.min(currentTurn, renderedTurns.length - 1);
+		if (currentTurn < 0)
+			currentTurn = 0;
+
+		renderPrompt();
+
+	} catch (error) {
+		console.error(error);
+		_showPromptUnavailable(String(error));
+	}
+}
+
+function resizePromptBox() {
+	const outputBox = document.getElementById("promptOutput");
+	outputBox.style.height = "auto";
+	outputBox.style.height = outputBox.scrollHeight + "px";
+}
+
+	/* =========================
+	   Modal overlay
+	   ========================= */
+
+	function openModalOverlay() {
+		const overlay = document.getElementById("modalOverlay");
+		overlay.classList.remove("hidden");
+	}
+
+	function closeModalOverlay() {
+		const overlay = document.getElementById("modalOverlay");
+		overlay.classList.add("hidden");
+		document.getElementById("modalOverlayContainer").replaceChildren();
+	}
+
+	/* =========================
+	   Settings
+	   ========================= */
+
+	function updateWeightGroupPercentages(wrap) {
+		const weightGroups = getItemsByWeightGroup(wrap);
+		
+		for (const items of weightGroups.values()) {
+			let sum = 0;
+			for (const item of items) {
+				const v = parseInt(item.querySelector('input[type="number"]').value, 10);
+				if (Number.isFinite(v) && v > 0) sum += v;
+			}
+			for (const item of items) {
+				const input = item.querySelector('input[type="number"]');
+				const pctEl = item.querySelector(".settings-weight-label");
+				if (!pctEl) continue;
+				const v = parseInt(input.value, 10);
+				pctEl.textContent = (!Number.isFinite(v) || v <= 0 || sum <= 0)
+					? "0%"
+					: `${Math.round((v / sum) * 1000) / 10}%`;
+			}
+		}
+	}
+
+	function updateAllWeightPercentages() {
+		document.querySelectorAll(".settings-childrenwrap").forEach(updateWeightGroupPercentages);
+	}
+
+	function refreshInputsFromState(selector, applyFn) {
+		document.querySelectorAll(selector).forEach(input => {
+			const oid = input.dataset.settingOid;
+			try {
+				applyFn(input, Settings.getValue(oid));
+			} catch {
+				//Defensive only - every input should always have a valid oid from the same tree Settings walks
+				console.warn(`Unable to refresh input for unknown setting oid: ${oid}`);
+			}
+		});
+	}
+
+	function refreshSettingsUIFromState() {
+		refreshInputsFromState('input[type="number"][data-setting-oid]', (input, v) => input.value = String(v));
+		refreshInputsFromState('input[type="checkbox"][data-setting-oid]', (input, v) => input.checked = Boolean(v));
+
+		updateAllWeightPercentages();
+		updateSettingsUI();
+	}
+
+	function updateSettingsValidationUI(errors = []) {
+		const byOid = new Map();
+		for (const err of errors) {
+			if (!byOid.has(err.oid))
+				byOid.set(err.oid, []);
+			
+			byOid.get(err.oid).push(err);
+		}
+		
+		const root = document.getElementById("settingsList");
+		let collected_errors = [];
+
+		for (const item of root.children)
+			collected_errors.push(...updateSettingsValidationNode(item, byOid));
+		
+		updateSettingsPanelValidation(collected_errors);
+	}
 	
-    document.querySelectorAll("[data-loc-html]").forEach(el => {
-        const key = el.dataset.locHtml;
-        el.innerHTML = Loc(key);
-    });
-	
-    const titleEl = document.querySelector("title[data-loc]");
-    if (titleEl) {
-        titleEl.textContent = Loc(titleEl.dataset.loc);
-    }
+	function clearValidationState(item) {
+		item.classList.remove("settings-has-errors");
+
+		const childrenWrap = item.querySelector(":scope > .settings-childrenwrap");
+
+		if (childrenWrap) {
+			for (const child of childrenWrap.children)
+				child.classList.remove("settings-weightbox-error");
+		}
+	}
+
+	function renderValueError(item, err) {
+		item.classList.add("settings-has-errors");
+	}
+
+	function renderWeightGroupError(item, err) {
+		item.classList.add("settings-has-errors");
+
+		const gid = String(err.data.weightGroupId);
+
+		const childrenWrap = item.querySelector(":scope > .settings-childrenwrap");
+		if (!childrenWrap)
+			return;
+
+		for (const child of childrenWrap.children) {
+			if (child.dataset.weightGroupId === gid)
+				child.classList.add("settings-weightbox-error");
+		}
+	}
+
+	function applyValidationError(item, err) {
+		const renderer = VALIDATION_RENDERERS[err.errorType];
+		if (renderer)
+			renderer(item, err);
+		else
+			console.warn(`Unknown validation error type '${err.errorType}'`);
+	}
+
+	function updateValidationIcon(target, errors) {
+		if (!target) return;
+		
+		target.querySelector(".settings-validation-count").textContent = String(errors.length);
+		target.style.display = errors.length ? "" : "none";
+		target._validationErrors = errors.length ? errors : null;
+	}
+
+	function updateItemValidationIcon(item, errors) {
+		const indicator = item.querySelector(":scope > .settings-row > .settings-validation-indicator");
+		updateValidationIcon(indicator, errors);
+	}
+
+	function updateSettingsPanelValidation(errors) {
+		const indicator = document.getElementById("settingsPanelValidationIndicator");
+		updateValidationIcon(indicator, errors);
+	}
+
+	function updateSettingsValidationNode(item, byOid) {
+		const propagatedErrors = [];
+
+		const childrenWrap = item.querySelector(":scope > .settings-childrenwrap");
+		if (childrenWrap) {
+			for (const child of childrenWrap.children) {
+				const childErrors = updateSettingsValidationNode(child, byOid);
+				propagatedErrors.push(...childErrors);
+			}
+		}
+
+		const ownErrors = byOid.get(item.dataset.settingOid) ?? [];
+
+		clearValidationState(item);
+
+		for (const err of ownErrors)
+			applyValidationError(item, err);
+
+		const allErrors = [ ...ownErrors, ...propagatedErrors ];
+
+		updateItemValidationIcon(item, allErrors);
+
+		return allErrors;
+	}
+
+	function updateSettingsUI() {
+		const errors = Settings.validate({ selectedRoles: roleCounts });
+		updateSettingsValidationUI(errors);
+		updatePrompt(Settings.filterRelevant(errors, roleCounts));
+	}
+
+	/* =========================
+	   Adaptive layout/scaling
+	   ========================= */
+
+	function getUsableViewport() {
+		if (window.visualViewport) {
+			return {
+				width: window.visualViewport.width,
+				height: window.visualViewport.height
+			};
+		}
+
+		return {
+			width: window.innerWidth,
+			height: window.innerHeight
+		};
+	}
+
+	function updateGUIScale() {
+		const { width, height } = getUsableViewport();
+		const minViewport = Math.min(width, height);
+
+		const MIN_SELECT_SCALE = 0.5;
+		const MAX_SELECT_SCALE = 1.0;
+		const MIN_DESCRIPTION_SCALE = 0.75;
+		const MAX_DESCRIPTION_SCALE = 1.0;
+		const SELECT_BASE_SIZE = 800;
+		const DESCRIPTION_BASE_SIZE = 800;
+
+		let select_scale = minViewport / SELECT_BASE_SIZE;
+		select_scale = Math.max(MIN_SELECT_SCALE, Math.min(MAX_SELECT_SCALE, select_scale));
+		let description_scale = minViewport / DESCRIPTION_BASE_SIZE;
+		description_scale = Math.max(MIN_DESCRIPTION_SCALE, Math.min(MAX_DESCRIPTION_SCALE, description_scale));
+
+		document.documentElement.style
+			.setProperty("--selection-tile-scale", select_scale.toFixed(3));
+
+		document.documentElement.style
+			.setProperty("--description-tile-scale", description_scale.toFixed(3));
+	}
+
+
+
+
+
+/* =========================
+   Printing
+   ========================= */
+
+function printWithHiddenElements(elements) {
+	elements.forEach(el => el.classList.add("do-not-print"));
+
+	const cleanup = () => {
+		elements.forEach(el => el.classList.remove("do-not-print"));
+		window.removeEventListener("afterprint", cleanup);
+	};
+
+	window.addEventListener("afterprint", cleanup);
+	window.print();
 }
 
-function openRoleOverlay(roleId) {
-    const overlay = document.getElementById("roleOverlay");
-    const content = document.getElementById("roleOverlayContent");
 
-    const role = ROLES[roleId];
-    if (!role) return;
 
-    content.innerHTML = "";
-    content.appendChild(createRoleDescriptionEntry(role));
 
-    overlay.classList.remove("hidden");
 
-    // Lock background scroll
-    document.body.style.overflow = "hidden";
+/* =========================
+   Day timer
+   ========================= */
+
+//Retrieves the current remaining time in seconds, derived from the target timestamp while running
+function getDayTimerRemainingSeconds() {
+	if (dayTimerState === "running" && dayTimerTargetTimestamp != null) {
+		return Math.max(0, Math.round((dayTimerTargetTimestamp - Date.now()) / 1000));
+	}
+	return dayTimerRemaining;
+}
+//Formats a whole number of seconds as MM:SS, clamped to zero
+function formatDayTimerTime(totalSeconds) {
+	const clamped = Math.max(0, Math.round(totalSeconds));
+	const minutes = Math.floor(clamped / 60);
+	const seconds = clamped % 60;
+	return String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
 }
 
-function closeRoleOverlay() {
-    const overlay = document.getElementById("roleOverlay");
-    overlay.classList.add("hidden");
+//Starts or resumes the timer from its current remaining time. No-op if already running or if there's no time left (stop first to reset)
+function startDayTimer() {
+	if (dayTimerState === "running" || dayTimerRemaining <= 0) return;
 
-    document.body.style.overflow = "";
+	dayTimerTargetTimestamp = Date.now() + dayTimerRemaining * 1000;
+	dayTimerState = "running";
+
+	ensureDayTimerInterval();
+	updateDayTimerUI();
+	saveDayTimer();
+}
+//Pauses the timer, freezing the remaining time until resumed
+function pauseDayTimer() {
+	if (dayTimerState !== "running") return;
+
+	dayTimerRemaining = getDayTimerRemainingSeconds();
+	dayTimerTargetTimestamp = null;
+	dayTimerState = "paused";
+
+	clearDayTimerInterval();
+	updateDayTimerUI();
+	saveDayTimer();
+}
+//Stops the timer and resets it back to the configured duration, ready to be started again
+function stopDayTimer() {
+	dayTimerState = "stopped";
+	dayTimerTargetTimestamp = null;
+	dayTimerRemaining = dayTimerDuration;
+
+	clearDayTimerInterval();
+	updateDayTimerUI();
+	saveDayTimer();
+}
+//Adjusts the remaining time (and the running target, if running) by a number of seconds, clamped to zero
+//While stopped, also updates the configured duration, since there's nothing else to fall back to
+function adjustDayTimer(deltaSeconds) {
+	if (dayTimerState === "running") {
+		dayTimerTargetTimestamp = Math.max(Date.now(), dayTimerTargetTimestamp + deltaSeconds * 1000);
+	} else {
+		dayTimerRemaining = Math.max(0, dayTimerRemaining + deltaSeconds);
+		if (dayTimerState === "stopped")
+			dayTimerDuration = dayTimerRemaining;
+	}
+
+	updateDayTimerUI();
+	saveDayTimer();
+}
+//Sets an explicit duration in seconds, only valid while stopped or paused (guarded by caller, but defensively re-checked here)
+function setDayTimerDuration(totalSeconds) {
+	if (dayTimerState === "running") return;
+
+	const clamped = Math.max(0, Math.round(totalSeconds));
+	dayTimerRemaining = clamped;
+	if (dayTimerState === "stopped")
+		dayTimerDuration = clamped;
+
+	updateDayTimerUI();
+	saveDayTimer();
 }
 
-function handleRoleClick(role) {
-    const selectedRoleIds = getSelectedRoleIds();
-
-    if (!roleIsAvailable(role, selectedRoleIds)) return;
-
-    const current = roleCounts.get(role.id) ?? 0;
-
-    let next;
-    if (current === 0) next = role.minCount;
-    else if (current < role.maxCount) next = current + 1;
-    else next = 0;
-
-    roleCounts.set(role.id, next);
-    updateRolesUI();
+function ensureDayTimerInterval() {
+	if (dayTimerIntervalId != null) return;
+	dayTimerIntervalId = setInterval(tickDayTimer, DAY_TIMER_TICK_INTERVAL);
 }
+
+function clearDayTimerInterval() {
+	if (dayTimerIntervalId == null) return;
+	clearInterval(dayTimerIntervalId);
+	dayTimerIntervalId = null;
+}
+//Redraw callback while running. Also detects reaching zero, at which point the timer simply stops (staying at 00:00 until the narrator presses stop/reset)
+function tickDayTimer() {
+	if (getDayTimerRemainingSeconds() > 0) {
+		updateDayTimerUI();
+		return;
+	}
+
+	dayTimerState = "stopped";
+	dayTimerTargetTimestamp = null;
+	dayTimerRemaining = 0;
+
+	clearDayTimerInterval();
+	updateDayTimerUI();
+	saveDayTimer();
+}
+
+//Refreshes the pill text, panel time, and toggle button label to match the current state
+function updateDayTimerUI() {
+	const isRunning = dayTimerState === "running";
+	const timeText = formatDayTimerTime(getDayTimerRemainingSeconds());
+
+	const pillText = document.getElementById("dayTimerPillText");
+	if (pillText)
+		pillText.textContent = (dayTimerState === "stopped") ? Localization.localize("UI_DAYTIMER_START") : timeText;
+
+	const display = document.getElementById("dayTimerDisplay");
+	if (display) {
+		//Only overwrite the field's value when it isn't the active element, so a redraw doesn't fight with an in-progress edit
+		if (document.activeElement !== display)
+			display.value = timeText;
+		display.disabled = isRunning;
+	}
+
+	const toggleBtn = document.getElementById("dayTimerToggle");
+	if (toggleBtn)
+		toggleBtn.textContent = isRunning ? "⏸" : "▶";
+}
+
+//Expands the panel, pushing page content down
+function expandDayTimer() {
+	dayTimerExpanded = true;
+	document.body.classList.add("day-timer-expanded");
+	updateDayTimerSpacer();
+}
+//Collapses back down to the floating pill
+function collapseDayTimer() {
+	dayTimerExpanded = false;
+	document.body.classList.remove("day-timer-expanded");
+	updateDayTimerSpacer();
+}
+//Resizes the layout spacer to match the expanded panel's actual rendered height (which may wrap on narrow screens), so it reserves the right amount of space
+function updateDayTimerSpacer() {
+	const spacer = document.getElementById("dayTimerSpacer");
+	const panel = document.getElementById("dayTimerPanel");
+	if (!spacer || !panel) return;
+
+	//Deferred a frame so the panel's display change (via the body class) has taken effect before measuring it
+	requestAnimationFrame(() => {
+		spacer.style.height = dayTimerExpanded ? panel.getBoundingClientRect().height + "px" : "0px";
+	});
+}
+
+
 
 /* =========================
    Event listeners
    ========================= */
 
 function onWindowResize() {
-	updateRoleScale();
+	updateGUIScale();
 	resizePromptBox();
+	updateDayTimerSpacer();
 }
 
 function onSettingsReset() {
-    initSettings();
-	saveSettingsToStorage();
+	Settings.reset();
 	refreshSettingsUIFromState();
-    updatePrompt();
 }
 
 function onSelectedRolesReset() {
-    const tiles = document.querySelectorAll(".role-tile");
-	const selectedRoleIds = getSelectedRoleIds();
-
-
+	const tiles = document.querySelectorAll(".selection-tile");
+	
 	tiles.forEach(tile => {
 		const roleId = tile.dataset.roleId;
-		roleCounts.set(roleId, 0);
+		setRoleCount(roleId, 0);
 	});
 
 	updateRolesUI();
 }
 
-/* =========================
-   Prompt handling
-   ========================= */
-
-function updatePrompt() {	
-	const outputBox = document.getElementById("promptOutput");
-	const roleList = document.getElementById("roleList");
-
-    const selectedRoles = Array.from(
-        roleList.querySelectorAll(".role-tile.selected")
-    ).map(tile => tile.dataset.roleId);
-
-    outputBox.value = buildPrompt(selectedRoles, getSettingsValues(), ROLES, getPlayerCount());
-	resizePromptBox();
+function onSelectionSearchInput() {
+	updateSelectionVisibility();
 }
 
-function resizePromptBox() {
-	const outputBox = document.getElementById("promptOutput");
-    outputBox.style.height = "auto";
-    outputBox.style.height = outputBox.scrollHeight + "px";
+function onDescriptionSearchInput() {
+	updateDescriptionVisibility();
 }
 
-/* ============================
-   Role selection tile assembly
-   ============================ */
+function onLanguageSelect(e) {
+	const lang = e.target.value;
+	Localization.setLanguage(lang);
+	//setGUILanguage(lang);	//If switching to updating page rather than reloading, this needs to be added back
+	window.location.reload();
+}
 
-function buildRoleSelection() {
-	const LONG_PRESS_DELAY = 300; // ms
+function onOpenModalRoleDescription(role) {
+	buildModalRoleDescription(role);
+	openModalOverlay();
+}
+
+function onCloseModalOverlay() {
+	closeModalOverlay();
+}
+
+function onSelectionTileClicked(role) {
+	if (!Roles.isSelectable(role, roleCounts)) return;
+
+	const current = getRoleCount(role.id);
 	
-	let activeTile = null;
-	let activePointerId = null;
+	const { minCount, maxCount } = Roles.getMinMax(role);
+	let next;
+	if (current === 0)
+		next = minCount;
+	else if (current < maxCount)
+		next = current + 1;
+	else
+		next = 0;
 
-    const roleList = document.getElementById("roleList");
+	setRoleCount(role.id, next);
+	updateRolesUI();
+}
+
+function onTagFilterClicked(e) {
+	const tile = e.currentTarget;
+	toggleTagFilterTileState(tile);
+	saveTagFilters();
+}
+
+function onPrintRulesClicked(e) {
+	const toHide = document.querySelectorAll("h1, .role-search, .panel-header, #languageSelector, .panel:not(.panel-rules)");
+	printWithHiddenElements([...toHide]);
+}
+
+function onPrintDescriptionsClicked(e) {
+	const toHide = document.querySelectorAll("h1, .role-search, .panel-header, #languageSelector, .panel:not(.panel-role-descriptions)");
+	printWithHiddenElements([...toHide]);
+}
+
+function onSettingsBranchClicked(e, childrenWrap) {
+	if (e.target.closest("button, input, select, textarea, label"))
+		return;
+
+	e.preventDefault();
+	e.stopPropagation();
+
+	const row = e.currentTarget;
+	const disclosure = row.querySelector(".settings-row-disclosure");
+
+	const collapsed = childrenWrap.dataset.collapsed === "true";
+	childrenWrap.dataset.collapsed = collapsed ? "false" : "true";
+	childrenWrap.style.display = collapsed ? "" : "none";
+	disclosure.textContent = collapsed ? "▼" : "▶";
+	disclosure.dataset.expanded = collapsed ? "true" : "false";
+}
+
+function onErrorIndicatorClicked(e) {
+	e.stopPropagation();
+
+	const errors = e.currentTarget._validationErrors ?? [];
+
+	buildModalErrorPanel(errors);
+	openModalOverlay();
+}
+
+function onNavigationButtonClicked(e) {
+	const target = e.currentTarget;
+	const action = target.dataset.action;
 	
-    getSortedRoles().forEach(role => {
-		let pressTimer = null;
-		let longPressTriggered = false;
-		let startX, startY;
-		
-		roleCounts.set(role.id, 0);
-		
-        const tile = createRoleRootEl(role, "role-tile unselected", "tiles");
-
-        const icon = createRoleIcon(role);
-
-        const label = document.createElement("div");
-        label.className = "role-tile-name";
-        label.textContent = Loc(role.nameKey);
-		
-		const count = document.createElement("div");
-		count.className = "role-count";
-		count.style.display = "none";
-
-        tile.append(icon, label, count);
-
-		tile.addEventListener("pointerdown", (e) => {
-			activeTile = tile;
-			activePointerId = e.pointerId;
-			startX = e.clientX;
-			startY = e.clientY;
-
-			longPressTriggered = false;
-
-			pressTimer = setTimeout(() => {
-				longPressTriggered = true;
-				openRoleOverlay(role.id);
-			}, LONG_PRESS_DELAY);
-		});
-		
-		tile.addEventListener("pointermove", (e) => {
-			if (!pressTimer) return;
-
-			const dx = Math.abs(e.clientX - startX);
-			const dy = Math.abs(e.clientY - startY);
-
-			if (dx > 10 || dy > 10) {
-				clearTimeout(pressTimer);
-			}
-		});
-
-		tile.addEventListener("pointerup", (e) => {
-			if (e.pointerId !== activePointerId) return;
-			
-			clearTimeout(pressTimer);
-			
-			if (tile !== activeTile) return;
-
-			if (!longPressTriggered) {
-				handleRoleClick(role);
-			}
-			
-			activeTile = null;
-			activePointerId = null;
-		});
-
-		tile.addEventListener("pointerleave", () => {
-			clearTimeout(pressTimer);
-		});
-
-		tile.addEventListener("pointercancel", () => {
-			clearTimeout(pressTimer);
-		});
-
-        roleList.appendChild(tile);
-    });
-}
-
-function buildRoleFilters() {
-    const container = document.getElementById("roleFilterContainer");
-    if (!container) return;
-
-    container.innerHTML = "";
-
-    TAG_FILTER_GROUPS.forEach(group => {
-        // --- Section wrapper ---
-		const section = document.createElement("fieldset");
-		section.className = "ruleset-group";
-
-		const legend = document.createElement("legend");
-		legend.className = "ruleset-group-legend";
-		legend.textContent = Loc(group.label);
-
-		section.appendChild(legend);
-
-        // --- Tile container ---
-        const tileContainer = document.createElement("div");
-        tileContainer.className = "ruleset-group-tiles";
-
-        group.tags.forEach(f => {
-            const tile = document.createElement("div");
-            tile.className = "ruleset-tile";
-            tile.dataset.tag = f.tag;
-            tile.dataset.group = group.id;
-/*
-			const icon = document.createElement("div");
-			icon.className = "ruleset-icon"; // styled similarly to role-icon
-			tile.prepend(icon);
-*/
-            const label = document.createElement("div");
-            label.className = "ruleset-name";
-            label.textContent = Loc(f.label);
-
-            tile.appendChild(label);
-
-            // Set default state
-            setRulesetTileState(tile, !!f.default);
-
-            tile.addEventListener("click", () => {
-                const isSelected = tile.classList.contains("selected");
-                setRulesetTileState(tile, !isSelected);
-
-                applyRoleTileFilter();
-            });
-
-            tileContainer.appendChild(tile);
-        });
-
-        section.appendChild(tileContainer);
-        container.appendChild(section);
-    });
-}
-
-/* =========================
-   Role description assembly
-   ========================= */
-
-function getDescriptionTeamText(role) {
-    let team = Loc(role.team);
-	
-    if (team && role.tags?.includes("CAN_CHANGE_ALIGNMENT")) {
-        team += Loc("TEAM_VARIABLE_SUFFIX");
-    }
-
-    return team;
-}
-
-function getDescriptionRolePhase(role) {
-	switch (role.phase) {
-		case "NIGHT":
-			return Loc("ROLE_PHASE_NIGHT");
-		case "DAY":
-			return Loc("ROLE_PHASE_DAY");
-		case "DUSK":
-			return Loc("ROLE_PHASE_DUSK");
+	switch (action) {
+		case "first":
+			currentTurn = 0;
+			break;
+		case "prev":
+			currentTurn = Math.max(0, currentTurn-1);
+			break;
+		case "next":
+			currentTurn = Math.min(renderedTurns.length-1, currentTurn+1);
+			break;
+		case "last":
+			currentTurn = Math.max(0, renderedTurns.length-1);
+			break;
 	}
 	
-	console.warn("Unknown phase " + role.phase + " for role " + role.id + " when fetching description");
-	return "";
+	renderPrompt();
 }
 
-function getDescriptionWinConditionText(role) {
-    const roleKey = `UI_WINCONDITION_${role.id}`;
-    if (hasLoc(roleKey)) {
-        return Loc(roleKey);
-    }
-
-    const teamKey = `UI_WINCONDITION_${role.team}`;
-    let base;
-
-    if (hasLoc(teamKey)) {
-        base = Loc(teamKey);
-    } else {
-        console.warn(`Missing team win condition: ${teamKey} (role: ${role.id})`);
-        base = "";
-    }
-
-    if (role.tags?.includes("CAN_CHANGE_ALIGNMENT")) {
-        base += (base ? " " : "") + Loc("UI_WINCONDITION_VARIABLE_NOTE");
-    }
-
-    return base;
+function onNavigationModeChanged(e) {
+	showSingleTurn = e.currentTarget.checked;
+	renderPrompt();
 }
 
-function buildRoleDescriptions() {
-    const roleDescriptionList = document.getElementById("roleDescriptionList");
-
-    getSortedRoles().forEach(role => {
-		const entry = createRoleDescriptionEntry(role);
-		roleDescriptionList.appendChild(entry);
-    });
+function onTokenDescriptionSearchInput() {
+	updateTokenDescriptionVisibility();
 }
 
-function createRoleDescriptionEntry(role) {
-    const entry = createRoleRootEl(role, "role-entry", "descriptions");
-
-    const icon = createRoleIcon(role);
-
-    const info = document.createElement("div");
-    info.className = "role-info";
-
-    const name = document.createElement("div");
-    name.className = "role-description-name";
-    name.textContent = Loc(role.nameKey, true);
-
-    const header = document.createElement("div");
-    header.className = "role-header";
-    header.append(name);
-
-    const phase = document.createElement("div");
-    phase.className = "role-phase";
-    phase.textContent = getDescriptionRolePhase(role);
-
-    const team = document.createElement("div");
-    team.className = "role-team";
-    team.textContent = Loc("TEAM_PREFIX") + ": " + getDescriptionTeamText(role);
-    if (role.tags?.includes("CAN_CHANGE_ALIGNMENT")) {
-        team.classList.add("team-variable");
-    }
-
-    const meta = document.createElement("div");
-    meta.className = "role-meta";
-    meta.append(phase, team);
-
-    const ability = document.createElement("div");
-    ability.className = "role-ability";
-    ability.textContent = Loc(role.abilityKey);
-
-    const winCondition = document.createElement("div");
-    winCondition.className = "win-condition";
-    winCondition.textContent = getDescriptionWinConditionText(role);
-
-    const rules = document.createElement("div");
-    rules.className = "role-rules";
-    rules.append(ability, winCondition);
-
-    info.append(header, meta, rules);
-    entry.append(icon, info);
-
-    return entry;
+function onPrintTokensClicked(e) {
+	const toHide = document.querySelectorAll("h1, .role-search, .panel-header, #languageSelector, .panel:not(.panel-token-descriptions)");
+	printWithHiddenElements([...toHide]);
 }
 
-
-/* =========================
-   Settings assembly (NEW)
-   ========================= */
-
-/**
- * We render the settings tree using 3 visual node types:
- *
- * 1) header nodes: collapsible groups, slightly heavier than rows
- * 2) setting rows (leaf): label + input + metadata
- * 3) setting rows (branch): same as leaf, plus disclosure + children container
- *
- * IMPORTANT:
- * - We do NOT use .panel for settings nodes anymore.
- * - Only the main Settings panel (in index.html) remains a panel.
- */
-
-function refreshSettingsUIFromState() {
-    // Number inputs (weight + percent)
-    const numInputs = document.querySelectorAll('input[type="number"][data-setting-oid]');
-    numInputs.forEach(input => {
-        const oid = input.dataset.settingOid;
-        const v = getSettingByOid(oid);
-
-        // If v is null/undefined, keep the current input value
-        if (v === null || v === undefined) return;
-
-        input.value = String(v);
-    });
-
-    // Toggles (checkboxes)
-    const checkInputs = document.querySelectorAll('input[type="checkbox"][data-setting-oid]');
-    checkInputs.forEach(input => {
-        const oid = input.dataset.settingOid;
-        const v = getSettingByOid(oid);
-
-        if (v === null || v === undefined) return;
-
-        input.checked = Boolean(v);
-    });
-
-    // Update derived UI
-    updateSettingsValidationUI();
-    updateWeightPercentages();
-    updatePrompt();
+function onDayTimerPillClicked() {
+	expandDayTimer();
 }
 
-/* -------------------------
-   Helpers: element builders
-   ------------------------- */
-
-function createSettingRowEl() {
-    const row = document.createElement("div");
-    row.className = "setting-row2";
-    return row;
+function onDayTimerCollapseClicked() {
+	collapseDayTimer();
 }
 
-function createSettingLabelEl(text) {
-    const label = document.createElement("div");
-    label.className = "setting-label2";
-    label.textContent = text;
-    return label;
+function onDayTimerToggleClicked() {
+	if (dayTimerState === "running")
+		pauseDayTimer();
+	else
+		startDayTimer();
 }
 
-function createSettingControlEl() {
-    const wrap = document.createElement("div");
-    wrap.className = "setting-control2";
-    return wrap;
+function onDayTimerStopClicked() {
+	stopDayTimer();
 }
 
-function createSettingChildrenWrap(depth) {
-    const wrap = document.createElement("div");
-    wrap.className = "setting-children2";
-    wrap.dataset.depth = String(depth);
-    return wrap;
+function onDayTimerAdjustClicked(deltaSeconds) {
+	adjustDayTimer(deltaSeconds);
 }
+//Parses the typed MM:SS value on commit (blur/enter). Reverts to the current value on anything unparseable, rather than guessing
+function onDayTimerDisplayChange(e) {
+	if (dayTimerState === "running") return;
 
-function createSettingDisclosureButton() {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "setting-disclosure2";
-    btn.textContent = "▶";
-    btn.setAttribute("aria-label", "Toggle");
-    return btn;
-}
+	const match = e.target.value.trim().match(/^(\d{1,3}):([0-5]?\d)$/);
 
-function createSettingErrorBox() {
-    const box = document.createElement("div");
-    box.className = "setting-errors";
-    box.style.display = "none";
-    return box;
-}
-
-function setSettingErrors(errorBox, errors) {
-    if (!errors || errors.length === 0) {
-        errorBox.style.display = "none";
-        errorBox.innerHTML = "";
-        return;
-    }
-
-    errorBox.style.display = "";
-    errorBox.innerHTML = "";
-
-    for (const err of errors) {
-        const line = document.createElement("div");
-        line.className = "setting-error-line";
-        line.textContent = Loc(err.messageKey);
-        errorBox.appendChild(line);
-    }
-}
-
-/* -------------------------
-   Input creators (unchanged)
-   ------------------------- */
-
-function getParentOid(oid) {
-    const i = oid.lastIndexOf(".");
-    if (i === -1) return "root";
-    return oid.slice(0, i);
-}
-
-function updateWeightPercentages() {
-    const inputs = Array.from(document.querySelectorAll(
-        'input[data-weight-group-id][data-setting-oid]'
-    ));
-
-    // groupKey -> inputs[]
-    const groups = new Map();
-
-    for (const input of inputs) {
-        const groupId = input.dataset.weightGroupId;
-        const oid = input.dataset.settingOid;
-
-        if (!groupId || !oid) continue;
-
-        const parentOid = getParentOid(oid);
-        const key = `${parentOid}::${groupId}`;
-
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(input);
-    }
-
-    for (const groupInputs of groups.values()) {
-        let sum = 0;
-
-        for (const input of groupInputs) {
-            const v = parseInt(input.value, 10);
-            if (Number.isFinite(v) && v > 0) sum += v;
-        }
-
-        for (const input of groupInputs) {
-            const oid = input.dataset.settingOid;
-            const pctEl = document.querySelector(
-                `.setting-weight-pct[data-setting-oid="${oid}"]`
-            );
-            if (!pctEl) continue;
-
-            const v = parseInt(input.value, 10);
-
-            if (!Number.isFinite(v) || v <= 0 || sum <= 0) {
-                pctEl.textContent = "0%";
-            } else {
-                pctEl.textContent = `${Math.round((v / sum) * 1000) / 10}%`;
-            }
-        }
-    }
-}
-
-function createWeightPercentLabel(node) {
-    const pct = document.createElement("span");
-    pct.className = "setting-weight-pct";
-    pct.dataset.settingOid = node.oid;
-    pct.textContent = "";
-    return pct;
-}
-
-function createPercentUnitLabel(node) {
-    const pct = document.createElement("span");
-    pct.className = "setting-percent-unit";
-    pct.dataset.settingOid = node.oid;
-    pct.textContent = "%";
-    return pct;
-}
-
-function createPercentInput(node) {
-    const input = document.createElement("input");
-    input.type = "number";
-    input.min = "0";
-    input.max = "100";
-    input.step = "1";
-    input.value = String(getSettingByOid(node.oid) ?? node.defaultValue ?? 0);
-
-    input.dataset.settingOid = node.oid;
-
-    input.addEventListener("input", () => {
-        let v = parseInt(input.value, 10);
-        if (!Number.isFinite(v) || v < 0) v = 0;
-        if (v > 100) v = 100;
-
-        input.value = String(v);
-
-        setSettingByOid(node.oid, v);
-
-        updateSettingsValidationUI();
-        updatePrompt();
-    });
-
-    return input;
-}
-
-function createWeightInput(node) {
-    const input = document.createElement("input");
-    input.type = "number";
-    input.min = "0";
-    input.step = "1";
-    input.value = String(getSettingByOid(node.oid) ?? node.defaultValue ?? 0);
-
-    input.dataset.settingOid = node.oid;
-    input.dataset.weightGroupId = String(node.weightGroupId ?? "");
-
-    input.addEventListener("input", () => {
-        let v = parseInt(input.value, 10);
-        if (!Number.isFinite(v) || v < 0) v = 0;
-
-        input.value = String(v);
-
-        setSettingByOid(node.oid, v);
-
-        updateSettingsValidationUI();
-        updateWeightPercentages();
-        updatePrompt();
-    });
-
-    return input;
-}
-
-function createToggleInput(node) {
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = Boolean(getSettingByOid(node.oid) ?? node.defaultValue ?? false);
-	input.dataset.settingOid = node.oid;
-
-    input.addEventListener("change", () => {
-        setSettingByOid(node.oid, input.checked);
-
-        updateSettingsValidationUI();
-        updatePrompt();
-    });
-
-    return input;
-}
-
-/* -------------------------
-   Row control assembly
-   ------------------------- */
-
-function buildSettingControlForNode(node) {
-    const control = document.createElement("div");
-    control.className = "setting-control2";
-
-    const meta = document.createElement("span");
-    meta.className = "setting-meta2";
-
-    const inputWrap = document.createElement("div");
-    inputWrap.className = "setting-input2";
-
-    // LABEL: no control
-    if (node.type === "label" || node.type === "separator") {
-        meta.textContent = "";
-        control.append(meta, inputWrap);
-        return control;
-    }
-
-    // WEIGHT
-	if (node.type === "weight") {
-		const pct = createWeightPercentLabel(node);
-		pct.classList.add("setting-meta2"); // use the same meta column sizing
-
-		const input = createWeightInput(node);
-
-		const weightWrap = document.createElement("div");
-		weightWrap.className = "setting-weight-field2";
-
-		const icon = document.createElement("span");
-		icon.className = "setting-weight-icon2";
-		icon.textContent = "⚖"; // can be changed later
-
-		weightWrap.append(icon, input);
-
-		control.append(pct, inputWrap);
-		inputWrap.appendChild(weightWrap);
-
-		return control;
+	if (!match) {
+		updateDayTimerUI();	//Invalid input, revert the field back to the current value
+		return;
 	}
 
-    // PERCENT
-	if (node.type === "percent") {
-		meta.textContent = ""; // no prefix
-
-		const input = createPercentInput(node);
-
-		const percentWrap = document.createElement("div");
-		percentWrap.className = "setting-percent-field2";
-		percentWrap.appendChild(input);
-
-		control.append(meta, inputWrap);
-		inputWrap.appendChild(percentWrap);
-
-		return control;
-	}
-
-    // TOGGLE
-    if (node.type === "toggle") {
-        meta.textContent = "";
-
-        const input = createToggleInput(node);
-
-        control.append(meta, inputWrap);
-        inputWrap.appendChild(input);
-
-        return control;
-    }
-
-    // Unknown type
-    meta.textContent = "";
-    control.append(meta, inputWrap);
-    return control;
+	const minutes = parseInt(match[1], 10);
+	const seconds = parseInt(match[2], 10);
+	setDayTimerDuration(minutes * 60 + seconds);
 }
 
-
-/* -------------------------
-   Render: setting row
-   ------------------------- */
-
-function renderSettingRow(node, depth) {
-    const hasChildren = Boolean(node.children && node.children.length);
-	const isSeparator = node.type === "separator";
-	const isLabelOnly = node.type === "label";
-
-    const container = document.createElement("div");
-	container.className = isSeparator ? "setting-item2 setting-separator-item2" : "setting-item2";
-    container.dataset.settingOid = node.oid;
-    container.dataset.depth = String(depth);
-    container.dataset.hasChildren = hasChildren ? "true" : "false";
-
-    const row = createSettingRowEl();
-
-	// SEPARATOR: special row layout
-	if (isSeparator) {
-		const spacer = document.createElement("div");
-		spacer.className = "setting-disclosure-spacer2";
-		row.appendChild(spacer);
-
-		const line = document.createElement("div");
-		line.className = "setting-separator-line2";
-
-		// line spans label+control area
-		row.appendChild(line);
-
-	} else {
-		// Left: disclosure spacer / button
-		if (hasChildren && !isSeparator) {
-			const disclosure = createSettingDisclosureButton();
-			disclosure.dataset.expanded = "false";
-			row.appendChild(disclosure);
-		} else {
-			const spacer = document.createElement("div");
-			spacer.className = "setting-disclosure-spacer2";
-			row.appendChild(spacer);
-		}
-
-		// Label
-		const labelEl = createSettingLabelEl(Loc(node.textKey, true));
-		applyTextStyleClasses(labelEl, node);
-		row.appendChild(labelEl);
-
-		// Control (empty for label nodes)
-		row.appendChild(buildSettingControlForNode(node));
-	}
-
-    container.appendChild(row);
-
-    // Error box belongs to the node container
-	if (!isSeparator) {
-		const errorBox = createSettingErrorBox();
-		container.appendChild(errorBox);
-	}
-
-    // Children (if any)
-    if (hasChildren && !isSeparator) {
-        const childrenWrap = createSettingChildrenWrap(depth + 1);
-        childrenWrap.style.display = "none"; // collapsed by default
-        childrenWrap.dataset.collapsed = "true";
-
-        for (const child of node.children) {
-            childrenWrap.appendChild(renderSettingNode(child, depth + 1));
-        }
-
-        container.appendChild(childrenWrap);
-
-        // Wire disclosure behavior
-        const disclosure = row.querySelector(".setting-disclosure2");
-        disclosure.addEventListener("click", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const collapsed = childrenWrap.dataset.collapsed === "true";
-            childrenWrap.dataset.collapsed = collapsed ? "false" : "true";
-            childrenWrap.style.display = collapsed ? "" : "none";
-            disclosure.textContent = collapsed ? "▼" : "▶";
-            disclosure.dataset.expanded = collapsed ? "true" : "false";
-        });
-
-        // Optional: clicking row toggles too, but not when interacting with input
-        row.addEventListener("click", (e) => {
-            if (e.target.closest("input, button, select, textarea, label")) return;
-            disclosure.click();
-        });
-    }
-
-    return container;
+function onRerandomizeClicked(e) {
+	Rules.rerandomize();
+	updatePrompt();
 }
-
-/* -------------------------
-   Render: header group
-   ------------------------- */
-
-function renderSettingHeaderGroup(node, depth) {
-    const hasChildren = Boolean(node.children && node.children.length);
-
-    const group = document.createElement("div");
-    group.className = "setting-group2";
-    group.dataset.settingOid = node.oid;
-    group.dataset.depth = String(depth);
-
-    const header = document.createElement("div");
-    header.className = "setting-group-header2";
-
-    const disclosure = document.createElement("span");
-    disclosure.className = "setting-group-toggle2";
-    disclosure.textContent = hasChildren ? "▼" : "";
-
-    const title = document.createElement("div");
-    title.className = "setting-group-title2";
-	title.textContent = Loc(node.textKey, true);
-	applyTextStyleClasses(title, node);
-
-    header.append(disclosure, title);
-    group.appendChild(header);
-
-    const body = document.createElement("div");
-    body.className = "setting-group-body2";
-
-    // Error box for group-level validation (weight group sum = 0 etc.)
-    const errorBox = createSettingErrorBox();
-    body.appendChild(errorBox);
-
-    if (hasChildren) {
-        for (const child of node.children) {
-            body.appendChild(renderSettingNode(child, depth + 1));
-        }
-    }
-
-    group.appendChild(body);
-
-    // Collapse behavior for header groups
-    if (hasChildren) {
-        header.addEventListener("click", (e) => {
-            if (e.target.closest("input, button, select, textarea, label")) return;
-
-            const collapsed = body.style.display === "none";
-            body.style.display = collapsed ? "" : "none";
-            disclosure.textContent = collapsed ? "▼" : "▶";
-        });
-
-		// Default: collapsed
-		disclosure.textContent = "▶";
-		body.style.display = "none";
-    }
-
-    return group;
-}
-
-/* -------------------------
-   Render: node dispatcher
-   ------------------------- */
-
-function renderSettingNode(node, depth = 0) {
-    // Header nodes are their own grouping blocks
-    if (node.type === "header") {
-        return renderSettingHeaderGroup(node, depth);
-    }
-
-    // Everything else is a row (leaf or branch)
-    return renderSettingRow(node, depth);
-}
-
-/* -------------------------
-   Render: weight group borders
-   ------------------------- */
-
-function updateWeightGroupRowBorders() {
-    const inputs = Array.from(document.querySelectorAll(
-        'input[data-weight-group-id][data-setting-oid]'
-    ));
-
-    // groupKey -> inputs[]
-    const groups = new Map();
-
-    for (const input of inputs) {
-        const groupId = input.dataset.weightGroupId;
-        const oid = input.dataset.settingOid;
-
-        if (!groupId || !oid) continue;
-
-        const parentOid = getParentOid(oid);
-        const key = `${parentOid}::${groupId}`;
-
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(input);
-    }
-
-    // Clear old markers
-    document.querySelectorAll(".setting-item2").forEach(el => {
-        el.classList.remove(
-            "wg-box",
-            "wg-box-first",
-            "wg-box-middle",
-            "wg-box-last"
-        );
-    });
-
-    for (const groupInputs of groups.values()) {
-        const items = groupInputs
-            .map(input => input.closest(".setting-item2"))
-            .filter(Boolean);
-
-        // unique
-        const unique = [];
-        const seen = new Set();
-        for (const item of items) {
-            if (seen.has(item)) continue;
-            seen.add(item);
-            unique.push(item);
-        }
-
-        // If only 1 item, no point boxing it
-        if (unique.length <= 1) continue;
-
-        // Mark
-        for (const item of unique) item.classList.add("wg-box");
-
-        unique[0].classList.add("wg-box-first");
-        unique[unique.length - 1].classList.add("wg-box-last");
-
-        for (let i = 1; i < unique.length - 1; i++) {
-            unique[i].classList.add("wg-box-middle");
-        }
-    }
-}
-
-
-/* -------------------------
-   Build UI
-   ------------------------- */
-
-function buildSettingsUI() {
-    const settingsList = document.getElementById("settings-list");
-    if (!settingsList) return;
-
-    settingsList.innerHTML = "";
-
-    // Root nodes in SETTINGS_TREE
-    for (const rootNode of SETTINGS_TREE) {
-        settingsList.appendChild(renderSettingNode(rootNode, 0));
-    }
-
-    // Ensure UI state is correct
-    updateSettingsValidationUI();
-    updateWeightPercentages();
-	updateWeightGroupRowBorders();
-}
-
-/* -------------------------
-   Validation UI hookup
-   ------------------------- */
-
-function updateSettingsValidationUI() {
-    const errors = validateSettings();
-
-    // Group by oid
-    const byOid = new Map();
-    for (const err of errors) {
-        if (!byOid.has(err.oid)) byOid.set(err.oid, []);
-        byOid.get(err.oid).push(err);
-    }
-
-    // Clear all error boxes
-    document.querySelectorAll(".setting-item2, .setting-group2").forEach(container => {
-        const box = container.querySelector(":scope > .setting-errors") ||
-                    container.querySelector(".setting-group-body2 > .setting-errors");
-        if (box) setSettingErrors(box, []);
-    });
-
-    // Apply errors
-    for (const [oid, errs] of byOid.entries()) {
-        const container =
-            document.querySelector(`.setting-item2[data-setting-oid="${oid}"]`) ||
-            document.querySelector(`.setting-group2[data-setting-oid="${oid}"]`);
-
-        if (!container) continue;
-
-        // setting rows: direct child
-        let box = container.querySelector(":scope > .setting-errors");
-
-        // header groups: error box is inside body
-        if (!box) box = container.querySelector(".setting-group-body2 > .setting-errors");
-
-        if (box) setSettingErrors(box, errs);
-    }
-
-    updateWeightPercentages();
-}
-
 
 
 
 
 /* =========================
-   Panel collapse behavior
+   Initialization
    ========================= */
 
-function initPanels() {
-    document.querySelectorAll(".panel").forEach(panel => {
-        const header = panel.querySelector(".panel-header");
-        const toggle = panel.querySelector(".panel-toggle");
-        const content = panel.querySelector(".panel-content");
-
-        if (!header || !toggle || !content) return;
-
-        header.addEventListener("click", (e) => {
-			if (e.target.closest("input, button, select, textarea, label")) return;
-            const collapsed = content.style.display === "none";
-            content.style.display = collapsed ? "" : "none";
-            toggle.textContent = collapsed ? "−" : "+";
-        });
-    });
-
-    document
-        .querySelectorAll(".panel[data-collapsed='true']")
-        .forEach(panel => {
-            const content = panel.querySelector(".panel-content");
-            const toggle = panel.querySelector(".panel-toggle");
-            if (content) content.style.display = "none";
-            if (toggle) toggle.textContent = "+";
-        });
-}
-
-/* =========================
-   Responsive scaling
-   ========================= */
-
-function getUsableViewport() {
-    if (window.visualViewport) {
-        return {
-            width: window.visualViewport.width,
-            height: window.visualViewport.height
-        };
-    }
-
-    return {
-        width: window.innerWidth,
-        height: window.innerHeight
-    };
-}
-
-function updateRoleScale() {
-    const { width, height } = getUsableViewport();
-    const minViewport = Math.min(width, height);
-
-	const MIN_SELECT_SCALE = 0.5;
-	const MAX_SELECT_SCALE = 1.0;
-	const MIN_DESCRIPTION_SCALE = 0.75;
-	const MAX_DESCRIPTION_SCALE = 1.0;
-	const SELECT_BASE_SIZE = 800;
-	const DESCRIPTION_BASE_SIZE = 800;
-
-    let select_scale = minViewport / SELECT_BASE_SIZE;
-    select_scale = Math.max(MIN_SELECT_SCALE, Math.min(MAX_SELECT_SCALE, select_scale));
-    let description_scale = minViewport / DESCRIPTION_BASE_SIZE;
-    description_scale = Math.max(MIN_DESCRIPTION_SCALE, Math.min(MAX_DESCRIPTION_SCALE, description_scale));
-
-    document.documentElement.style
-        .setProperty("--tile-scale", select_scale.toFixed(3));
-
-    document.documentElement.style
-        .setProperty("--description-tile-scale", description_scale.toFixed(3));
-		
-	const debugEl = document.getElementById("scaleDebugValue");
-	if (debugEl) {
-		debugEl.textContent = `${select_scale.toFixed(3)} / ${description_scale.toFixed(3)} | ${Math.round(width)}×${Math.round(height)}`;
-	}
-}
-
-/* =========================
-   Search role function
-   ========================= */
-
-function filterRoles(query, containerId) {
-    const q = query.trim().toLowerCase();
-
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
-    container
-        .querySelectorAll("[data-role-name]")
-        .forEach(el => {
-            el.classList.toggle(
-                "role-hidden",
-                !el.dataset.roleName.includes(q)
-            );
-        });
-		
-	applySelectionFilter();
-	applyRoleTileFilter();
-}
-
-/* =========================
-   Role selection filter (only show selected tags)
-   ========================= */
-   
-function applyRoleTileFilter() {
-    const search = document
-        .getElementById("roleSelectionSearchField")
-        .value
-        .toLowerCase()
-        .trim();
-
-    const groupedFilters = getSelectedTagFilters();
-
-    document.querySelectorAll(".role-tile").forEach(tile => {
-        const roleId = tile.dataset.roleId;
-        const role = ROLES[roleId];
-
-        const isSelected = (roleCounts.get(roleId) ?? 0) > 0;
-
-        const matchesSearch =
-            !search || tile.dataset.roleName.includes(search);
-
-        const matchesTag =
-            roleMatchesAllFilterGroups(role, groupedFilters);
-
-        if (search) {
-            // Strict search mode (no selection override)
-            tile.classList.toggle("role-filtered-out", !matchesSearch);
-            tile.classList.remove("role-hidden");
-        } else {
-            // Selection overrides tag filtering
-            const visible = matchesTag || isSelected;
-
-            tile.classList.toggle("role-hidden", !visible);
-            tile.classList.remove("role-filtered-out");
-        }
-    });
-}
-
-/* =========================
-   Role description selection filter (only show selected roles)
-   ========================= */
-   
-function applySelectionFilter() {
-    const input = document.getElementById("roleDescriptionSearchField");
-    const query = input.value.trim();
-
-    // If search is active → do nothing (search has priority)
-    if (query.length > 0) {
-        document.querySelectorAll("#roleDescriptionList [data-role-id]")
-            .forEach(el => el.classList.remove("role-filtered-out"));
-        return;
-    }
-
-    // Check if any roles are selected
-    let hasSelection = false;
-    for (const count of roleCounts.values()) {
-        if (count > 0) {
-            hasSelection = true;
-            break;
-        }
-    }
-
-    const entries = document.querySelectorAll("#roleDescriptionList [data-role-id]");
-
-    entries.forEach(el => {
-        const roleId = el.dataset.roleId;
-
-        const visible = !hasSelection || (roleCounts.get(roleId) ?? 0) > 0;
-
-        el.classList.toggle("role-filtered-out", !visible);
-    });
-}
-
-/* =========================
-   Print buttons
-   ========================= */
-
-function printWithHiddenElements(elements) {
-    elements.forEach(el => el.classList.add("do-not-print"));
-
-    const cleanup = () => {
-        elements.forEach(el => el.classList.remove("do-not-print"));
-        window.removeEventListener("afterprint", cleanup);
-    };
-
-    window.addEventListener("afterprint", cleanup);
-    window.print();
-}
-
-function printRules() {
-    const toHide = document.querySelectorAll(
-        "h1, .role-search, .panel-header, .panel:not(.panel-rules)"
-    );
-    printWithHiddenElements([...toHide]);
-}
-
-function printRoleDescriptions() {
-    const toHide = document.querySelectorAll(
-        "h1, .role-search, .panel-header, .panel:not(.panel-role-descriptions)"
-    );
-    printWithHiddenElements([...toHide]);
-}
-
-/* =========================
-   Init
-   ========================= */
-
-function initGUI() {
-	const lang = loadLanguage()
-	setLocalizationLanguage(lang);
-	const selector = document.getElementById("languageSelector").value = lang;
-	
-	localizeStaticContent();
-	buildRoleSelection();
-	loadRolesFromStorage();
-	buildRoleFilters();
-	buildRoleDescriptions();
-	buildSettingsUI();
-	initPanels();
-	
-	updateRoleScale();
-	
+//Assigns listener functions to fixed GUI elements. Dynamic elements may have listeners assigned at creation
+function initGUIListeners() {
+	//May trigger twice in some cases, but necessary for cross-device support
 	window.addEventListener("resize", onWindowResize);
 	window.visualViewport?.addEventListener("resize", onWindowResize);
 	
-	document.getElementById("btn-reset-settings")?.addEventListener("click", onSettingsReset);
-	document.getElementById("btn-reset-roles")?.addEventListener("click", onSelectedRolesReset);
-	document.querySelectorAll(".role-filter input").forEach(cb => { cb.addEventListener("change", applyRoleTileFilter); });	
-	document.getElementById("roleOverlayClose").addEventListener("click", closeRoleOverlay);
-	document.querySelector(".role-overlay-backdrop").addEventListener("click", closeRoleOverlay);
-	document.getElementById("languageSelector").addEventListener("change", (e) => { setLanguage(e.target.value); });
+	document.getElementById("btn-reset-settings").addEventListener("click", onSettingsReset);
+	document.getElementById("btn-reset-roles").addEventListener("click", onSelectedRolesReset);
+	document.getElementById("modalOverlayClose").addEventListener("click", onCloseModalOverlay);
+	document.querySelector(".modal-overlay-backdrop").addEventListener("click", onCloseModalOverlay);
+	document.getElementById("languageSelector").addEventListener("change", onLanguageSelect);
+	document.getElementById("roleSelectionSearchField").addEventListener("input", onSelectionSearchInput);
+	document.getElementById("roleDescriptionSearchField").addEventListener("input", onDescriptionSearchInput);
+	document.getElementById("btn-print-rules").addEventListener("click", onPrintRulesClicked);
+	document.getElementById("btn-print-descriptions").addEventListener("click", onPrintDescriptionsClicked);
+	document.getElementById("promptFirst").addEventListener("click", onNavigationButtonClicked);
+	document.getElementById("promptPrevious").addEventListener("click", onNavigationButtonClicked);
+	document.getElementById("promptNext").addEventListener("click", onNavigationButtonClicked);
+	document.getElementById("promptLast").addEventListener("click", onNavigationButtonClicked);
+	document.getElementById("promptSingleTurn").addEventListener("change", onNavigationModeChanged);
+	document.getElementById("tokenDescriptionSearchField").addEventListener("input", onTokenDescriptionSearchInput);
+	document.getElementById("btn-print-tokens").addEventListener("click", onPrintTokensClicked);
+
+	document.getElementById("dayTimerPill").addEventListener("click", onDayTimerPillClicked);
+	document.getElementById("dayTimerCollapseTab").addEventListener("click", onDayTimerCollapseClicked);
+	document.getElementById("dayTimerToggle").addEventListener("click", onDayTimerToggleClicked);
+	document.getElementById("dayTimerStop").addEventListener("click", onDayTimerStopClicked);
+	document.getElementById("dayTimerMinus30").addEventListener("click", () => onDayTimerAdjustClicked(-DAY_TIMER_ADJUST_STEP));
+	document.getElementById("dayTimerPlus30").addEventListener("click", () => onDayTimerAdjustClicked(DAY_TIMER_ADJUST_STEP));
+	document.getElementById("dayTimerDisplay").addEventListener("change", onDayTimerDisplayChange);
 	
-	updatePlayerCountDisplay();
+	document.getElementById("btn-rerandomize").addEventListener("click", onRerandomizeClicked);
 	
+	
+}
+
+//Restores persisted state, resumes a running timer's interval if needed, and syncs the UI to match
+function initDayTimer() {
+	loadDayTimer();
+
+	if (dayTimerState === "running")
+		ensureDayTimerInterval();
+
+	updateDayTimerUI();
+	updateDayTimerSpacer();
+}
+
+function initRoleElements() {
+	const sortedRoles = getEnabledRolesSorted();
+	
+	sortedRoles.forEach(role => {
+		const selectionTile = buildSelectionListTile(role);
+		applySelectionTileListeners(selectionTile, role);
+		
+		buildDescriptionListTile(role);
+	});
+}
+
+function initTokenElements() {
+	const sortedTokens = getEnabledTokensSorted();
+	sortedTokens.forEach(token => buildTokenDescriptionListTile(token));
+}
+
+function initPanels() {
+	document.querySelectorAll(".panel").forEach(panel => {
+		const header = panel.querySelector(".panel-header");
+		const toggle = panel.querySelector(".panel-toggle");
+		const content = panel.querySelector(".panel-content");
+
+		if (!header || !toggle || !content) return;
+
+		header.addEventListener("click", (e) => {
+			if (e.target.closest("input, button, select, textarea, label")) return;
+			const collapsed = content.style.display === "none";
+			content.style.display = collapsed ? "" : "none";
+			toggle.textContent = collapsed ? "−" : "+";
+		});
+	});
+
+	document
+		.querySelectorAll(".panel[data-collapsed='true']")
+		.forEach(panel => {
+			const content = panel.querySelector(".panel-content");
+			const toggle = panel.querySelector(".panel-toggle");
+			if (content) content.style.display = "none";
+			if (toggle) toggle.textContent = "+";
+		});
+}
+
+function initGUI() {
+	//Load language first so it's ready for component initialization, no dependency on anything
+	setGUILanguage(Localization.getLanguage());
+	
+	//Load configuration/stored values, no dependecy
+	loadSelectedRoles();
+	initDayTimer();	//Loads persisted timer state and resumes ticking if it was left running
+	
+	//Adapt scaling to window size, no dependecy
+	updateGUIScale();
+	
+	//Setup DOM elements in their default states, no interdependency but depends on localization to be loaded
+	localizeStaticContent();
+	initPanels();
+	initRoleElements();
+	initTokenElements();
+	buildSelectionTagFilters();
+	buildSettingsUI();
+	buildPromptNavigationControls();
+	
+	//Load saved tag filters, depends on buildSelectionTagFilters() having executed first
+	loadTagFilters();
+	
+	//Assign listeners to DOM elements, depends on DOM being completed
+	initGUIListeners();
+	
+	//Update the GUI to apply non-default states
 	updateRolesUI();
 }
 

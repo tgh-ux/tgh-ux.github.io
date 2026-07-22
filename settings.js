@@ -1,846 +1,949 @@
-/* =========================
-   Settings tree (pure data)
-   ========================= */
-
-/**
- * type:
- * - header: visual grouping panel, no value
- * - weight: integer >= 0, used for weighted choice pools
- * - percent: integer [0,100]
- * - toggle: boolean (future)
- * - label: simple text node (supports children)
- * - separator: vertical line
- * id:
- * - string, must be unique per hierarchy
- * textKey:
- * - string, localized key
- * textStyle:
- * - "bold" | "italic" | "underline" | "muted" | "none"
- * weightGroupId:
- * - ID for weight group, validation demands sum > 0. Must be unique per sibling group
- * defaultValue:
- * - default value of the input control
- */
-
-const SETTINGS_TREE = [
-	{
-		type: "header",
-		id: "ripple",
-		textKey: "UI_SETTING_RIPPLE",
-		children: [
-			{
-				type: "weight",
-				id: "one_minute",
-				textKey: "UI_SETTING_RIPPLE_ONE_MINUTE",
-				weightGroupId: 1,
-				defaultValue: 10,
-			},
-			{
-				type: "weight",
-				id: "insomniac",
-				textKey: "UI_SETTING_RIPPLE_INSOMNIAC",
-				weightGroupId: 1,
-				defaultValue: 10,
-			},
-			{
-				type: "weight",
-				id: "muted",
-				textKey: "UI_SETTING_RIPPLE_MUTED",
-				weightGroupId: 1,
-				defaultValue: 10
-			},
-			{
-				type: "weight",
-				id: "rebuked",
-				textKey: "UI_SETTING_RIPPLE_REBUKED",
-				weightGroupId: 1,
-				defaultValue: 0
-			},
-			{
-				type: "weight",
-				id: "troublemaker",
-				textKey: "UI_SETTING_RIPPLE_TROUBLEMAKER",
-				weightGroupId: 1,
-				defaultValue: 10
-			},
-			{
-				type: "weight",
-				id: "robber",
-				textKey: "UI_SETTING_RIPPLE_ROBBER",
-				weightGroupId: 1,
-				defaultValue: 10
-			},
-			{
-				type: "weight",
-				id: "witch",
-				textKey: "UI_SETTING_RIPPLE_WITCH",
-				weightGroupId: 1,
-				defaultValue: 10
-			},
-			{
-				type: "weight",
-				id: "revealer",
-				textKey: "UI_SETTING_RIPPLE_REVEALER",
-				weightGroupId: 1,
-				defaultValue: 10
-			},
-			{
-				type: "weight",
-				id: "drunk",
-				textKey: "UI_SETTING_RIPPLE_DRUNK",
-				weightGroupId: 1,
-				defaultValue: 10
-			},
-			{
-				type: "weight",
-				id: "view_player",
-				textKey: "UI_SETTING_RIPPLE_VIEW_PLAYER",
-				weightGroupId: 1,
-				defaultValue: 10
-			},
-			{
-				type: "weight",
-				id: "dual_view_player",
-				textKey: "UI_SETTING_RIPPLE_DUAL_VIEW_PLAYER",
-				weightGroupId: 1,
-				defaultValue: 10
-			},
-			{
-				type: "weight",
-				id: "double_vote",
-				textKey: "UI_SETTING_RIPPLE_DOUBLE_VOTE",
-				weightGroupId: 1,
-				defaultValue: 10
-			},
-			{
-				type: "weight",
-				id: "none",
-				textKey: "UI_SETTING_RIPPLE_NONE",
-				weightGroupId: 1,
-				defaultValue: 40
-			},
-		]
-	},
-	{
-		type: "header",
-		id: "alien",
-		textKey: "TEAM_ALIEN_PLURAL",
-		children: [
-			{
-				type: "weight",
-				id: "view_card_individual",
-				textKey: "UI_SETTING_ALIENS_VIEW_CARD_INDIVIDUAL",
-				weightGroupId: 1,
-				defaultValue: 30,
-				children: [
-					{
-						type: "weight",
-						id: "center",
-						textKey: "UI_SETTING_VIEW_CARD_CENTER_ONE",
-						weightGroupId: 1,
-						defaultValue: 10,
-					},
-					{
-						type: "weight",
-						id: "even",
-						textKey: "UI_SETTING_VIEW_CARD_PLAYER_EVEN",
-						weightGroupId: 1,
-						defaultValue: 10,
-					},
-					{
-						type: "weight",
-						id: "odd",
-						textKey: "UI_SETTING_VIEW_CARD_PLAYER_ODD",
-						weightGroupId: 1,
-						defaultValue: 10,
-					},
-					{
-						type: "weight",
-						id: "neighbor",
-						textKey: "UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR",
-						weightGroupId: 1,
-						defaultValue: 10,
-					},
-				]
-			},
-			{
-				type: "weight",
-				id: "view_card_collective",
-				textKey: "UI_SETTING_ALIENS_VIEW_CARD_COLLECTIVE",
-				weightGroupId: 1,
-				defaultValue: 30,
-				children: [
-					{
-						type: "weight",
-						id: "center",
-						textKey: "UI_SETTING_VIEW_CARD_CENTER_ONE",
-						weightGroupId: 1,
-						defaultValue: 10,
-					},
-					{
-						type: "weight",
-						id: "even",
-						textKey: "UI_SETTING_VIEW_CARD_PLAYER_EVEN",
-						weightGroupId: 1,
-						defaultValue: 10,
-					},
-					{
-						type: "weight",
-						id: "odd",
-						textKey: "UI_SETTING_VIEW_CARD_PLAYER_ODD",
-						weightGroupId: 1,
-						defaultValue: 10,
-					},
-					{
-						type: "weight",
-						id: "specific",
-						textKey: "UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC",
-						weightGroupId: 1,
-						defaultValue: 10,
-					},
-				]
-			},
-			{
-				type: "weight",
-				id: "nothing",
-				textKey: "UI_SETTING_ALIENS_NOTHING",
-				weightGroupId: 1,
-				defaultValue: 15
-			},
-			{
-				type: "weight",
-				id: "trade_cards",
-				textKey: "UI_SETTING_ALIENS_TRADE_CARDS",
-				weightGroupId: 1,
-				defaultValue: 15
-			},
-			{
-				type: "weight",
-				id: "show_Cards",
-				textKey: "UI_SETTING_ALIENS_SHOW_CARDS",
-				weightGroupId: 1,
-				defaultValue: 10
-			},
-			{
-				type: "weight",
-				id: "make_alien",
-				textKey: "UI_SETTING_ALIENS_MAKE_ALIEN",
-				weightGroupId: 1,
-				defaultValue: 0
-			},
-			{
-				type: "weight",
-				id: "make_minion",
-				textKey: "UI_SETTING_ALIENS_MAKE_MINION",
-				weightGroupId: 1,
-				defaultValue: 0
-			}
-		]
-	},
-	{
-		type: "header",
-		id: "bodysnatcher",
-		textKey: "ROLE_BODYSNATCHER",
-		children: [
-			{
-				type: "weight",
-				id: "center",
-				textKey: "UI_SETTING_VIEW_CARD_CENTER_ONE",
-				weightGroupId: 1,
-				defaultValue: 20,
-			},
-			{
-				type: "weight",
-				id: "neighbor",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR",
-				weightGroupId: 1,
-				defaultValue: 20,
-			},
-			{
-				type: "weight",
-				id: "odd",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_ODD",
-				weightGroupId: 1,
-				defaultValue: 20
-			},
-			{
-				type: "weight",
-				id: "even",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_EVEN",
-				weightGroupId: 1,
-				defaultValue: 20
-			},
-			{
-				type: "weight",
-				id: "specific",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC",
-				weightGroupId: 1,
-				defaultValue: 20
-			},
-			{
-				type: "percent",
-				id: "fake",
-				textKey: "UI_SETTING_BODYSNATCHER_FAKE_ACTION",
-				defaultValue: 0
-			}
-		]
-	},
-	{
-		type: "header",
-		id: "mortician",
-		textKey: "ROLE_MORTICIAN",
-		children: [
-			{
-				type: "label",
-				id: "mortician_label",
-				textKey: "UI_SETTING_LABEL_VIEW_CARD",
-				textStyle: ["italic", "muted"]
-			},
-			{
-				type: "weight",
-				id: "neighbor",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR",
-				weightGroupId: 1,
-				defaultValue: 2,
-			},
-			{
-				type: "weight",
-				id: "both",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR_BOTH",
-				weightGroupId: 1,
-				defaultValue: 1
-			},
-			{
-				type: "weight",
-				id: "self",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_SELF",
-				weightGroupId: 1,
-				defaultValue: 1
-			}
-		]
-	},
-	{
-		type: "header",
-		id: "exposer",
-		textKey: "ROLE_EXPOSER",
-		children: [
-			{
-				type: "weight",
-				id: "flip_one",
-				textKey: "UI_SETTING_EXPOSER_FLIP_ONE",
-				weightGroupId: 1,
-				defaultValue: 100,
-			},
-			{
-				type: "weight",
-				id: "flip_two",
-				textKey: "UI_SETTING_EXPOSER_FLIP_TWO",
-				weightGroupId: 1,
-				defaultValue: 20
-			},
-			{
-				type: "weight",
-				id: "flip_three",
-				textKey: "UI_SETTING_EXPOSER_FLIP_THREE",
-				weightGroupId: 1,
-				defaultValue: 0
-			}
-		]
-	},
-	{
-		type: "header",
-		id: "rascal",
-		textKey: "ROLE_RASCAL",
-		children: [
-			{
-				type: "label",
-				id: "rascal_label",
-				textKey: "UI_SETTING_LABEL_RASCAL",
-				textStyle: ["italic", "muted"]
-			},
-			{
-				type: "weight",
-				id: "troublemaker",
-				textKey: "ROLE_TROUBLEMAKER",
-				weightGroupId: 1,
-				defaultValue: 20,
-			},
-			{
-				type: "weight",
-				id: "robber",
-				textKey: "ROLE_ROBBER",
-				weightGroupId: 1,
-				defaultValue: 20
-			},
-			{
-				type: "weight",
-				id: "witch",
-				textKey: "ROLE_WITCH",
-				weightGroupId: 1,
-				defaultValue: 20
-			},
-			{
-				type: "weight",
-				id: "villageidiot",
-				textKey: "ROLE_VILLAGEIDIOT",
-				weightGroupId: 1,
-				defaultValue: 0
-			},
-			{
-				type: "weight",
-				id: "drunk",
-				textKey: "ROLE_DRUNK",
-				weightGroupId: 1,
-				defaultValue: 0
-			},
-		]
-	},
-	{
-		type: "header",
-		id: "psychic",
-		textKey: "ROLE_PSYCHIC",
-		children: [
-			{
-				type: "percent",
-				id: "double_cards",
-				textKey: "UI_SETTING_PSYCHIC_VIEW_TWO_CARDS",
-				defaultValue: 0
-			},
-			{
-				type: "label",
-				id: "psychic_label",
-				textKey: "UI_SETTING_LABEL_VIEW_CARD",
-				textStyle: ["italic", "muted"]
-			},
-			{
-				type: "weight",
-				id: "neighbor",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR",
-				weightGroupId: 1,
-				defaultValue: 25,
-			},
-			{
-				type: "weight",
-				id: "odd",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_ODD",
-				weightGroupId: 1,
-				defaultValue: 25
-			},
-			{
-				type: "weight",
-				id: "even",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_EVEN",
-				weightGroupId: 1,
-				defaultValue: 25
-			},
-			{
-				type: "weight",
-				id: "specific",
-				textKey: "UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC",
-				weightGroupId: 1,
-				defaultValue: 25
-			},
-		]
-	},
-	{
-		type: "header",
-		id: "oracle",
-		textKey: "ROLE_ORACLE",
-		children: [
-/*
-			{
-				type: "header",
-				id: "oracle_test",
-				textKey: "oracle_test",
-				children: [
-					{
-						type: "percent",
-						id: "oracle_test_1",
-						textKey: "oracle_test_1",
-						defaultValue: 25
-					},
-					{
-						type: "separator",
-						id: "oracle_test_sep",
-					},
-					{
-						type: "label",
-						id: "oracle_test_label",
-						textKey: "oracle_test_label",
-						textStyle: ["italic", "muted"]
-					},
-					{
-						type: "percent",
-						id: "oracle_test_2",
-						textKey: "oracle_test_2",
-						defaultValue: 50
-					},
-					{
-						type: "toggle",
-						id: "oracle_test_3",
-						textKey: "oracle_test_3",
-						defaultValue: false,
-					},
-				],
-			},
-*/
-			{
-				type: "weight",
-				id: "change_team",
-				textKey: "UI_SETTING_ORACLE_SWITCH_TEAM",
-				weightGroupId: 1,
-				defaultValue: 45,
-				children: [
-					{
-						type: "weight",
-						id: "full",
-						textKey: "UI_SETTING_ORACLE_SWITCH_TEAM_FULL",
-						weightGroupId: 1,
-						defaultValue: 1
-					},
-					{
-						type: "weight",
-						id: "partial",
-						textKey: "UI_SETTING_ORACLE_SWITCH_TEAM_PARTIAL",
-						weightGroupId: 1,
-						defaultValue: 1
-					},
-				],
-			},
-			{
-				type: "weight",
-				id: "view_center",
-				textKey: "UI_SETTING_ORACLE_VIEW_CENTER",
-				weightGroupId: 1,
-				defaultValue: 10,
-				children: [
-					{
-						type: "weight",
-						id: "one",
-						textKey: "UI_SETTING_VIEW_CARD_CENTER_ONE",
-						weightGroupId: 1,
-						defaultValue: 3
-					},
-					{
-						type: "weight",
-						id: "two",
-						textKey: "UI_SETTING_VIEW_CARD_CENTER_TWO",
-						weightGroupId: 1,
-						defaultValue: 2
-					},
-					{
-						type: "weight",
-						id: "three",
-						textKey: "UI_SETTING_VIEW_CARD_CENTER_THREE",
-						weightGroupId: 1,
-						defaultValue: 1
-					},
-				],
-			},
-			{
-				type: "weight",
-				id: "view_player",
-				textKey: "UI_SETTING_ORACLE_VIEW_PLAYER",
-				weightGroupId: 1,
-				defaultValue: 10,
-				children: [
-					{
-						type: "weight",
-						id: "even",
-						textKey: "UI_SETTING_VIEW_CARD_PLAYER_EVEN",
-						weightGroupId: 1,
-						defaultValue: 3
-					},
-					{
-						type: "weight",
-						id: "odd",
-						textKey: "UI_SETTING_VIEW_CARD_PLAYER_ODD",
-						weightGroupId: 1,
-						defaultValue: 3
-					},
-					{
-						type: "weight",
-						id: "any",
-						textKey: "UI_SETTING_VIEW_CARD_PLAYER_ANY",
-						weightGroupId: 1,
-						defaultValue: 1
-					},
-					{
-						type: "weight",
-						id: "specific",
-						textKey: "UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC",
-						weightGroupId: 1,
-						defaultValue: 1
-					},
-				],
-			},
-			{
-				type: "weight",
-				id: "hunt",
-				textKey: "UI_SETTING_ORACLE_HUNT",
-				weightGroupId: 1,
-				defaultValue: 10,
-				children: [
-					{
-						type: "percent",
-						id: "chance",
-						textKey: "UI_SETTING_ORACLE_HUNT_CHANCE",
-						defaultValue: 90
-					},
-					{
-						type: "toggle",
-						id: "allow_bad_teams",
-						textKey: "UI_SETTING_ORACLE_HUNT_ALLOW_BAD_TEAMS",
-						defaultValue: false
-					},
-				],
-			},
-			{
-				type: "weight",
-				id: "block_action",
-				textKey: "UI_SETTING_ORACLE_BLOCK_ACTION",
-				weightGroupId: 1,
-				defaultValue: 10,
-			},
-			{
-				type: "weight",
-				id: "drunk",
-				textKey: "UI_SETTING_ORACLE_DRUNK",
-				weightGroupId: 1,
-				defaultValue: 10,
-			},
-			{
-				type: "weight",
-				id: "even_odd",
-				textKey: "UI_SETTING_ORACLE_EVEN_ODD",
-				weightGroupId: 1,
-				defaultValue: 10,
-			},
-		]
-	}
-];
-
-/* =========================
-   Internal state
-   ========================= */
-
-const SETTINGS_VALUES = {}; // oid -> current value
-
-/* =========================
-   Persistent storage
-   ========================= */
-   
-function saveSettingsToStorage() {
-  localStorage.setItem(
-    "onuww_settings",
-    JSON.stringify(SETTINGS_VALUES)
-  );
-}
-
-function loadSettingsFromStorage() {
-  const raw = localStorage.getItem("onuww_settings");
-  if (!raw) return;
-
-  try {
-    const saved = JSON.parse(raw);
-
-    console.group("Loaded settings (diff from defaults)");
-
-    for (const [oid, value] of Object.entries(saved)) {
-      if (!(oid in SETTINGS_VALUES)) continue;
-
-      const before = SETTINGS_VALUES[oid];
-
-      if (before !== value) {
-        console.log(`${oid}: ${before} → ${value}`);
-      }
-
-      SETTINGS_VALUES[oid] = value;
-    }
-
-    console.groupEnd();
-  } catch {
-    console.warn("Failed to parse stored settings");
-  }
-}
-
-/* =========================
-   OID helpers
-   ========================= */
-
-function makeOid(...parts) {
-  return parts.filter(Boolean).join(".");
-}
-
-function normalizeSettingsTree(tree, parentOid = "") {
-  for (const node of tree) {
-    node.oid = makeOid(parentOid, node.id);
-
-    if (node.children && node.children.length) {
-      normalizeSettingsTree(node.children, node.oid);
-    }
-  }
-}
-
-/* =========================
-   Default value assembly
-   ========================= */
-
-function buildDefaultSettingsValues(tree) {
-  const values = {};
-
-  function walk(nodes) {
-    for (const node of nodes) {
-      if (node.type === "weight") {
-        values[node.oid] = node.defaultValue ?? 0;
-      } else if (node.type === "toggle") {
-        values[node.oid] = node.defaultValue ?? false;
-      } else if (node.type === "percent") {
-        values[node.oid] = node.defaultValue ?? 0;
-      }
-
-      if (node.children && node.children.length) walk(node.children);
-    }
-  }
-
-  walk(tree);
-  return values;
-}
-
-/* =========================
-   Public API: init / get / set
-   ========================= */
-
-function initSettings() {
-  // Adds node.oid to every node in the tree.
-  normalizeSettingsTree(SETTINGS_TREE);
-
-  // Fill SETTINGS_VALUES with defaults.
-  const defaults = buildDefaultSettingsValues(SETTINGS_TREE);
-  for (const [k, v] of Object.entries(defaults)) {
-    SETTINGS_VALUES[k] = v;
-  }
-}
-
-function getSettingByOid(oid) {
-  return SETTINGS_VALUES[oid];
-}
-
-function setSettingByOid(oid, value) {
-  SETTINGS_VALUES[oid] = value;
-  saveSettingsToStorage();
-}
-
-function getSettingsValues() {
-  // Return a shallow copy so rules.js can't accidentally mutate state.
-  return { ...SETTINGS_VALUES };
-}
-
-/* =========================
-   Validation
-   ========================= */
-
-/**
- * Returns an array of validation errors.
- * Each error: { oid, messageKey, details? }
- *
- * We keep messageKey as a localization key so this file stays dependency-free.
- */
-function validateSettings() {
-  const errors = [];
-
-  function validateNode(node) {
-    // Self validation
-    if (node.type === "weight") {
-      const v = SETTINGS_VALUES[node.oid];
-
-      // Allow undefined during partial UI init
-      if (v === undefined) return;
-
-      if (!Number.isInteger(v) || v < 0) {
-        errors.push({
-          oid: node.oid,
-          messageKey: "UI_SETTING_ERROR_WEIGHT_NOT_NONNEG_INT"
-        });
-      }
-    }
-
-    if (node.type === "toggle") {
-      const v = SETTINGS_VALUES[node.oid];
-      if (v === undefined) return;
-
-      if (typeof v !== "boolean") {
-        errors.push({
-          oid: node.oid,
-          messageKey: "UI_SETTING_ERROR_TOGGLE_NOT_BOOL"
-        });
-      }
-    }
+const Settings = (() => {
 	
-	if (node.type === "percent") {
-      const v = SETTINGS_VALUES[node.oid];
+	/* =========================
+	   Data
+	   ========================= */
+	   
+	const SETTINGS_STORE = "onuw_settings";
+	
+	//Current settings, mapping all OIDs to a value
+	const OID_TO_VALUE = {};
+	
+	//The type expected for each OID for quick lookup and validation
+	const OID_TO_TYPE = {};
+	
+	const SETTINGS_TYPES = {
+		weight: {
+			validator: (value) => { return (Number.isInteger(value) && value >= 0); },
+			errorMsgKey: "UI_SETTING_ERROR_WEIGHT_NOT_NONNEG_INT",
+			defaultValue: (node) => { return node.defaultValue ?? 0; },
+		},
+		percent: {
+			validator: (value) => { return (Number.isInteger(value) && value >= 0 && value <= 100); },
+			errorMsgKey: "UI_SETTING_ERROR_WEIGHT_NOT_PERCENT",
+			defaultValue: (node) => { return node.defaultValue ?? 0; },
+		},
+		toggle: {
+			validator: (value) => { return (typeof value === "boolean"); },
+			errorMsgKey: "UI_SETTING_ERROR_TOGGLE_NOT_BOOL",
+			defaultValue: (node) => { return node.defaultValue ?? false; },
+		},
+	};
+	
+	const CONTEXT_REQUIREMENTS = {
+		evilTeamPresent: (context) => {
+			if (!context?.selectedRoles) return true; // no context supplied — fail open, see below
+			return [...context.selectedRoles.keys()].some(id =>
+				Roles.isTeam(id, "TEAM_WEREWOLF") || Roles.isTeam(id, "TEAM_VAMPIRE") || Roles.isTeam(id, "TEAM_ALIEN")
+			);
+		},
+	};
 
-      // Allow undefined during partial UI init
-      if (v === undefined) return;
+	/*
+		Settings tree, defines the avaiable settings and their hierarchy for use in the GUI construction. Each node represents a row in the GUI, and contains attributes as below
+		 * type:
+		 * - header: visual grouping panel, no value
+		 * - weight: integer >= 0, used for weighted choice pools
+		 * - percent: integer [0,100]
+		 * - toggle: boolean (future)
+		 * - label: simple text node (supports children)
+		 * - separator: vertical line
+		 * id: string, must be unique per hierarchy
+		 * textKey: string, localized key
+		 * textStyle: string array containing font styles to apply to a label element
+		 * - "bold" | "italic" | "underline" | "muted" | "none"
+		 * weightGroupId: ID for weight group, validation demands sum > 0. Must be unique per sibling group
+		 * requiresContext: (optional) key into CONTEXT_REQUIREMENTS - if present, this node's weight only counts toward its weight group's sum when the check passes
+		 * contextErrorMsg: (optional) localization key used as error message if requiresContext validation fails
+		 * defaultValue: default value of the input control
+	 */
+	const SETTINGS_TREE = [
+		{
+			type: "header",
+			id: "ripple",
+			textKey: "UI_SETTING_RIPPLE",
+			affectedRoles: [ "TEAM_ALIEN", "SYNTHETICALIEN" ],
+			children: [
+				{
+					type: "weight",
+					id: "one_minute",
+					textKey: "UI_SETTING_RIPPLE_ONE_MINUTE",
+					weightGroupId: 1,
+					defaultValue: 10,
+				},
+				{
+					type: "weight",
+					id: "insomniac",
+					textKey: "UI_SETTING_RIPPLE_INSOMNIAC",
+					weightGroupId: 1,
+					defaultValue: 10,
+				},
+				{
+					type: "weight",
+					id: "muted",
+					textKey: "UI_SETTING_RIPPLE_MUTED",
+					weightGroupId: 1,
+					defaultValue: 10
+				},
+				{
+					type: "weight",
+					id: "rebuked",
+					textKey: "UI_SETTING_RIPPLE_REBUKED",
+					weightGroupId: 1,
+					defaultValue: 0
+				},
+				{
+					type: "weight",
+					id: "troublemaker",
+					textKey: "UI_SETTING_RIPPLE_TROUBLEMAKER",
+					weightGroupId: 1,
+					defaultValue: 10
+				},
+				{
+					type: "weight",
+					id: "robber",
+					textKey: "UI_SETTING_RIPPLE_ROBBER",
+					weightGroupId: 1,
+					defaultValue: 10
+				},
+				{
+					type: "weight",
+					id: "witch",
+					textKey: "UI_SETTING_RIPPLE_WITCH",
+					weightGroupId: 1,
+					defaultValue: 10
+				},
+				{
+					type: "weight",
+					id: "revealer",
+					textKey: "UI_SETTING_RIPPLE_REVEALER",
+					weightGroupId: 1,
+					defaultValue: 10
+				},
+				{
+					type: "weight",
+					id: "drunk",
+					textKey: "UI_SETTING_RIPPLE_DRUNK",
+					weightGroupId: 1,
+					defaultValue: 10
+				},
+				{
+					type: "weight",
+					id: "view_player",
+					textKey: "UI_SETTING_RIPPLE_VIEW_PLAYER",
+					weightGroupId: 1,
+					defaultValue: 10
+				},
+				{
+					type: "weight",
+					id: "dual_view_player",
+					textKey: "UI_SETTING_RIPPLE_DUAL_VIEW_PLAYER",
+					weightGroupId: 1,
+					defaultValue: 10
+				},
+				{
+					type: "weight",
+					id: "double_vote",
+					textKey: "UI_SETTING_RIPPLE_DOUBLE_VOTE",
+					weightGroupId: 1,
+					defaultValue: 10
+				},
+				{
+					type: "weight",
+					id: "none",
+					textKey: "UI_SETTING_RIPPLE_NONE",
+					weightGroupId: 1,
+					defaultValue: 40
+				},
+			]
+		},
+		{
+			type: "header",
+			id: "alien",
+			textKey: "TEAM_ALIEN_PLURAL",
+			affectedRoles: [ "TEAM_ALIEN", "SYNTHETICALIEN" ],
+			children: [
+				{
+					type: "weight",
+					id: "view_card_individual",
+					textKey: "UI_SETTING_ALIENS_VIEW_CARD_INDIVIDUAL",
+					weightGroupId: 1,
+					defaultValue: 30,
+					children: [
+						{
+							type: "weight",
+							id: "center",
+							textKey: "UI_SETTING_VIEW_CARD_CENTER_ONE",
+							weightGroupId: 1,
+							defaultValue: 10,
+						},
+						{
+							type: "weight",
+							id: "even",
+							textKey: "UI_SETTING_VIEW_CARD_PLAYER_EVEN",
+							weightGroupId: 1,
+							defaultValue: 10,
+						},
+						{
+							type: "weight",
+							id: "odd",
+							textKey: "UI_SETTING_VIEW_CARD_PLAYER_ODD",
+							weightGroupId: 1,
+							defaultValue: 10,
+						},
+						{
+							type: "weight",
+							id: "neighbor",
+							textKey: "UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR",
+							weightGroupId: 1,
+							defaultValue: 10,
+						},
+					]
+				},
+				{
+					type: "weight",
+					id: "view_card_collective",
+					textKey: "UI_SETTING_ALIENS_VIEW_CARD_COLLECTIVE",
+					weightGroupId: 1,
+					defaultValue: 30,
+					children: [
+						{
+							type: "weight",
+							id: "center",
+							textKey: "UI_SETTING_VIEW_CARD_CENTER_ONE",
+							weightGroupId: 1,
+							defaultValue: 10,
+						},
+						{
+							type: "weight",
+							id: "even",
+							textKey: "UI_SETTING_VIEW_CARD_PLAYER_EVEN",
+							weightGroupId: 1,
+							defaultValue: 10,
+						},
+						{
+							type: "weight",
+							id: "odd",
+							textKey: "UI_SETTING_VIEW_CARD_PLAYER_ODD",
+							weightGroupId: 1,
+							defaultValue: 10,
+						},
+						{
+							type: "weight",
+							id: "specific",
+							textKey: "UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC",
+							weightGroupId: 1,
+							defaultValue: 10,
+						},
+					]
+				},
+				{
+					type: "weight",
+					id: "nothing",
+					textKey: "UI_SETTING_ALIENS_NOTHING",
+					weightGroupId: 1,
+					defaultValue: 15
+				},
+				{
+					type: "weight",
+					id: "trade_cards",
+					textKey: "UI_SETTING_ALIENS_TRADE_CARDS",
+					weightGroupId: 1,
+					defaultValue: 15
+				},
+				{
+					type: "weight",
+					id: "show_cards",
+					textKey: "UI_SETTING_ALIENS_SHOW_CARDS",
+					weightGroupId: 1,
+					defaultValue: 10
+				},
+				{
+					type: "weight",
+					id: "make_alien",
+					textKey: "UI_SETTING_ALIENS_MAKE_ALIEN",
+					weightGroupId: 1,
+					defaultValue: 0
+				},
+				{
+					type: "weight",
+					id: "make_minion",
+					textKey: "UI_SETTING_ALIENS_MAKE_MINION",
+					weightGroupId: 1,
+					defaultValue: 0
+				}
+			]
+		},
+		{
+			type: "header",
+			id: "bodysnatcher",
+			textKey: "ROLE_BODYSNATCHER",
+			affectedRoles: [ "BODYSNATCHER" ],
+			children: [
+				{
+					type: "weight",
+					id: "center",
+					textKey: "UI_SETTING_VIEW_CARD_CENTER_ONE",
+					weightGroupId: 1,
+					defaultValue: 20,
+				},
+				{
+					type: "weight",
+					id: "neighbor",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR",
+					weightGroupId: 1,
+					defaultValue: 20,
+				},
+				{
+					type: "weight",
+					id: "odd",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_ODD",
+					weightGroupId: 1,
+					defaultValue: 20
+				},
+				{
+					type: "weight",
+					id: "even",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_EVEN",
+					weightGroupId: 1,
+					defaultValue: 20
+				},
+				{
+					type: "weight",
+					id: "specific",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC",
+					weightGroupId: 1,
+					defaultValue: 20
+				},
+				{
+					type: "percent",
+					id: "fake",
+					textKey: "UI_SETTING_BODYSNATCHER_FAKE_ACTION",
+					defaultValue: 0
+				}
+			]
+		},
+		{
+			type: "header",
+			id: "mortician",
+			textKey: "ROLE_MORTICIAN",
+			affectedRoles: [ "MORTICIAN" ],
+			children: [
+				{
+					type: "label",
+					id: "mortician_label",
+					textKey: "UI_SETTING_LABEL_VIEW_CARD",
+					textStyle: ["italic", "muted"]
+				},
+				{
+					type: "weight",
+					id: "neighbor",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR",
+					weightGroupId: 1,
+					defaultValue: 2,
+				},
+				{
+					type: "weight",
+					id: "both",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR_BOTH",
+					weightGroupId: 1,
+					defaultValue: 1
+				},
+				{
+					type: "weight",
+					id: "self",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_SELF",
+					weightGroupId: 1,
+					defaultValue: 1
+				}
+			]
+		},
+		{
+			type: "header",
+			id: "exposer",
+			textKey: "ROLE_EXPOSER",
+			affectedRoles: [ "EXPOSER" ],
+			children: [
+				{
+					type: "weight",
+					id: "flip_one",
+					textKey: "UI_SETTING_EXPOSER_FLIP_ONE",
+					weightGroupId: 1,
+					defaultValue: 100,
+				},
+				{
+					type: "weight",
+					id: "flip_two",
+					textKey: "UI_SETTING_EXPOSER_FLIP_TWO",
+					weightGroupId: 1,
+					defaultValue: 20
+				},
+				{
+					type: "weight",
+					id: "flip_three",
+					textKey: "UI_SETTING_EXPOSER_FLIP_THREE",
+					weightGroupId: 1,
+					defaultValue: 0
+				}
+			]
+		},
+		{
+			type: "header",
+			id: "rascal",
+			textKey: "ROLE_RASCAL",
+			affectedRoles: [ "RASCAL" ],
+			children: [
+				{
+					type: "label",
+					id: "rascal_label",
+					textKey: "UI_SETTING_LABEL_RASCAL",
+					textStyle: ["italic", "muted"]
+				},
+				{
+					type: "weight",
+					id: "troublemaker",
+					textKey: "ROLE_TROUBLEMAKER",
+					weightGroupId: 1,
+					defaultValue: 20,
+				},
+				{
+					type: "weight",
+					id: "robber",
+					textKey: "ROLE_ROBBER",
+					weightGroupId: 1,
+					defaultValue: 20
+				},
+				{
+					type: "weight",
+					id: "witch",
+					textKey: "ROLE_WITCH",
+					weightGroupId: 1,
+					defaultValue: 20
+				},
+				{
+					type: "weight",
+					id: "villageidiot",
+					textKey: "ROLE_VILLAGEIDIOT",
+					weightGroupId: 1,
+					defaultValue: 0
+				},
+				{
+					type: "weight",
+					id: "drunk",
+					textKey: "ROLE_DRUNK",
+					weightGroupId: 1,
+					defaultValue: 0
+				},
+			]
+		},
+		{
+			type: "header",
+			id: "psychic",
+			textKey: "ROLE_PSYCHIC",
+			affectedRoles: [ "PSYCHIC" ],
+			children: [
+				{
+					type: "percent",
+					id: "double_cards",
+					textKey: "UI_SETTING_PSYCHIC_VIEW_TWO_CARDS",
+					defaultValue: 0
+				},
+				{
+					type: "label",
+					id: "psychic_label",
+					textKey: "UI_SETTING_LABEL_VIEW_CARD",
+					textStyle: ["italic", "muted"]
+				},
+				{
+					type: "weight",
+					id: "neighbor",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR",
+					weightGroupId: 1,
+					defaultValue: 25,
+				},
+				{
+					type: "weight",
+					id: "odd",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_ODD",
+					weightGroupId: 1,
+					defaultValue: 25
+				},
+				{
+					type: "weight",
+					id: "even",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_EVEN",
+					weightGroupId: 1,
+					defaultValue: 25
+				},
+				{
+					type: "weight",
+					id: "specific",
+					textKey: "UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC",
+					weightGroupId: 1,
+					defaultValue: 25
+				},
+			]
+		},
+		{
+			type: "header",
+			id: "oracle",
+			textKey: "ROLE_ORACLE",
+			affectedRoles: [ "ORACLE" ],
+			children: [
+/*
+				{
+					type: "header",
+					id: "oracle_test",
+					textKey: "oracle_test",
+					children: [
+						{
+							type: "percent",
+							id: "oracle_test_1",
+							textKey: "oracle_test_1",
+							defaultValue: 25
+						},
+						{
+							type: "separator",
+							id: "oracle_test_sep",
+						},
+						{
+							type: "label",
+							id: "oracle_test_label",
+							textKey: "oracle_test_label",
+							textStyle: ["italic", "muted"]
+						},
+						{
+							type: "percent",
+							id: "oracle_test_2",
+							textKey: "oracle_test_2",
+							textStyle: ["bold"],
+							defaultValue: 50
+						},
+						{
+							type: "toggle",
+							id: "oracle_test_3",
+							textKey: "oracle_test_3",
+							textStyle: ["underline"],
+							defaultValue: false,
+						},
+					],
+				},
+*/
+				{
+					type: "weight",
+					id: "change_team",
+					textKey: "UI_SETTING_ORACLE_SWITCH_TEAM",
+					weightGroupId: 1,
+					defaultValue: 45,
+					requiresContext: "evilTeamPresent",
+					contextErrorMsg: "UI_SETTING_ERROR_WEIGHTGROUP_ORACLE_TEAM",
+					children: [
+						{
+							type: "percent",
+							id: "chance",
+							textKey: "UI_SETTING_ORACLE_SWITCH_TEAM_MODE",
+							defaultValue: 50
+						},
+					],
+				},
+				{
+					type: "weight",
+					id: "view_center",
+					textKey: "UI_SETTING_ORACLE_VIEW_CENTER",
+					weightGroupId: 1,
+					defaultValue: 10,
+					children: [
+						{
+							type: "weight",
+							id: "one",
+							textKey: "UI_SETTING_VIEW_CARD_CENTER_ONE",
+							weightGroupId: 1,
+							defaultValue: 3
+						},
+						{
+							type: "weight",
+							id: "two",
+							textKey: "UI_SETTING_VIEW_CARD_CENTER_TWO",
+							weightGroupId: 1,
+							defaultValue: 2
+						},
+						{
+							type: "weight",
+							id: "three",
+							textKey: "UI_SETTING_VIEW_CARD_CENTER_THREE",
+							weightGroupId: 1,
+							defaultValue: 1
+						},
+					],
+				},
+				{
+					type: "weight",
+					id: "view_player",
+					textKey: "UI_SETTING_ORACLE_VIEW_PLAYER",
+					weightGroupId: 1,
+					defaultValue: 10,
+					children: [
+						{
+							type: "weight",
+							id: "even",
+							textKey: "UI_SETTING_VIEW_CARD_PLAYER_EVEN",
+							weightGroupId: 1,
+							defaultValue: 3
+						},
+						{
+							type: "weight",
+							id: "odd",
+							textKey: "UI_SETTING_VIEW_CARD_PLAYER_ODD",
+							weightGroupId: 1,
+							defaultValue: 3
+						},
+						{
+							type: "weight",
+							id: "any",
+							textKey: "UI_SETTING_VIEW_CARD_PLAYER_ANY",
+							weightGroupId: 1,
+							defaultValue: 1
+						},
+						{
+							type: "weight",
+							id: "specific",
+							textKey: "UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC",
+							weightGroupId: 1,
+							defaultValue: 1
+						},
+					],
+				},
+				{
+					type: "weight",
+					id: "hunt",
+					textKey: "UI_SETTING_ORACLE_HUNT",
+					weightGroupId: 1,
+					defaultValue: 10,
+					children: [
+						{
+							type: "percent",
+							id: "chance",
+							textKey: "UI_SETTING_ORACLE_HUNT_CHANCE",
+							defaultValue: 90
+						},
+						{
+							type: "toggle",
+							id: "allow_bad_teams",
+							textKey: "UI_SETTING_ORACLE_HUNT_ALLOW_BAD_TEAMS",
+							defaultValue: false
+						},
+					],
+				},
+				{
+					type: "weight",
+					id: "block_action",
+					textKey: "UI_SETTING_ORACLE_BLOCK_ACTION",
+					weightGroupId: 1,
+					defaultValue: 10,
+				},
+				{
+					type: "weight",
+					id: "drunk",
+					textKey: "UI_SETTING_ORACLE_DRUNK",
+					weightGroupId: 1,
+					defaultValue: 10,
+				},
+				{
+					type: "weight",
+					id: "even_odd",
+					textKey: "UI_SETTING_ORACLE_EVEN_ODD",
+					weightGroupId: 1,
+					defaultValue: 10,
+				},
+			]
+		}
+	];
 
-      if (!Number.isInteger(v) || v < 0 || v > 100) {
-        errors.push({
-          oid: node.oid,
-          messageKey: "UI_SETTING_ERROR_WEIGHT_NOT_PERCENT"
-        });
-      }
-    }
 
-    // Child/group validation
-    if (node.children && node.children.length) {
-      validateWeightGroupsAmongChildren(node);
-      for (const child of node.children) validateNode(child);
-    }
-  }
 
-  function validateWeightGroupsAmongChildren(parentNode) {
-    const weights = parentNode.children.filter(c => c.type === "weight");
+	/* =========================
+	   Initialization
+	   ========================= */
 
-    // Group by weightGroupId
-    const groups = new Map(); // groupId -> childNodes[]
-    for (const child of weights) {
-      const gid = child.weightGroupId;
-      if (gid === undefined || gid === null) continue;
+	function _init() {
+		_normalizeTree();
+		_resetToDefault();
+		_load();
+		_deepFreeze(SETTINGS_TREE);
+	}
+	
+	//Initializes full OID value to all nodes in the tree
+	function _normalizeTree(tree = SETTINGS_TREE, parentOid = "") {
+		for (const node of tree) {
+			const oid = _makeOid(parentOid, node.id);
+			node.oid = oid;
+			
+			if (node.children && node.children.length) {
+				_normalizeTree(node.children, oid);
+			}
+			
+			if (_isInputType(node))
+				OID_TO_TYPE[oid] = node.type;
+		}
+	}
 
-      if (!groups.has(gid)) groups.set(gid, []);
-      groups.get(gid).push(child);
-    }
+	//Locks the role definitions as immutable
+	function _deepFreeze(obj) {
+		Object.freeze(obj);
 
-    for (const [gid, nodes] of groups.entries()) {
-      let sum = 0;
+		for (const value of Object.values(obj)) {
+			if (value && typeof value === "object" && !Object.isFrozen(value)) {
+				_deepFreeze(value);
+			}
+		}
+	}
 
-      for (const n of nodes) {
-        const v = SETTINGS_VALUES[n.oid];
-        if (Number.isInteger(v) && v > 0) sum += v;
-      }
+	/* =========================
+	   Private functions
+	   ========================= */
 
-      if (sum <= 0) {
-        errors.push({
-          oid: parentNode.oid,
-          messageKey: "UI_SETTING_ERROR_WEIGHTGROUP_SUM_ZERO",
-          details: { weightGroupId: gid }
-        });
-      }
-    }
-  }
+	function _load() {
+		const raw = localStorage.getItem(SETTINGS_STORE);
+		if (!raw) return;
 
-  for (const root of SETTINGS_TREE) validateNode(root);
+		try {
+			const saved = JSON.parse(raw);
 
-  return errors;
-}
+			console.group("Loaded settings (diff from defaults)");
 
-/* =========================
-   Init at load
-   ========================= */
+			for (const [oid, value] of Object.entries(saved)) {
+				if (!(oid in OID_TO_VALUE)) continue;
 
-function initializeSettingsWithPersistence() {
-    initSettings();
-    loadSettingsFromStorage();
-}
+				const before = OID_TO_VALUE[oid];
 
-initializeSettingsWithPersistence();
+				if (before !== value) {
+					console.log(`${oid}: ${before} → ${value}`);
+				}
+				
+				try {
+					_setValue(oid, value, false);
+				} catch {
+					console.warn(`Skipping invalid stored value for ${oid}`);
+				}
+			}
+
+			console.groupEnd();
+		} catch {
+			console.warn("Failed to parse stored settings");
+		}
+	}
+	
+	function _save() {
+		localStorage.setItem(SETTINGS_STORE, JSON.stringify(OID_TO_VALUE) );
+	}
+	
+	//Resets current settings values to default
+	function _resetToDefault() {
+		const defaults = _getDefaultSettings();
+		
+		for (const [oid, value] of Object.entries(defaults)) {
+			_setValue(oid, value, false);
+		}
+	}
+	
+	function _getDefaultSettings() {
+		const values = {};
+
+		function walk(nodes) {
+			for (const node of nodes) {
+				if (SETTINGS_TYPES[node.type])
+					values[node.oid] = SETTINGS_TYPES[node.type].defaultValue(node);
+				
+				if (node.children && node.children.length)
+					walk(node.children);
+			}
+		}
+
+		walk(SETTINGS_TREE);
+		
+		return values;
+	}
+	
+	function _makeOid(...parts) {
+		return parts.filter(Boolean).join(".");
+	}
+	
+	function _isInputType(node) {
+		return node.type in SETTINGS_TYPES;
+	}
+	
+	function _setValue(oid, value, save = true) {
+		const type = OID_TO_TYPE[oid];
+		
+		if (!type)
+			throw new Error(`Unknown setting OID to set: ${oid}`);
+		
+		if (!SETTINGS_TYPES[type].validator(value))
+			throw new Error(`Invalid value ${value} of type ${type} to set: ${oid}`);
+		
+		OID_TO_VALUE[oid] = value;
+		
+		if (save)
+			_save();
+	}
+	
+	function _validateNode(node, errors, hierarchy = [], context = {}, inheritedAffectedRoles) {
+		const affectedRoles = node.affectedRoles ?? inheritedAffectedRoles;
+		const v = OID_TO_VALUE[node.oid];
+		const lookup = SETTINGS_TYPES[node.type];
+		const invalid = lookup && !lookup.validator(v);
+		const newHierarchy = [ ...hierarchy, node.textKey ];
+		
+		if (invalid)
+			errors.push({ oid: node.oid, errorType: "value", optionKey: newHierarchy, messageKey: lookup.errorMsgKey, affectedRoles: affectedRoles });
+		
+		// Child/group validation
+		if (hasChildren(node)) {
+			_validateWeightGroupsAmongChildren(node, errors, newHierarchy, context, affectedRoles);
+			for (const child of getChildren(node))
+				_validateNode(child, errors, newHierarchy, context, affectedRoles);
+		}
+	}
+	
+	function _validateWeightGroupsAmongChildren(node, errors, hierarchy, context, inheritedAffectedRoles) {
+		const affectedRoles = node.affectedRoles ?? inheritedAffectedRoles;
+		const groupSums = new Map();
+		const excludingChild = new Map(); // gid -> true if any child was excluded by context
+
+		for (const child of getChildren(node)) {
+			const gid = child.weightGroupId;
+			if (gid == null) continue;	//Skip because it's either not a weight group or it is malformed
+
+			const available = _isContextuallyAvailable(child, context);
+			if (!available)
+				excludingChild.set(gid, child);
+
+			const sum = groupSums.get(gid) ?? 0;
+			groupSums.set(gid, sum + (available ? getValue(child.oid) : 0));
+		}
+
+		for (const [gid, sum] of groupSums.entries()) {
+			if (sum <= 0) {
+				const excluder = excludingChild.get(gid);
+				errors.push({
+					oid: node.oid,
+					errorType: "weightGroupSum",
+					optionKey: [...hierarchy],
+					messageKey: excluder?.contextErrorMsg ?? (excluder
+						? "UI_SETTING_ERROR_WEIGHTGROUP_SUM_ZERO_CONTEXT"
+						: "UI_SETTING_ERROR_WEIGHTGROUP_SUM_ZERO"),
+					data: { weightGroupId: gid },
+					affectedRoles: affectedRoles,
+				});
+			}
+		}
+	}
+	
+	function _isContextuallyAvailable(node, context) {
+		if (!node.requiresContext) return true;
+
+		const check = CONTEXT_REQUIREMENTS[node.requiresContext];
+		if (!check) {
+			console.warn(`Unknown requiresContext key '${node.requiresContext}' on node ${node.oid}`);
+			return true; // typo'd key shouldn't manufacture a false-positive error
+		}
+		return check(context);
+	}
+	
+	function _roleMatchesAffected(roleId, entry) {
+		return roleId === entry || Roles.isTeam(roleId, entry);
+	}
+	
+	function _isErrorRelevant(error, selectedRoles) {
+		if (!error.affectedRoles) return true; // global setting — always relevant
+		return [...selectedRoles.keys()].some(roleId =>
+			error.affectedRoles.some(entry => _roleMatchesAffected(roleId, entry))
+		);
+	}
+	
+	
+	/* =========================
+	   Public functions
+	   ========================= */
+
+	function getRootNodes() {
+		return SETTINGS_TREE;
+	}
+	
+	function getChildren(node) {
+		return node.children ?? [];
+	}
+	
+	function hasChildren(node) {
+		return (node.children?.length ?? 0) > 0;
+	}
+	
+	function getValue(oid) {
+		if (!(oid in OID_TO_VALUE)) {
+			throw new Error(`Unknown setting OID to get: ${oid}`);
+		}
+		
+		return OID_TO_VALUE[oid];
+	}
+	
+	function setValue(oid, value) {
+		_setValue(oid, value);
+	}
+	
+	function reset() {
+		_resetToDefault();
+		_save();
+	}
+	
+	function getAllValues() {
+		//Return a shallow copy so it can't be externally mutated
+		return { ...OID_TO_VALUE };
+	}
+
+	function validate(context = {}) {
+		const errors = [];
+		
+		for (const root of SETTINGS_TREE)
+			_validateNode(root, errors, [], context);
+
+		return errors;
+	}
+	
+	function filterRelevant(errors, selectedRoles) {
+		return errors.filter(error => _isErrorRelevant(error, selectedRoles));
+	}
+	
+	function validateRelevant(context) {
+		return filterRelevant(validate(context), context.selectedRoles ?? new Map());
+	}
+	
+	function getNodeTextStyles(node) {
+		const styles = node.textStyle;
+		
+		if (Array.isArray(styles))
+			return styles;
+		else if (typeof styles === "string")
+			return [ styles ];
+		
+		return [];
+	}
+
+
+	//Initialization
+	_init();
+
+	return {
+		getRootNodes,
+		getChildren,
+		hasChildren,
+		getValue,
+		setValue,
+		reset,
+		getAllValues,
+		validate,
+		filterRelevant,
+		validateRelevant,
+		getNodeTextStyles,
+	};
+	
+})();
