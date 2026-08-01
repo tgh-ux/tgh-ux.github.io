@@ -2254,7 +2254,7 @@ const Localization = (() => {
 
 	const LANGUAGE_STORE = "onuw_lang"
 	
-	let LANG = "SWE";
+	let LANG = "ENG";
 
 	/* =========================
 	   Initialization
