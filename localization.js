@@ -1,11 +1,40 @@
+/*
+ * Localization and template engine.
+ *
+ * Stores all localized strings, manages the active language, and resolves
+ * localization templates into final text.
+ *
+ * The template language is intentionally lightweight, allowing narration,
+ * role descriptions and UI text to be generated from reusable localization
+ * keys rather than hard-coded strings.
+ */
+
 const Localization = (() => {
 	
 	/* =========================
 	   Data
 	   ========================= */
 	
+	//Safety limit preventing infinite recursion caused by cyclic template references.
+	//Increase as needed if deeper template resolution is required.
 	const MAX_ITERATIONS = 20;
 	
+	/*
+	 * Localization data grouped by language.
+	 *
+	 * Keys are shared across every language and are expected to exist for each
+	 * localization. Prompt-related keys make extensive use of the template
+	 * language implemented below.
+	 *
+	 * Identity keys (roles and teams, e.g. ROLE_SEER, TEAM_WEREWOLF) follow a
+	 * fixed suffix convention that Interpreter's Identity/RoleName primitives
+	 * build up from the raw ID + requested grammatical form(s):
+	 *   <ID>, <ID>_PLURAL, <ID>_DEFINITE, <ID>_GENITIVE, and their
+	 *   combinations (e.g. ROLE_SEER_PLURAL_DEFINITE_GENITIVE). Every
+	 *   identity key is expected to have all applicable combinations defined
+	 *   here, since the interpreter constructs the key name rather than
+	 *   looking up a pre-built variant list.
+	 */
 	const LOCALIZATION_KEYS = {
 		ENG: {
 			LIST_AND: "and",
@@ -584,15 +613,15 @@ const Localization = (() => {
 			UI_ABILITY_BEHOLDER: "Wakes up and sees who {ROLE_SEER_DEFINITE} and {ROLE_APPRENTICESEER_DEFINITE} are. May then check their cards to see if they were moved during the night.",
 			UI_ABILITY_BLOB: "Does not wake up. At the start of the day, it is announced which nearby players (0–4) {ROLE_BLOB_DEFINITE} must protect.",
 			UI_ABILITY_BODYGUARD: "The player voted for by {ROLE_BODYGUARD_DEFINITE} cannot be eliminated. The player with the second-highest votes is eliminated instead.",
-			UI_ABILITY_BODYSNATCHER: "Wakes up and may choose to swap another player's card with their own, then look at their new card. Both {ROLE_BODYSNATCHER_DEFINITE} and the other card become a {TEAM_ALIEN}.",
-			UI_ABILITY_COPYCAT: "Wakes up and looks at one of the center cards. {ROLE_COPYCAT_DEFINITE} copies that role and team. Role/team follows the card if moved during the night. {ROLE_COPYCAT_DEFINITE} later wakes and performs that role's action.",
+			UI_ABILITY_BODYSNATCHER: "Wakes up and may choose to swap another player's card with their own, then look at their new card. Both {ROLE_BODYSNATCHER_DEFINITE} and the other card become a member of {TEAM_ALIEN_PLURAL_DEFINITE}.",
+			UI_ABILITY_COPYCAT: "Wakes up and looks at one of the center cards. {ROLE_COPYCAT_DEFINITE} copies that role and team. The copied role and team follows the card if it is moved during the night. {ROLE_COPYCAT_DEFINITE} later wakes and performs that role's action.",
 			UI_ABILITY_COUNT: "Wakes up with all {TEAM_VAMPIRE_PLURAL}. Then wakes alone and places the {TOKEN_MARK_COUNT} on a non-{TEAM_VAMPIRE} player. That player may not wake or perform any action during the night.",
 			UI_ABILITY_COW: "Holds out a hand without waking. If one or more {TEAM_ALIEN_PLURAL} are adjacent to {ROLE_COW_DEFINITE}, they must touch {ROLE_COW_DEFINITE}'s hand.",
 			UI_ABILITY_CUPID: "Wakes up and places the {TOKEN_MARK_CUPID} on two players. Those players wake together and identify each other. If one is eliminated, the other is also eliminated.",
 			UI_ABILITY_CURATOR: "Wakes up and places a random artifact token in front of a player, including {ROLE_CURATOR_DEFINITE}. At the start of the day, that player may look at it. If it causes a role change, it overrides the player's card for ability and team.",
 			UI_ABILITY_CURSED: "If at least one {TEAM_WEREWOLF}, {TEAM_VAMPIRE}, or {TEAM_ALIEN} votes for {ROLE_CURSED_DEFINITE}, it changes to that team.",
 			UI_ABILITY_DISEASED: "Wakes up and places the {TOKEN_MARK_DISEASED} on a neighbor. Any player who votes for {ROLE_DISEASED_DEFINITE} or a marked player automatically loses, even if their team wins.",
-			UI_ABILITY_DOPPELGANGER: "Wakes up and looks at another player's card. {ROLE_DOPPELGANGER_DEFINITE} copies that role and team. This follows the card if moved. {ROLE_DOPPELGANGER_DEFINITE} later wakes and performs that role's action.",
+			UI_ABILITY_DOPPELGANGER: "Wakes up and looks at another player's card. {ROLE_DOPPELGANGER_DEFINITE} copies that role and team. The copied role and team follows the card if it is moved during the night. {ROLE_DOPPELGANGER_DEFINITE} later wakes and performs that role's action.",
 			UI_ABILITY_DREAMWOLF: "Shows a thumb instead of waking with {TEAM_WEREWOLF_PLURAL} so they can identify {ROLE_DREAMWOLF_DEFINITE}.",
 			UI_ABILITY_DRUNK: "Wakes up and swaps their card with a center card without looking at it.",
 			UI_ABILITY_EMPATH: "Wakes up and observes players perform a random action without waking them.",
@@ -626,7 +655,7 @@ const Localization = (() => {
 			UI_ABILITY_PRINCE: "Cannot be eliminated. The player with the second-highest votes is eliminated instead.",
 			UI_ABILITY_PSYCHIC: "Wakes up and may look at another player's card with random restrictions.",
 			UI_ABILITY_RASCAL: "Wakes up and performs a random action from {ROLE_TROUBLEMAKER_DEFINITE}, {ROLE_ROBBER_DEFINITE}, {ROLE_WITCH_DEFINITE}, {ROLE_VILLAGEIDIOT_DEFINITE}, or {ROLE_DRUNK_DEFINITE}.",
-			UI_ABILITY_RENFIELD: "Wakes up and replaces their mark with {TOKEN_MARK_RENFIELD}. Sees all {TEAM_VAMPIRE} and which player received a {TOKEN_MARK_VAMPIRE}.",
+			UI_ABILITY_RENFIELD: "Wakes up and replaces their mark with {TOKEN_MARK_RENFIELD}. Sees all {TEAM_VAMPIRE_PLURAL} and which player received a {TOKEN_MARK_VAMPIRE}.",
 			UI_ABILITY_REVEALER: "Wakes up and turns another player's card face up. If not {TEAM_VILLAGE_DEFINITE}, it is turned back down.",
 			UI_ABILITY_ROBBER: "Wakes up and may swap cards with another player, then look at the new card. Does not wake again.",
 			UI_ABILITY_SEER: "Wakes up and may look at another player's card or two center cards.",
@@ -771,7 +800,7 @@ const Localization = (() => {
 			PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN: "All other players, hold out a hand in front of you. {Identity:instigator,plural}, touch another player's hand. That player is now an Alien regardless of what happens to their card. All players, put your hands down.",
 			PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION: "All other players, hold out a hand in front of you. {Identity:instigator,plural}, touch another player's hand. That player now wins if {Identity:instigator,plural,definite} win, regardless of whether they themselves are voted out and what happens to their card. All players, put your hands down.",
 			PROMPT_ALIEN_TEAM_ACTION_NOTHING: "Do nothing, just stare at each other until it gets awkward.",
-			PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS: "Show your cards to the other {Identity:instigator,plural}.",
+			PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS: "Show your cards to each other.",
 			PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS: "Give your cards to the nearest {Identity:instigator} to your {Select:restriction,left,DIRECTION_LEFT,right,DIRECTION_RIGHT}.",
 			PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE: "Together as a team, you may look at {PROMPT_VIEW_CARD_ENTRY}.",
 			PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL: "Individually, you may look at {PROMPT_VIEW_CARD_ENTRY}.",
@@ -795,7 +824,7 @@ const Localization = (() => {
 			PROMPT_BLOB_OBJECTIVE_ALONE: "You only need to prevent yourself from being voted out.",
 			PROMPT_BLOB_OBJECTIVE_MULTI: "You must prevent the nearest {Value:blobLeft} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your left and {Value:blobRight} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your right from being voted out.",
 			PROMPT_BLOB_OBJECTIVE_SINGLE: "You must prevent the player nearest to your {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT} from being voted out.",
-			PROMPT_BODYSNATCHER: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {If:fakeAction,PROMPT_BODYSNATCHER_FAKE} {PROMPT_VIEW_CARD} Then swap your own card for the card you looked at. Your new card is now also an Alien. {PROMPT_SLEEP_CALL}",
+			PROMPT_BODYSNATCHER: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {If:fakeAction,PROMPT_BODYSNATCHER_FAKE} {PROMPT_VIEW_CARD} Then swap your own card for the card you looked at. Your new card also becomes an {TEAM_ALIEN}. {PROMPT_SLEEP_CALL}",
 			PROMPT_BODYSNATCHER_FAKE: "<Narrator: show that the action is not to be performed>.",
 			PROMPT_BRIEF_ALIEN_MAKE_ALIEN: "touch a hand, that player becomes an Alien.",
 			PROMPT_BRIEF_ALIEN_MAKE_MINION: "touch a hand, that player wins with you.",
@@ -839,8 +868,8 @@ const Localization = (() => {
 			PROMPT_BRIEF_HEADER_ECHO: "{Identity:instigator} ({Identity:copiedRole}):",
 			PROMPT_BRIEF_INSOMNIAC: "{PROMPT_BRIEF_HEADER} look at your own card.",
 			PROMPT_BRIEF_INSTIGATOR: "{PROMPT_BRIEF_HEADER} swap out a player's marker.",
-			PROMPT_BRIEF_LEADER: "{PROMPT_BRIEF_HEADER} look at {TEAM_ALIEN_PLURAL}.{If:hasFeudingAliens,PROMPT_BRIEF_LEADER_FEUDINGALIENS}",
-			PROMPT_BRIEF_LEADER_FEUDINGALIENS: " Wins if both Groob and Zerb survive.",
+			PROMPT_BRIEF_LEADER: "{PROMPT_BRIEF_HEADER} look at {TEAM_ALIEN_PLURAL}. {If:hasFeudingAliens,PROMPT_BRIEF_LEADER_FEUDINGALIENS}",
+			PROMPT_BRIEF_LEADER_FEUDINGALIENS: "Wins if both Groob and Zerb survive.",
 			PROMPT_BRIEF_LOVERS: "{PROMPT_BRIEF_HEADER} identify each other.",
 			PROMPT_BRIEF_MARKSMAN: "{PROMPT_BRIEF_HEADER} look at a player's card + marker.",
 			PROMPT_BRIEF_MASON: "{PROMPT_BRIEF_HEADER} identify each other.",
@@ -1143,7 +1172,7 @@ const Localization = (() => {
 			ROLE_APPRENTICEASSASSIN: "Lönnmördarnovis",
 			ROLE_APPRENTICEASSASSIN_DEFINITE: "Lönnmördarnovisen",
 			ROLE_APPRENTICEASSASSIN_DEFINITE_GENITIVE: "Lönnmördarnovisens",
-			ROLE_APPRENTICEASSASSIN_GENITIVE: "Lönnmördarnovisens",
+			ROLE_APPRENTICEASSASSIN_GENITIVE: "Lönnmördarnovis",
 			ROLE_APPRENTICEASSASSIN_PLURAL: "Lönnmördarnoviser",
 			ROLE_APPRENTICEASSASSIN_PLURAL_DEFINITE: "Lönnmördarnoviserna",
 			ROLE_APPRENTICEASSASSIN_PLURAL_DEFINITE_GENITIVE: "Lönnmördarnovisernas",
@@ -1862,11 +1891,16 @@ const Localization = (() => {
 			//Narration prompts
 			DIRECTION_LEFT: "vänster",
 			DIRECTION_RIGHT: "höger",
-			NUM_WORD: "{Select:count,1,NUM_ONE,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR}",
+			NUM_WORD: "{Select:count,1,NUM_ONE,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,5,NUM_FIVE,6,NUM_SIX,7,NUM_SEVEN,8,NUM_EIGHT,9,NUM_NINE}",
 			NUM_ONE: "ett",
 			NUM_TWO: "två",
 			NUM_THREE: "tre",
 			NUM_FOUR: "fyra",
+			NUM_FIVE: "fem",
+			NUM_SIX: "sex",
+			NUM_SEVEN: "sju",
+			NUM_EIGHT: "åtta",
+			NUM_NINE: "nio",
 			
 			PROMPT_BRIEF_HEADER: "{If:copiedRole,PROMPT_BRIEF_HEADER_ECHO,PROMPT_BRIEF_HEADER_DIRECT}",
 			PROMPT_BRIEF_HEADER_DIRECT: "{Identity:instigator}:",
@@ -1882,7 +1916,7 @@ const Localization = (() => {
 			PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN: "Alla andra spelare, håll ut en hand framför er. {Identity:instigator,plural}, rör vid en annan spelares hand. Spelaren är nu en {Identity:instigator} oavsett vad som händer med deras kort. Alla spelare, ner med händerna.",
 			PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION: "Alla andra spelare, håll ut en hand framför er. {Identity:instigator,plural}, rör vid en annan spelares hand. Spelaren vinner nu om {Identity:instigator,plural,definite} vinner oavsett om de själva blir utröstade och vad som händer med deras kort. Alla spelare, ner med händerna.",
 			PROMPT_ALIEN_TEAM_ACTION_NOTHING: "Gör ingenting, stirra bara på varandra tills det blir pinsamt.",
-			PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS: "Visa era kort för alla andra {Identity:instigator,plural}.",
+			PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS: "Visa era kort för varandra.",
 			PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS: "Ge era kort till närmaste {Identity:instigator} till {Select:restriction,left,DIRECTION_LEFT,right,DIRECTION_RIGHT} om er.",
 			PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE: "Gemensamt inom laget får ni titta på {PROMPT_VIEW_CARD_ENTRY}.",
 			PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL: "Individuellt får ni titta på {PROMPT_VIEW_CARD_ENTRY}.",
@@ -1947,8 +1981,8 @@ const Localization = (() => {
 			PROMPT_BRIEF_GREMLIN: "{PROMPT_BRIEF_HEADER} byt plats på två märken eller kort.",
 			PROMPT_BRIEF_INSOMNIAC: "{PROMPT_BRIEF_HEADER} titta på ditt eget kort.",
 			PROMPT_BRIEF_INSTIGATOR: "{PROMPT_BRIEF_HEADER} byt ut en spelares märke.",
-			PROMPT_BRIEF_LEADER: "{PROMPT_BRIEF_HEADER} titta på {TEAM_ALIEN_PLURAL}.{If:hasFeudingAliens,PROMPT_BRIEF_LEADER_FEUDINGALIENS}",
-			PROMPT_BRIEF_LEADER_FEUDINGALIENS: " Vinner om båda Groob och Zerb överlever.",
+			PROMPT_BRIEF_LEADER: "{PROMPT_BRIEF_HEADER} titta på {TEAM_ALIEN_PLURAL}. {If:hasFeudingAliens,PROMPT_BRIEF_LEADER_FEUDINGALIENS}",
+			PROMPT_BRIEF_LEADER_FEUDINGALIENS: "Vinner om både Groob och Zerb överlever.",
 			PROMPT_BRIEF_LOVERS: "{PROMPT_BRIEF_HEADER} identifiera varandra.",
 			PROMPT_BRIEF_MARKSMAN: "{PROMPT_BRIEF_HEADER} titta på en spelares kort + märke.",
 			PROMPT_BRIEF_MASON: "{PROMPT_BRIEF_HEADER} identifiera varandra.",
@@ -2003,7 +2037,7 @@ const Localization = (() => {
 			PROMPT_COUNT_ACTION: "Byt ut en annan spelares märke mot {ROLE_COUNT_DEFINITE_GENITIVE} märke.",
 			PROMPT_CUPID: "{PROMPT_WAKE_CALL} Byt ut två andra spelares märken mot {ROLE_CUPID_DEFINITE_GENITIVE} märke. {PROMPT_SLEEP_CALL}",
 			PROMPT_CURATOR: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_CURATOR_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_CURATOR_ACTION: "Placera en artefakt med ansiktet ner på en annan spelares kort utan att titta på den.",
+			PROMPT_CURATOR_ACTION: "Placera en artefakt utan att titta på den med ansiktet ner framför en annan spelare.",
 			PROMPT_DISEASED: "{PROMPT_WAKE_CALL} Byt ut en av dina grannars märke mot {Identity:instigator,definite,genitive} märke. {PROMPT_SLEEP_CALL}",
 			PROMPT_DOPPELGANGER: "{PROMPT_WAKE_CALL} Titta på en annan spelares kort. Du är nu rollen du såg. {If:hasImmediateActionRoles,PROMPT_DOPPELGANGER_IMMEDIATE_ACTION} {PROMPT_SLEEP_CALL}",
 			PROMPT_DOPPELGANGER_IMMEDIATE_ACTION: "Om rollen du såg var {IdentityList:listImmediateActionRoles,or}, utför dess handling nu.",
@@ -2011,8 +2045,8 @@ const Localization = (() => {
 			PROMPT_DRUNK: "{PROMPT_WAKE_CALL} {PROMPT_DRUNK_ACTION} {PROMPT_SLEEP_CALL}",
 			PROMPT_DRUNK_ACTION: "Byt ditt kort mot ett av mittenkorten utan att se vad det är.",
 			PROMPT_EMPATH: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} Iakta vad de andra spelarna gör. Spelare {ValueList:players}, utan att vakna, {LocalizedValue:question} {PROMPT_SLEEP_CALL}",
-			PROMPT_EMPATH_QUESTION_10: "visa en tumme upp om du tror att du kommer vinna, eller en tumme ner om du tror att du kommer förlora.",
-			PROMPT_EMPATH_QUESTION_11: "peka på den spelare du tror är mest sannolik att redan ha glömt sin roll.",
+			PROMPT_EMPATH_QUESTION_10: "visa tummen upp om du tror att du kommer vinna, eller tummen ner om du tror att du kommer förlora.",
+			PROMPT_EMPATH_QUESTION_11: "peka på den spelare som du tror är mest sannolik att redan ha glömt sin roll.",
 			PROMPT_EMPATH_QUESTION_1: "peka på en spelare som du tror kommer vinna.",
 			PROMPT_EMPATH_QUESTION_2: "peka på en spelare som du tror blir utröstad.",
 			PROMPT_EMPATH_QUESTION_3: "peka på den spelare som du litar mest på.",
@@ -2034,7 +2068,7 @@ const Localization = (() => {
 			PROMPT_LEADER: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, håll ut en tumme så att {Identity:instigator,definite} kan se. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, dra tillbaka tummarna.",
 			PROMPT_LEADER_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_ALIEN_PLURAL}, fortsätt hålla ut tummarna så att {ROLE_DOPPELGANGER_DEFINITE} kan se. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
 			PROMPT_LEADER_FEUDINGALIENS: "{ROLE_FEUDINGALIENS}, håll ut båda tummarna. {Identity:instigator}, om du ser både {ROLE_FEUDINGALIENS_DEFINITE} vinner du om ingen av dem röstas ut.",
-			PROMPT_LOVERS: "{PROMPT_WAKE_CALL} Identifiera varandra. Om en av er röstas ut som kommer även den andra att röstas ut. {PROMPT_SLEEP_CALL}",
+			PROMPT_LOVERS: "{PROMPT_WAKE_CALL} Identifiera varandra. Om en av er röstas ut så kommer samtliga att röstas ut. {PROMPT_SLEEP_CALL}",
 			PROMPT_MARKSMAN: "{PROMPT_WAKE_CALL} {PROMPT_MARKSMAN_ACTION} {PROMPT_SLEEP_CALL}",
 			PROMPT_MARKSMAN_ACTION: "Titta på en annan spelares kort, samt ytterligare en annan spelares märke. Det får inte vara samma spelare.",
 			PROMPT_MASON: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_MASON_DOPPELGANGER} vakna och identifiera varandra. {Identity:instigator,plural}, somna.",
@@ -2071,10 +2105,10 @@ const Localization = (() => {
 			PROMPT_REVEALER_ACTION: "Vänd en annan spelares kort ansiktet upp. {If:hasHiddenRoles,PROMPT_REVEALER_HIDDEN_ROLE}",
 			PROMPT_REVEALER_HIDDEN_ROLE: "Om kortet är: {IdentityList:listHiddenRoles,or}, vänd kortet tillbaka med ansiktet ner.",
 			PROMPT_RIPPLE: "{If:noRipple,PROMPT_RIPPLE_NONE} Det har inträffat en krusning i rum-tiden. {PROMPT_RIPPLE_SELECTOR}",
-			PROMPT_RIPPLE_DOUBLE_VOTE: "Spelare {ValueList:players} får under omröstningen använda båda händer för att rösta för dubbla röster.",
-			PROMPT_RIPPLE_MUTED: "Spelare {ValueList:players} får inte prata till efter omröstningen.",
+			PROMPT_RIPPLE_DOUBLE_VOTE: "Spelare {ValueList:players} får under omröstningen använda båda händerna för dubbla röster.",
+			PROMPT_RIPPLE_MUTED: "Spelare {ValueList:players} får inte prata förrän efter omröstningen.",
 			PROMPT_RIPPLE_NONE: "<Berättare: ignorera följande om inte {ROLE_ORACLE_DEFINITE} valt att tvinga fram en krusning>",
-			PROMPT_RIPPLE_REBUKED: "Spelare {ValueList:players} måste vända sig från bordet till efter omröstningen.",
+			PROMPT_RIPPLE_REBUKED: "Spelare {ValueList:players} måste vända sig från bordet förrän efter omröstningen.",
 			PROMPT_RIPPLE_ROLE_ACTION: "Spelare {Value:player}, vakna. {PROMPT_DO_ROLE_ACTION} Spelare {Value:player}, somna.",
 			PROMPT_RIPPLE_SELECTOR: "{Select:type,ripple_timer,PROMPT_RIPPLE_TIMER,ripple_role_action,PROMPT_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_RIPPLE_MUTED,ripple_rebuked,PROMPT_RIPPLE_REBUKED,ripple_view_player,PROMPT_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_RIPPLE_DOUBLE_VOTE}",
 			PROMPT_RIPPLE_TIMER: "Ni har endast en minut på er innan ni måste rösta.",
@@ -2085,7 +2119,7 @@ const Localization = (() => {
 			PROMPT_SENTINEL: "{PROMPT_WAKE_CALL} Placera en {TOKEN_SHIELD} på en annan spelares kort. {PROMPT_SLEEP_CALL}",
 			PROMPT_SQUIRE: "{PROMPT_WAKE_CALL} {TEAM_WEREWOLF_PLURAL}, håll ut en tumme så att {Identity:instigator,definite} kan se vem ni är. {Identity:instigator}, du får titta på deras kort. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_SQUIRE_DOPPELGANGER} {TEAM_WEREWOLF_PLURAL}, ner med tummarna.",
 			PROMPT_SQUIRE_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, fortsätt hålla ut tummen så att {ROLE_DOPPELGANGER_DEFINITE} kan se vem ni är. {ROLE_DOPPELGANGER}, du får titta på deras kort. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_THING: "{PROMPT_WAKE_CALL} Samtliga andra spelare, räck ut en hand framför er. {ROLE_THING}, rör handen tilhörande spelarna närmast till höger eller vänster. {PROMPT_SLEEP_CALL}",
+			PROMPT_THING: "{PROMPT_WAKE_CALL} Samtliga andra spelare, räck ut en hand framför er. {ROLE_THING}, rör handen tillhörande spelaren närmast till höger eller vänster. {PROMPT_SLEEP_CALL}",
 			PROMPT_TROUBLEMAKER: "{PROMPT_WAKE_CALL} {PROMPT_TROUBLEMAKER_ACTION} {PROMPT_SLEEP_CALL}",
 			PROMPT_TROUBLEMAKER_ACTION: "Byt plats på två andra spelares kort, utan att titta på något av dem.",
 			PROMPT_VAMPIRE_TEAM: "{If:hasDoppelganger,PROMPT_VAMPIRE_TEAM_DOPPELGANGER_PREFIX} {Identity:instigator,plural}, vakna och identifiera varandra. Tillsammans får ni välja en spelare vars märke ni byter ut mot {Identity:instigator,plural,definite,genitive} märke. {Identity:instigator,plural}, somna.",
@@ -2101,7 +2135,9 @@ const Localization = (() => {
 			PROMPT_VIEW_CARD_NEIGHBOR_RIGHT: "din högra grannes kort",
 			PROMPT_VIEW_CARD_ODD: "{NUM_WORD} kort från udda spelare",
 			PROMPT_VIEW_CARD_PLAYER: "{Select:restriction,any,PROMPT_VIEW_CARD_PLAYER_ANY,specific,PROMPT_VIEW_CARD_PLAYER_SPECIFIC}",
-			PROMPT_VIEW_CARD_PLAYER_ANY: "{NUM_WORD} kort från en annan spelare",
+			PROMPT_VIEW_CARD_PLAYER_ANY: "{NUM_WORD} kort från {Select:count,1,PROMPT_VIEW_CARD_PLAYER_ANY_SINGLE,PROMPT_VIEW_CARD_PLAYER_ANY_MULTI} spelare",
+			PROMPT_VIEW_CARD_PLAYER_ANY_SINGLE: "en annan",
+			PROMPT_VIEW_CARD_PLAYER_ANY_MULTI: "andra",
 			PROMPT_VIEW_CARD_PLAYER_SPECIFIC: "kort som tillhör spelare {ValueList:players}",
 			PROMPT_VIEW_CARD_SELF: "ditt eget kort",
 			PROMPT_VILLAGEIDIOT: "{PROMPT_WAKE_CALL} {PROMPT_VILLAGEIDIOT_ACTION} {PROMPT_SLEEP_CALL}",
@@ -2218,7 +2254,7 @@ const Localization = (() => {
 
 	const LANGUAGE_STORE = "onuw_lang"
 	
-	let LANG = "ENG";
+	let LANG = "SWE";
 
 	/* =========================
 	   Initialization
@@ -2240,6 +2276,7 @@ const Localization = (() => {
 		LANG = localStorage.getItem(LANGUAGE_STORE) || LANG;
 	}
 
+	//Splits the argument portion of a template primitive, converting the raw string input to a typed value
 	function _parseTemplateArg(value) {
 		value = value.trim();
 
@@ -2262,16 +2299,42 @@ const Localization = (() => {
 		return value;
 	}
 	
+	//Capitalizes the first letter of each sentence (after a ./!/? or at the very start of the text), left over from template expansion pulling in lowercase fragments
 	function _normalizeSentences(text) {
 		return text.replace(/([.!?]|^)\s*(\p{L})/gu, (_, punct, letter) => {
 			return (punct === "" ? "" : punct + " ") + letter.toUpperCase();
 		});
 	}
 	
+	//Collapses runs of multiple spaces to one, removes a stray space before ,.!?, and trims the ends — cleanup for gaps left by conditional/empty template expansion.
 	function _trimExtraSpaces(text) {
 		return text.replace(/ {2,}/g, " ").replace(/ ([,.!?])/g, "$1").trim();
 	}
 	
+	/*
+	 * Recursively resolves template expressions embedded within localized text.
+	 *
+	 * Templates are entered into localized strings using the bracket {...} notation.
+	 * Templates can by default substitute localized keys directly. If a function
+	 * table is provided, it can also call named primitives with arguments. Arguments
+	 * are provided as comma separated values, prefixed by a colon.
+	 *
+	 * Template syntax:
+	 *	{KEY}
+	 *		Inserts another localization key.
+	 *	{Function:arg1,arg2,...}
+	 *		Invokes a built-in template function. Will only accept arguments as strings
+	 *		that are then converted to typed values (e.g. "true" -> boolean true).
+	 *
+	 * Template functions may themselves return templates, allowing complex
+	 * narration to be assembled from small reusable components.
+	 *
+	 * An optional data argument and error function can also be provided for extra
+	 * control over arguments and error handling.
+	 *
+	 * Resolution continues until no template expressions remain or the maximum
+	 * recursion depth is reached.
+	 */
 	function _resolveTemplate(text, funcs, data, onError) {
 		let result = text;
 
@@ -2302,6 +2365,7 @@ const Localization = (() => {
 		return _normalizeSentences(_trimExtraSpaces(result));
 	}
 
+	//Default error handling, generates readable placeholder output when template/localization evaluation fails (e.g. missing localization key definition).
 	function _defaultTemplateError(type, key) {
 		console.warn(`Template resolution issue (${type}):`, key);
 		return type === "missing_key" ? `UNDEF: ${key}` : undefined; // undefined ⇒ caller keeps the partially-resolved text
@@ -2311,6 +2375,13 @@ const Localization = (() => {
 	/* =========================
 	   Public functions
 	   ========================= */
+	
+	/*
+	 * Public localization interface.
+	 *
+	 * Most callers should use localize(), which resolves both localization keys
+	 * and any embedded template expressions.
+	 */
 	
 	function localize(key, funcs = null, data = null, onError = _defaultTemplateError) {
 		return _resolveTemplate(`{${key}}`, funcs, data, onError);

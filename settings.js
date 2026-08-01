@@ -1,3 +1,17 @@
+/*
+ * Central settings manager.
+ *
+ * Defines the complete settings hierarchy, stores current values,
+ * performs validation, persists settings to localStorage, and exposes
+ * helper functions used by both the settings UI and prompt generation.
+ *
+ * Settings are defined declaratively as a tree. Runtime lookup tables
+ * and OIDs are generated automatically during initialization.
+ *
+ * Object ID (OID) is used to uniquely identify a node within the
+ * settings tree, and is used for getting and setting values.
+ */
+
 const Settings = (() => {
 	
 	/* =========================
@@ -12,6 +26,16 @@ const Settings = (() => {
 	//The type expected for each OID for quick lookup and validation
 	const OID_TO_TYPE = {};
 	
+	/*
+	 * Definition of each supported input type.
+	 *
+	 * Every input type specifies:
+	 *   - validation
+	 *   - default value generation
+	 *   - localization key for validation errors
+	 *
+	 * This allows the settings tree itself to remain purely declarative.
+	 */
 	const SETTINGS_TYPES = {
 		weight: {
 			validator: (value) => { return (Number.isInteger(value) && value >= 0); },
@@ -30,6 +54,13 @@ const Settings = (() => {
 		},
 	};
 	
+	/*
+	 * Optional validation predicates that depend on the currently selected roles.
+	 *
+	 * Some settings are only meaningful when certain game configurations
+	 * are present. These predicates determine whether a setting should
+	 * participate in validation.
+	 */
 	const CONTEXT_REQUIREMENTS = {
 		evilTeamPresent: (context) => {
 			if (!context?.selectedRoles) return true; // no context supplied — fail open, see below
@@ -40,7 +71,13 @@ const Settings = (() => {
 	};
 
 	/*
-		Settings tree, defines the avaiable settings and their hierarchy for use in the GUI construction. Each node represents a row in the GUI, and contains attributes as below
+		Declarative description of the settings UI.
+		The same hierarchy drives:
+			- GUI generation
+			- default value generation
+			- validation
+			- persistence
+		Settings tree, defines the available settings and their hierarchy for use in the GUI construction. Each node represents a row in the GUI, and contains attributes as below
 		 * type:
 		 * - header: visual grouping panel, no value
 		 * - weight: integer >= 0, used for weighted choice pools
@@ -672,7 +709,14 @@ const Settings = (() => {
 		_deepFreeze(SETTINGS_TREE);
 	}
 	
-	//Initializes full OID value to all nodes in the tree
+	/*
+	 * Assigns a unique Object ID (OID) to every node by concatenating the
+	 * hierarchy of IDs (e.g. "oracle.view_player.odd").
+	 *
+	 * OIDs are used for lookup, persistence and validation instead of
+	 * storing direct references to tree nodes.
+	 * Also defines the type of value expected in each OID for validation
+	 */
 	function _normalizeTree(tree = SETTINGS_TREE, parentOid = "") {
 		for (const node of tree) {
 			const oid = _makeOid(parentOid, node.id);
@@ -687,7 +731,7 @@ const Settings = (() => {
 		}
 	}
 
-	//Locks the role definitions as immutable
+	//Locks the settings tree as immutable
 	function _deepFreeze(obj) {
 		Object.freeze(obj);
 
@@ -772,6 +816,7 @@ const Settings = (() => {
 		return node.type in SETTINGS_TYPES;
 	}
 	
+	//Centralized write path used by all callers to guarantee validation before a value is stored.
 	function _setValue(oid, value, save = true) {
 		const type = OID_TO_TYPE[oid];
 		
@@ -787,6 +832,28 @@ const Settings = (() => {
 			_save();
 	}
 	
+	/*
+	 * Validation walks the entire settings tree and produces a list of
+	 * structured error objects rather than stopping at the first error.
+	 *
+	 * This allows the UI to display every invalid setting simultaneously.
+	 *
+	 * Validation is intentionally independent of the currently selected
+	 * roles. Relevant errors are filtered afterwards so the UI only reports
+	 * problems that affect the current game configuration.
+	 *
+	 * Recursively validates a single node and its subtree, pushing any
+	 * problems found onto the shared `errors` array rather than returning
+	 * or throwing — this is what lets validate() report every invalid
+	 * setting across the whole tree in one pass instead of stopping at the
+	 * first failure.
+	 *
+	 * `affectedRoles` is inherited from the nearest ancestor that declares
+	 * it (typically a header node) unless a node overrides it, so leaf
+	 * settings don't need to repeat which roles make them relevant.
+	 * `hierarchy` accumulates textKeys on the way down purely so an error
+	 * can report a human-readable breadcrumb of where it occurred.
+	 */
 	function _validateNode(node, errors, hierarchy = [], context = {}, inheritedAffectedRoles) {
 		const affectedRoles = node.affectedRoles ?? inheritedAffectedRoles;
 		const v = OID_TO_VALUE[node.oid];
@@ -805,6 +872,24 @@ const Settings = (() => {
 		}
 	}
 	
+	/*
+	 * Weighted-choice pools (e.g. "what does the Alien do") only make sense
+	 * if at least one option in the group has a non-zero weight, or the
+	 * random pick in rules.js has nothing to select and throws. This groups
+	 * sibling children by weightGroupId and sums their values, but a child
+	 * whose `requiresContext` check fails (e.g. a setting only meaningful
+	 * when an evil team is in play) contributes 0 to the sum regardless of
+	 * its configured value — so a weight group can appear to satisfy
+	 * "sum > 0" in the settings UI generally, yet still be reported as
+	 * invalid for the *current* role selection if the only non-zero entries
+	 * are contextually unavailable right now.
+	 *
+	 * When a group's sum is zero, the error message differentiates between
+	 * "you set everything to zero yourself" vs. "the only non-zero entry was
+	 * excluded by context" (using that excluded child's own
+	 * contextErrorMsg if it defines one), so the UI can explain *why* a
+	 * group is failing rather than just that it is.
+	 */
 	function _validateWeightGroupsAmongChildren(node, errors, hierarchy, context, inheritedAffectedRoles) {
 		const affectedRoles = node.affectedRoles ?? inheritedAffectedRoles;
 		const groupSums = new Map();
@@ -900,6 +985,7 @@ const Settings = (() => {
 		return { ...OID_TO_VALUE };
 	}
 
+	//validate returns every configuration error.
 	function validate(context = {}) {
 		const errors = [];
 		
@@ -913,6 +999,15 @@ const Settings = (() => {
 		return errors.filter(error => _isErrorRelevant(error, selectedRoles));
 	}
 	
+	/*
+	 * validate() deliberately ignores which roles are selected, so its
+	 * results are stable regardless of the current game setup — useful for
+	 * a "reset to sane defaults" check. validateRelevant() layers the
+	 * role-awareness on top by filtering those same errors down to the ones
+	 * whose `affectedRoles` intersects the roles actually in play, which is
+	 * what the in-game UI should show (no point warning about Vampire
+	 * settings when no Vampire role is selected).
+	 */
 	function validateRelevant(context) {
 		return filterRelevant(validate(context), context.selectedRoles ?? new Map());
 	}

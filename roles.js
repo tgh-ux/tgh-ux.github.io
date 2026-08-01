@@ -1,3 +1,15 @@
+/*
+ * Central registry for all role and token definitions.
+ *
+ * This module contains the immutable metadata describing every role and token
+ * in the game, performs initialization to derive additional information
+ * (tags, teams, phases, localization keys, etc.), validates the data, and
+ * exposes helper functions used throughout the application.
+ *
+ * The exported objects are frozen after initialization and should be treated
+ * as read-only.
+ */
+
 const Roles = (() => {
 
 	/* =========================
@@ -37,6 +49,11 @@ const Roles = (() => {
 	};
 
 	/* Definition of all roles present in the game, pre-defined with unique per-role data
+		Only data that is unique to an individual role is stored here.
+		Shared properties such as tags, team membership, active phase,
+		localization keys and IDs are injected during initialization
+		from the lookup tables below.
+		
 		RoleID:
 			* icon: x/y coordinates for the character portrait and first card art in their respective sprite sheets
 			* cardIcons: array of x/y coordinates for addition card art in the card sprite sheet
@@ -46,10 +63,10 @@ const Roles = (() => {
 			* extraCenterCards: how many extra unused center cards this role will contribute with (mainly for player count calculations)
 			* disable: if present and true, excludes the role from consideration in the UI and logic
 			
-			The follow attributes are assigned during initialization
+			The following attributes are assigned during initialization
 			* id: the ID of the role, same as its entry in the ROLES table
 			* nameKey: localization key for the full role name
-			* abilityKey: localization key for the fill role ability description
+			* abilityKey: localization key for the full role ability description
 			* tags: an array of strings that represent generic meta data, such as what rules apply for a role
 			* team: defines the team a role is playing for (by default)
 			* phase: defines the active phase during which the role will perform its action
@@ -324,7 +341,15 @@ const Roles = (() => {
 			icon: { x: 10, y: 1 },
 		},
 	};
-	//Defines different tags used by the roles, as well as what roles they are connected to
+	/*
+	 * Lookup tables mapping tags to the roles that possess them.
+	 *
+	 * During initialization these mappings are inverted so each role receives
+	 * a `tags` array, avoiding duplication inside individual role definitions.
+	 *
+	 * Tags are used both for gameplay rules and as generic metadata for
+	 * filtering, prerequisites and UI behaviour.
+	 */
 	const TAGS = {
 		DOPPELGANGER_IMMEDIATE_ACTION: [
 			"ALPHAWOLF",
@@ -608,13 +633,23 @@ const Roles = (() => {
 			"VILLAGEIDIOT",	
 		],
 	};
-	//Defines active phases and what roles they are connected to
+	/*
+	 * Lookup tables used during initialization.
+	 *
+	 * Rather than storing the active phase on every role directly, phases are
+	 * declared once here and injected into the role definitions.
+	 */
 	const ROLE_PHASES = {
 		DAY: [ "BLOB", "BODYGUARD", "CURSED", "HUNTER", "PRINCE", "TANNER", "VILLAGER", ], 
 		DUSK: [ "APPRENTICEASSASSIN", "ASSASSIN", "COUNT", "CUPID", "DISEASED", "INSTIGATOR", "MASTER", "PRIEST", "RENFIELD", "VAMPIRE", ],
 		NIGHT: [ "ALIEN", "ALPHAWOLF", "APPRENTICESEER", "APPRENTICETANNER", "AURASEER", "BEHOLDER", "BODYSNATCHER", "COPYCAT", "COW", "CURATOR", "DOPPELGANGER", "DREAMWOLF", "DRUNK", "EMPATH", "EXPOSER", "FEUDINGALIENS", "GREMLIN", "INSOMNIAC", "LEADER", "MARKSMAN", "MASON", "MINION", "MORTICIAN", "MYSTICWOLF", "NOSTRADAMUS", "ORACLE", "PARANORMALINVESTIGATOR", "PICKPOCKET", "PSYCHIC", "RASCAL", "REVEALER", "ROBBER", "SEER", "SENTINEL", "SQUIRE", "SYNTHETICALIEN", "THING", "TROUBLEMAKER", "VILLAGEIDIOT", "WEREWOLF", "WITCH", ], 	
 	};
-	//Defines the available teams and what roles are members of them
+	/*
+	 * Default team membership for each role.
+	 *
+	 * Some roles may later change alignment during gameplay, but this defines
+	 * their starting affiliation.
+	 */
 	const ROLE_TEAMS = {
 		TEAM_ALIEN: [ "ALIEN", "BODYSNATCHER", "FEUDINGALIENS", ], 
 		TEAM_MINORITY: [ "APPRENTICEASSASSIN", "APPRENTICETANNER", "ASSASSIN", "BLOB", "MINION", "MORTICIAN", "RENFIELD", "SQUIRE", "SYNTHETICALIEN", "TANNER", ], 
@@ -626,6 +661,17 @@ const Roles = (() => {
 	/* =========================
 	   Initialization
 	   ========================= */
+	
+	/*
+	 * Converts the declarative data above into the final runtime representation.
+	 *
+	 * Responsibilities include:
+	 *   - injecting derived properties
+	 *   - validating data consistency
+	 *   - generating localization keys
+	 *   - disabling invalid definitions
+	 *   - freezing the finished objects
+	 */
 	
 	function _init() {
 		_applyTags();
@@ -762,7 +808,21 @@ const Roles = (() => {
 	function _getToken(token) {
 		return typeof token === "object" ? token : TOKENS[token];
 	}
-	//Recursively evaluates all the nodes in the prerequisite tree of a role and returns true if all prerequisites are satisfied, else false
+	/*
+	 * Evaluates a prerequisite tree against a collection of selected roles.
+	 *
+	 * Nodes are either:
+	 *
+	 *   Leaf:
+	 *     { type: "role"|"team"|"tag", any:[...] }
+	 *     { type: "role"|"team"|"tag", all:[...] }
+	 *
+	 *   Logical:
+	 *     { any:[ child1, child2, ... ] }
+	 *     { all:[ child1, child2, ... ] }
+	 *
+	 * Trees may be nested arbitrarily to express complex eligibility rules.
+	 */
 	function _evaluatePrerequisiteNode(node, roleIds) {
 		const hasAny = node.any !== undefined;
 		const hasAll = node.all !== undefined;
@@ -823,6 +883,13 @@ const Roles = (() => {
 	   Public functions
 	   ========================= */
 	
+	/*
+	 * Public API.
+	 *
+	 * Most functions accept either a role/token ID string or the corresponding
+	 * definition object for convenience.
+	 */
+	
 	//Returns the x/y coordinates for the role character sprite in the role icon sprite sheet
 	function getPortraitIcon(role) {
 		return _getRole(role).icon;
@@ -846,11 +913,11 @@ const Roles = (() => {
 		const roleEntry = _getRole(role);
 		return roleEntry.nameKey;
 	}
-	//Returns true of a role has the specified tag, else false
+	//Returns true if a role has the specified tag, else false
 	function hasTag(role, tag) {
 		return _getRole(role)?.tags?.includes(tag) || false;
 	}
-	//Returns true of a role has any of the specified tags, else false
+	//Returns true if a role has any of the specified tags, else false
 	function hasAnyTag(role, ...tags) {
 		return tags.some(t => hasTag(role, t));
 	}
@@ -870,7 +937,18 @@ const Roles = (() => {
 	function isEnabled(role) {
 		return !_getRole(role)?.disable;
 	}
-	//Calculates and returns the number of players supported based on the provided role selection configuration, represented as a roleId -> count map
+	/*
+	 * Calculates and returns the number of players supported by a role
+	 * selection, represented as a roleId -> count map.
+	 *
+	 * Every game always reserves 3 unused cards in the center regardless of
+	 * player count, so the total card count starts 3 short of the player
+	 * count. Some roles (e.g. Alpha Wolf) contribute extra cards to the
+	 * center beyond their own instance — `extraCenterCards` — so each of
+	 * those instances counts for one player less. The result is floored at
+	 * 0 so a selection that's entirely center-fodder (e.g. no roles selected
+	 * yet) never reports a negative player count.
+	 */
 	function calculatePlayerCount(roleCounts) {
 		const CENTER_CARDS = 3;
 		let playerCount = 0 - CENTER_CARDS;
@@ -887,8 +965,6 @@ const Roles = (() => {
 		const selectedRoleIds = Array.from(roleCounts.keys());
 		return roleEntry.prereq ? _evaluatePrerequisiteNode(roleEntry.prereq, selectedRoleIds) : true;
 	}
-	
-	
 	//Returns the definitions of all currently enabled tokens
 	function getAllEnabledTokens() {
 		return Object.values(TOKENS).filter(t => !t.disabled);

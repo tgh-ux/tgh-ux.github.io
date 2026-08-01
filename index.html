@@ -1,3 +1,18 @@
+<!--
+    Static application skeleton.
+
+    Panel contents are largely generated at runtime by gui.js from the
+    declarative metadata exposed by the application modules.
+	
+	Module initialization order:
+	- Localization provides language services.
+	- Roles, Settings and Rules provide the game model.
+	- Interpreter bridges Rules and Localization.
+	- GUI builds the interactive interface on top of the loaded modules.
+	GUI is deferred, loaded only after the other modules have been loaded
+	and the static page skeleton has been created.
+-->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -145,6 +160,7 @@
     </section>
 </div>
 
+<!-- Shared modal used for role descriptions and validation errors -->
 <div id="modalOverlay" class="modal-overlay hidden">
     <div class="modal-overlay-backdrop"></div>
 

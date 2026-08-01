@@ -1,3 +1,15 @@
+/*
+ * Narration rule engine.
+ *
+ * Generates an ordered list of narration turns from the currently selected
+ * roles. Each turn contains only structured data describing the action and
+ * any randomly generated context required to narrate it.
+ *
+ * This module deliberately does not produce human-readable text.
+ * Interpretation and localization of the generated turn data is handled by
+ * a separate prompt rendering module.
+ */
+
 const Rules = (() => {
 
 	/* =========================
@@ -6,9 +18,29 @@ const Rules = (() => {
 	
 	//If there are less players than this, simply don't generate a prompt.
 	const MIN_PLAYERS = 3;
-		
-	//Must be defined before TURN_ORDER
+	
+	/*
+	 * Optional per-rule resolvers. Must be defined before TURN_ORDER.
+	 *
+	 * A resolver generates any contextual data required by a turn, such as
+	 * weighted random outcomes, randomly selected players or derived values.
+	 *
+	 * Resolvers never generate narration text directly; they only populate
+	 * structured data consumed later by the prompt interpreter.
+	 */
 	const RESOLVERS = {
+		/*
+		 * Determines what the Alien team does on their turn.
+		 *
+		 * Builds a two-level weighted tree: top-level branches are broad
+		 * categories (view a card collectively/individually, trade cards, do
+		 * nothing, convert someone, etc.), each with its own Settings-driven
+		 * weight. Categories that view cards branch again into *who* is
+		 * targeted (center, odd/even player, specific player, neighbor).
+		 * _chooseWeightedTree flattens both levels into one roll so the
+		 * final probability of any leaf outcome is the product of its
+		 * branch weights, without the caller needing to reason about nesting.
+		 */
 		AlienResolver: (ctx, action, instigator, data) => {
 			const rngKey = "alien_event" + (data.copiedRole ? "_doppelganger" : "");
 			const choices = [
@@ -40,6 +72,14 @@ const Rules = (() => {
 			
 			return _chooseWeightedTree(choices, rngKey);
 		},
+		/*
+		 * Determines how many Blob center cards exist and how they're split
+		 * left/right of center, scaled by player count (more players ⇒ more
+		 * Blob cards). The left/right split is deliberately balanced
+		 * (floor/ceil of half) rather than random, with only which *side*
+		 * gets the extra odd card decided by a coin flip — this avoids wildly
+		 * uneven distributions while still keeping some unpredictability.
+		 */
 		BlobResolver: (ctx, action, instigator, data) => {
 			const rngKey = "blob_event" + (data.copiedRole ? "_doppelganger" : "");
 			
@@ -61,6 +101,13 @@ const Rules = (() => {
 			
 			return { blobTotal: finalLeft + finalRight, blobLeft: finalLeft, blobRight: finalRight };
 		},
+		/*
+		 * Picks who/what the Bodysnatcher views, plus a separate independent
+		 * roll (`fakeAction`) for whether this turn is actually a decoy the
+		 * app narrates purely to keep other players guessing about who has
+		 * night actions — the interpreter/UI decides how to use that flag,
+		 * this resolver only reports whether it's set.
+		 */
 		BodysnatcherResolver: (ctx, action, instigator, data) => {
 			const rngKey = "bodysnatcher_event" + (data.copiedRole ? "_doppelganger" : "");
 			const fakeAction = _getCachedRandom(rngKey + ".fake") * 100 < Settings.getValue("bodysnatcher.fake");
@@ -75,6 +122,14 @@ const Rules = (() => {
 			
 			return { ..._chooseWeightedTree(choices, rngKey), fakeAction: fakeAction };
 		},
+		/*
+		 * EmpathResolver queries Localization directly for available question
+		 * keys, then picks one random question to assign for the prompt.
+		 *
+		 * This is an intentional exception to the otherwise data-driven design,
+		 * allowing translators to add or remove question variants without requiring
+		 * corresponding changes to the rules engine.
+		 */
 		EmpathResolver: (ctx, action, instigator, data) => {
 			const rngKey = "empath_event" + (data.copiedRole ? "_doppelganger" : "");
 			const availableQuestions = Localization.getKeysContaining("PROMPT_EMPATH_QUESTION_") ?? []
@@ -109,6 +164,18 @@ const Rules = (() => {
 			
 			return _chooseWeightedTree(weights, rngKey);
 		},
+		/*
+		 * Nostradamus predicts his own fate. Since his actual fate depends on
+		 * an actual player choice, this can't be determined programatically
+		 * and must be inserted by the narrator. In the case where NOSTRADAMUS
+		 * is in the game but ends up in the unused center cards, the resolver
+		 * picks a plausible "fallback" identity for him to join. Available
+		 * choices are evenly weighted across every evil/village team currently
+		 * in play, plus Tanner/Apprentice Tanner individually (since they
+		 * aren't a team). Only options that are actually present in the current
+		 * role selection are offered, with the village team always being
+		 * present with the assumption that Nostradamus himself is a member.
+		 */
 		NostradamusResolver: (ctx, action, instigator, data) => {
 			const rngKey = "nostradamus_event" + (data.copiedRole ? "_doppelganger" : "");
 			let choices = [];
@@ -123,6 +190,35 @@ const Rules = (() => {
 			
 			return _chooseWeightedTree(choices, rngKey);
 		},
+		/*
+		 * The most involved resolver: Oracle's action is a grab-bag of
+		 * outcome categories, several of which need their own extra rolls
+		 * *before* they can even be added as a weighted choice:
+		 *
+		 *   - "hunt": whether the hunt actually triggers is pre-rolled
+		 *     (`huntActive`) so the resulting turn data can also flag when a
+		 *     hunt would reveal a role from a team the current settings
+		 *     consider "shouldn't" be exposed (`showExclusionWarning`).
+		 *   - "change_team": only offered at all if an evil team is present;
+		 *     if offered, which team and whether it's a full/partial switch
+		 *     are pre-rolled so the option's *data* is decided independent of
+		 *     whether the option is actually chosen.
+		 *
+		 * The final _chooseWeightedTree call is wrapped in try/catch purely
+		 * to produce a clearer diagnostic in the specific case where the only
+		 * non-zero weight is "change_team" but no evil team exists to switch
+		 * to — a misconfiguration that would otherwise surface as an opaque
+		 * "total weight is zero" error.
+		 *
+		 * NOTE: this is now effectively a historical artifact. It predates
+		 * settings.js's requiresContext mechanism, which already declares
+		 * oracle.change_team as requiring evilTeamPresent within its weight
+		 * group — Settings.validate() catches this exact misconfiguration
+		 * before Rules.buildPrompt() is ever called from the GUI, so this
+		 * catch block shouldn't currently be reachable in practice. Left in
+		 * deliberately in case a future caller invokes Rules directly
+		 * without going through settings validation first.
+		 */
 		OracleResolver: (ctx, action, instigator, data) => {
 			const rngKey = "oracle_event" + (data.copiedRole ? "_doppelganger" : "");
 			
@@ -233,6 +329,41 @@ const Rules = (() => {
 			return _chooseWeightedTree(choices, rngKey);
 			
 		},
+		/*
+		 * "Ripple" is a special Alien-team turn that can layer a secondary
+		 * effect onto the game (re-running another role's action on a random
+		 * player, muting/rebuking players, granting a double vote, etc.).
+		 *
+		 * Player selections for every possible outcome are pre-rolled up
+		 * front (`rndPlayers`, `rndEffectPlayers`) and reused across choices
+		 * so that whichever outcome is ultimately chosen already has
+		 * consistent, cached player picks rather than each branch rolling
+		 * its own.
+		 *
+		 * "none" (no ripple) is intentionally the last entry in `choices` so
+		 * it can be sliced off: if the first roll lands on "none", a second
+		 * roll (".backup") is made against every *other* option to guarantee
+		 * a real ripple is always available as a backup — this exists
+		 * because Oracle's "block_action"-style outcomes can force a ripple
+		 * to occur even when the primary roll said there wouldn't be one.
+		 * `noRipple` reports whether the primary roll actually wanted a
+		 * ripple, so callers can tell a "genuine" ripple from a "backup one
+		 * that only exists in case it's needed".
+		 *
+		 * This can't be resolved purely programmatically: forcing a ripple
+		 * is a live player-response event (the narrator asks the Oracle
+		 * player a yes/no question and gets a physical nod/shake in
+		 * response), so the actual decision of whether to use the backup
+		 * happens at the table, not in code — the resolver just needs to
+		 * always have a valid backup on hand in case it's needed.
+		 *
+		 * KNOWN ISSUE: if every ripple effect except "none" is set to weight
+		 * 0, Settings.validate() still passes (the weight group's sum is
+		 * satisfied by "none" alone), but the backup roll here has no
+		 * non-zero option to fall back to and throws. Needs a fix — either
+		 * excluding this case from validation being "valid", or having this
+		 * resolver degrade gracefully instead of throwing.
+		 */
 		RippleResolver: (ctx, action, instigator, data) => {
 			const rngKey = "ripple_event";
 			let noRipple = false;
@@ -268,6 +399,20 @@ const Rules = (() => {
 		},
 	}
 
+	/*
+	 * Declarative turn definitions.
+	 *
+	 * Each entry represents a possible narration step in chronological order.
+	 * Each must contain, at minimum, an action field (what to do), as well as
+	 * an instigator field (who does the action).
+	 *
+	 * Rules may:
+	 *   - specify when they apply through conditions
+	 *   - generate additional contextual data
+	 *   - invoke a resolver for randomized outcomes
+	 *
+	 * buildPrompt() simply evaluates this list from top to bottom.
+	 */
 	const TURN_ORDER = [
 		{
 			action: "ORACLE",
@@ -431,7 +576,7 @@ const Rules = (() => {
 		{
 			action: "MASON",
 			instigator: "ROLE_MASON",
-			condition: ctx => ctx.isRolePresent("MASON"),
+			condition: ctx => ctx.getTotalRoleCountPresent("MASON", "DOPPELGANGER") >= 2,
 			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER") }),
 		},
 		{
@@ -658,7 +803,13 @@ const Rules = (() => {
 		},
 	];
 
-
+	/*
+	 * Cached random values keyed by logical event.
+	 *
+	 * Using deterministic keys ensures the same prompt is generated every time
+	 * until rerandomize() is called, preventing unrelated changes from altering
+	 * previously generated random choices.
+	 */
 	const RNG_CACHE = Object.create(null);
 	
 	/* =========================
@@ -673,6 +824,22 @@ const Rules = (() => {
 	   Private functions
 	   ========================= */
 	
+	/*
+	 * Picks a random, non-repeating set of player numbers (1..playerCount).
+	 *
+	 * min/max control how many players are picked, and each accepts either
+	 * an absolute integer or a percentage string (e.g. "20%"), which is
+	 * resolved relative to playerCount and rounded up. If min > max after
+	 * resolution they're swapped, and both are clamped to playerCount so
+	 * resolvers can request more players than actually exist in a small
+	 * game without crashing (e.g. "3 to 3" in a 2-player test config).
+	 *
+	 * The actual count is itself randomly rolled between min and max, then
+	 * that many players are drawn without replacement. Every random draw
+	 * goes through _getCachedRandom keyed off rndKey (plus a per-index
+	 * suffix), so the same call with the same key always reproduces the
+	 * same selection until Rules.rerandomize() clears the cache.
+	 */
 	function _getRandomPlayers(playerCount, rndKey, min = 1, max = 1) {
 		rndKey += ".players";
 		
@@ -722,6 +889,16 @@ const Rules = (() => {
 		return v;
 	}
 	
+	/*
+	 * Makes a single weighted pick from a flat list of { weight, data }
+	 * items. One cached random float [0,1) is scaled by the total weight,
+	 * then "consumed" by walking the list and subtracting each item's
+	 * weight until the roll falls within an item's slice — the classic
+	 * roulette-wheel selection. Zero-weight items are skipped since they can
+	 * never be selected. Falling through to the last item is a deliberate
+	 * safety net for floating-point rounding at the boundary, not an
+	 * expected outcome path.
+	 */
 	function _chooseWeighted(items, rngKey) {
 		if (!Array.isArray(items) || items.length === 0)
 			throw new Error(`_chooseWeighted: no options provided for evaluation '${rngKey}'`);
@@ -794,7 +971,8 @@ const Rules = (() => {
 	function _chooseWeightedTree(nodes, rngKey) {
 		return _chooseWeighted(_flattenWeighted(nodes), rngKey);
 	}
-
+	
+	//Executes a single rule and combines static, derived and resolved data into one turn.
 	function _runRule(ctx, rule) {
 		if (!rule.action || !rule.instigator)
 			throw new Error(`TURN_ORDER entry missing required action/instigator: ${JSON.stringify(rule)}`);
@@ -805,6 +983,14 @@ const Rules = (() => {
 		return { action: rule.action, instigator: rule.instigator, data: { ...resolveData, ...resolveResult } };
 	}
 	
+	
+	/*
+	 * Creates the immutable evaluation context passed to every rule.
+	 *
+	 * The context exposes convenience queries over the selected role set,
+	 * allowing rule conditions and resolvers to remain declarative rather
+	 * than repeatedly inspecting the raw role collection.
+	 */
 	function _makeCtx(roleCounts) {
 		return {
 			playerCount: Roles.calculatePlayerCount(roleCounts),
@@ -812,6 +998,9 @@ const Rules = (() => {
 
 			isRolePresent(roleID) {
 				return this.selectedRoles.has(roleID);
+			},
+			isMinRolePresent(roleID, minCount) {
+				return (this.selectedRoles.get(roleID) ?? 0) >= minCount;
 			},
 			isAllRolesPresent(...roleIDs) {
 				return roleIDs.every(roleID => this.isRolePresent(roleID));
@@ -834,6 +1023,16 @@ const Rules = (() => {
 				}
 				
 				return false;
+			},
+			getRoleCountPresent(roleID) {
+				return this.selectedRoles.get(roleID) ?? 0;
+			},
+			getTotalRoleCountPresent(...roleIDs) {
+				let count = 0;
+				for (const roleID of roleIDs) {
+					count += this.getRoleCountPresent(roleID);
+				}
+				return count;
 			},
 			getRolesPresentWithTag(tag) {
 				return [...this.selectedRoles.keys()].filter(roleID => Roles.hasTag(roleID, tag));
@@ -859,6 +1058,13 @@ const Rules = (() => {
 		for (const k in RNG_CACHE) delete RNG_CACHE[k];
 	}
 	
+	/*
+	 * Evaluates the turn definitions against the selected roles and produces
+	 * the complete structured narration sequence.
+	 *
+	 * Rules that fail during resolution are preserved in the output as error
+	 * turns rather than aborting generation entirely.
+	 */
 	function buildPrompt(roleCounts) {
 		const ctx = _makeCtx(roleCounts);
 		
