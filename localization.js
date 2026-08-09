@@ -15,6 +15,10 @@ const Localization = (() => {
 	   Data
 	   ========================= */
 	
+	let LANG = "SWE";
+	
+	const LANGUAGE_STORE = "onuw_lang"
+	
 	//Safety limit preventing infinite recursion caused by cyclic template references.
 	//Increase as needed if deeper template resolution is required.
 	const MAX_ITERATIONS = 20;
@@ -2252,9 +2256,6 @@ const Localization = (() => {
 		},
 	};
 
-	const LANGUAGE_STORE = "onuw_lang"
-	
-	let LANG = "ENG";
 
 	/* =========================
 	   Initialization
