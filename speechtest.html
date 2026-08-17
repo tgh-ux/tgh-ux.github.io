@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Piper TTS test</title>
+</head>
+<body>
+<h1>Piper TTS test</h1>
+<button id="go">Run test</button>
+<pre id="log"></pre>
+
+<script type="module">
+	import * as PiperTTS from "https://esm.sh/@mintplex-labs/piper-tts-web";
+
+	const logEl = document.getElementById("log");
+	function log(msg) {
+		console.log(msg);
+		logEl.textContent += msg + "\n";
+	}
+
+	async function speak(label, text, voiceId) {
+		try {
+			log(`[${label}] synthesizing with voice "${voiceId}"...`);
+			const wav = await PiperTTS.predict(
+				{ text, voiceId },
+				(p) => log(`[${label}] downloading ${p.url} - ${Math.round(p.loaded * 100 / p.total)}%`)
+			);
+			const audio = new Audio(URL.createObjectURL(wav));
+			await audio.play();
+			log(`[${label}] playing OK`);
+		} catch (err) {
+			log(`[${label}] FAILED: ${err}`);
+			console.error(err);
+		}
+	}
+
+	document.getElementById("go").addEventListener("click", async () => {
+		logEl.textContent = "";
+		log("Import loaded OK, module is: " + (PiperTTS ? "present" : "MISSING"));
+
+		try {
+			const voices = await PiperTTS.voices();
+			log("voices() OK, " + Object.keys(voices).length + " voices listed");
+		} catch (err) {
+			log("voices() FAILED: " + err);
+			console.error(err);
+		}
+
+		await speak("English", "Hello, this is a test of the Piper voice engine.", "en_US-lessac-medium");
+		await speak("Swedish", "Hej, det här är ett test av rösten.", "sv_SE-nst-medium");
+	});
+</script>
+</body>
+</html>
