@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Piper TTS test</title>
+<title>Piper TTS test mk2</title>
 
 <!-- Resolves the one bare import the vendored library needs internally.
      Pointing this at plain jsDelivr (not esm.sh) means no Node-compat shims,
@@ -16,7 +16,7 @@
 </script>
 </head>
 <body>
-<h1>Piper TTS test</h1>
+<h1>Piper TTS test mk2</h1>
 <button id="go">Run test</button>
 <pre id="log"></pre>
 
@@ -42,6 +42,9 @@
 	async function speak(label, text, voiceId) {
 		try {
 			log(`[${label}] creating session for voice "${voiceId}"...`);
+			// TtsSession is a hard singleton internally - force a fresh one so it
+			// actually reloads the model instead of reusing the last voice.
+			PiperTTS.TtsSession._instance = null;
 			const session = await PiperTTS.TtsSession.create({
 				voiceId,
 				wasmPaths,
@@ -50,7 +53,11 @@
 			log(`[${label}] session ready, synthesizing...`);
 			const wav = await session.predict(text);
 			const audio = new Audio(URL.createObjectURL(wav));
-			await audio.play();
+			await new Promise((resolve, reject) => {
+				audio.onended = resolve;
+				audio.onerror = reject;
+				audio.play();
+			});
 			log(`[${label}] playing OK`);
 		} catch (err) {
 			log(`[${label}] FAILED: ${err}`);
