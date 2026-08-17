@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Piper TTS test</title>
+
+<!-- Resolves the one bare import the vendored library needs internally.
+     Pointing this at plain jsDelivr (not esm.sh) means no Node-compat shims,
+     which avoids the "process.versions.node" misdetection bug. -->
+<script type="importmap">
+{
+	"imports": {
+		"onnxruntime-web/wasm": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.wasm.min.mjs"
+	}
+}
+</script>
+</head>
+<body>
+<h1>Piper TTS test</h1>
+<button id="go">Run test</button>
+<pre id="log"></pre>
+
+<script type="module">
+	// Vendored, unmodified files - see ./vendor/. Loading these directly (not via
+	// esm.sh) means no Node-compat polyfills get injected into their scope.
+	import * as PiperTTS from "./vendor/piper-tts-web.js";
+
+	const logEl = document.getElementById("log");
+	function log(msg) {
+		console.log(msg);
+		logEl.textContent += msg + "\n";
+	}
+
+	// The library's own default onnxWasm path (cdnjs, pinned to 1.18.0) is missing
+	// a file its onnxruntime-web version needs - override it to match the version
+	// pinned in the import map above.
+	const wasmPaths = {
+		...PiperTTS.TtsSession.WASM_LOCATIONS,
+		onnxWasm: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/",
+	};
+
+	async function speak(label, text, voiceId) {
+		try {
+			log(`[${label}] creating session for voice "${voiceId}"...`);
+			const session = await PiperTTS.TtsSession.create({
+				voiceId,
+				wasmPaths,
+				progress: (p) => log(`[${label}] downloading ${p.url} - ${Math.round(p.loaded * 100 / p.total)}%`),
+			});
+			log(`[${label}] session ready, synthesizing...`);
+			const wav = await session.predict(text);
+			const audio = new Audio(URL.createObjectURL(wav));
+			await audio.play();
+			log(`[${label}] playing OK`);
+		} catch (err) {
+			log(`[${label}] FAILED: ${err}`);
+			console.error(err);
+		}
+	}
+
+	document.getElementById("go").addEventListener("click", async () => {
+		logEl.textContent = "";
+		await speak("English", "Hello, this is a test of the Piper voice engine.", "en_US-lessac-medium");
+		await speak("Swedish", "Hej, det här är ett test av rösten.", "sv_SE-nst-medium");
+	});
+</script>
+</body>
+</html>
