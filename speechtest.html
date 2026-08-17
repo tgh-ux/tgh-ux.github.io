@@ -10,7 +10,8 @@
 <pre id="log"></pre>
 
 <script type="module">
-	import * as PiperTTS from "https://esm.sh/@mintplex-labs/piper-tts-web";
+	// Pin onnxruntime-web explicitly - the library's own default path is broken (see chat).
+	import * as PiperTTS from "https://esm.sh/@mintplex-labs/piper-tts-web@1.0.5?deps=onnxruntime-web@1.19.2";
 
 	const logEl = document.getElementById("log");
 	function log(msg) {
@@ -18,13 +19,22 @@
 		logEl.textContent += msg + "\n";
 	}
 
+	// Override only the onnx runtime path; leave piperData/piperWasm at their library defaults.
+	const wasmPaths = {
+		...PiperTTS.TtsSession.WASM_LOCATIONS,
+		onnxWasm: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/",
+	};
+
 	async function speak(label, text, voiceId) {
 		try {
-			log(`[${label}] synthesizing with voice "${voiceId}"...`);
-			const wav = await PiperTTS.predict(
-				{ text, voiceId },
-				(p) => log(`[${label}] downloading ${p.url} - ${Math.round(p.loaded * 100 / p.total)}%`)
-			);
+			log(`[${label}] creating session for voice "${voiceId}"...`);
+			const session = await PiperTTS.TtsSession.create({
+				voiceId,
+				wasmPaths,
+				progress: (p) => log(`[${label}] downloading ${p.url} - ${Math.round(p.loaded * 100 / p.total)}%`),
+			});
+			log(`[${label}] session ready, synthesizing...`);
+			const wav = await session.predict(text);
 			const audio = new Audio(URL.createObjectURL(wav));
 			await audio.play();
 			log(`[${label}] playing OK`);
@@ -36,16 +46,6 @@
 
 	document.getElementById("go").addEventListener("click", async () => {
 		logEl.textContent = "";
-		log("Import loaded OK, module is: " + (PiperTTS ? "present" : "MISSING"));
-
-		try {
-			const voices = await PiperTTS.voices();
-			log("voices() OK, " + Object.keys(voices).length + " voices listed");
-		} catch (err) {
-			log("voices() FAILED: " + err);
-			console.error(err);
-		}
-
 		await speak("English", "Hello, this is a test of the Piper voice engine.", "en_US-lessac-medium");
 		await speak("Swedish", "Hej, det här är ett test av rösten.", "sv_SE-nst-medium");
 	});
