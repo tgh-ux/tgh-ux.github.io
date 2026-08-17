@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Piper TTS test mk2</title>
+<title>Piper TTS test mk3</title>
 
 <!-- Resolves the one bare import the vendored library needs internally.
      Pointing this at plain jsDelivr (not esm.sh) means no Node-compat shims,
@@ -16,8 +16,13 @@
 </script>
 </head>
 <body>
-<h1>Piper TTS test mk2</h1>
-<button id="go">Run test</button>
+<h1>Piper TTS test mk3</h1>
+<label for="voice">Voice:</label>
+<select id="voice"></select>
+<br><br>
+<input id="text" type="text" size="50" value="Hello, this is a test of the Piper voice engine.">
+<button id="go">Speak</button>
+<button id="clear">Clear cached voices</button>
 <pre id="log"></pre>
 
 <script type="module">
@@ -30,6 +35,53 @@
 		console.log(msg);
 		logEl.textContent += msg + "\n";
 	}
+
+	// Pulled directly from this library version's own voice map (PATH_MAP in
+	// piper-tts-web.js) - only voices listed there are actually usable here.
+	const VOICES = {
+		"English (en_GB)": [
+			"en_GB-alan-low", "en_GB-alan-medium", "en_GB-alba-medium", "en_GB-aru-medium",
+			"en_GB-cori-high", "en_GB-cori-medium", "en_GB-jenny_dioco-medium",
+			"en_GB-northern_english_male-medium", "en_GB-semaine-medium",
+			"en_GB-southern_english_female-low", "en_GB-vctk-medium",
+		],
+		"English (en_US)": [
+			"en_US-amy-low", "en_US-amy-medium", "en_US-arctic-medium", "en_US-bryce-medium",
+			"en_US-danny-low", "en_US-hfc_female-medium", "en_US-hfc_male-medium",
+			"en_US-joe-medium", "en_US-john-medium", "en_US-kathleen-low",
+			"en_US-kristin-medium", "en_US-kusal-medium", "en_US-l2arctic-medium",
+			"en_US-lessac-high", "en_US-lessac-low", "en_US-lessac-medium",
+			"en_US-libritts-high", "en_US-libritts_r-medium", "en_US-ljspeech-high",
+			"en_US-ljspeech-medium", "en_US-norman-medium", "en_US-ryan-high",
+			"en_US-ryan-low", "en_US-ryan-medium",
+		],
+		"Swedish (sv_SE)": [
+			"sv_SE-nst-medium", // only Swedish voice this library version ships
+		],
+	};
+
+	const SAMPLE_TEXT = {
+		en: "Hello, this is a test of the Piper voice engine.",
+		sv: "Hej, det här är ett test av rösten.",
+	};
+
+	const voiceSelect = document.getElementById("voice");
+	const textInput = document.getElementById("text");
+	for (const [groupLabel, ids] of Object.entries(VOICES)) {
+		const group = document.createElement("optgroup");
+		group.label = groupLabel;
+		for (const id of ids) {
+			const opt = document.createElement("option");
+			opt.value = id;
+			opt.textContent = id;
+			group.appendChild(opt);
+		}
+		voiceSelect.appendChild(group);
+	}
+	voiceSelect.addEventListener("change", () => {
+		textInput.value = voiceSelect.value.startsWith("sv_SE") ? SAMPLE_TEXT.sv : SAMPLE_TEXT.en;
+	});
+	textInput.value = SAMPLE_TEXT.en; // matches the first option (en_GB-alan-low)
 
 	// The library's own default onnxWasm path (cdnjs, pinned to 1.18.0) is missing
 	// a file its onnxruntime-web version needs - override it to match the version
@@ -67,8 +119,15 @@
 
 	document.getElementById("go").addEventListener("click", async () => {
 		logEl.textContent = "";
-		await speak("English", "Hello, this is a test of the Piper voice engine.", "en_US-lessac-medium");
-		await speak("Swedish", "Hej, det här är ett test av rösten.", "sv_SE-nst-medium");
+		const voiceId = voiceSelect.value;
+		await speak(voiceId, textInput.value, voiceId);
+	});
+
+	document.getElementById("clear").addEventListener("click", async () => {
+		logEl.textContent = "";
+		log("Cached before clearing: " + JSON.stringify(await PiperTTS.stored()));
+		await PiperTTS.flush();
+		log("Cleared. Cached now: " + JSON.stringify(await PiperTTS.stored()));
 	});
 </script>
 </body>
