@@ -35,7 +35,9 @@
 			});
 			log(`[${label}] session ready, synthesizing...`);
 			const wav = await session.predict(text);
+			log(`[${label}] session.predict done...`);
 			const audio = new Audio(URL.createObjectURL(wav));
+			log(`[${label}] new Audio done...`);
 			await audio.play();
 			log(`[${label}] playing OK`);
 		} catch (err) {
