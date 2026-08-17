@@ -8,6 +8,7 @@
 	- Localization provides language services.
 	- Roles, Settings and Rules provide the game model.
 	- Interpreter bridges Rules and Localization.
+	- Speech plays back Interpreter's turn sequences as narration.
 	- GUI builds the interactive interface on top of the loaded modules.
 	GUI is deferred, loaded only after the other modules have been loaded
 	and the static page skeleton has been created.
@@ -25,6 +26,7 @@
 	<script src="settings.js"></script>
 	<script src="rules.js"></script>
 	<script src="interpreter.js"></script>
+	<script src="speech.js"></script>
 </head>
 <body>
 
@@ -94,6 +96,10 @@
 
         <div class="panel-content output">
             <textarea id="promptOutput" rows="6"></textarea>
+
+            <div id="speechControls" class="speech-controls">
+                <button type="button" id="btn-speech-start" class="speech-btn">▶</button>
+            </div>
         </div>
     </section>
 	
@@ -167,6 +173,20 @@
     <div class="modal-overlay-panel">
         <button id="modalOverlayClose" class="modal-overlay-close">×</button>
         <div id="modalOverlayContainer"></div>
+    </div>
+</div>
+
+<!-- TTS narration overlay -->
+<div id="speechOverlay" class="speech-overlay" aria-hidden="true">
+    <div class="speech-overlay-content">
+        <div id="speechOverlayState" class="speech-overlay-state"></div>
+        <div id="speechOverlayText" class="speech-overlay-text"></div>
+        <div id="speechOverlayCountdown" class="speech-overlay-countdown"></div>
+		<div id="speechOverlayOptions" class="speech-overlay-options"></div>
+        <div class="speech-overlay-controls">
+            <button type="button" id="btn-speech-overlay-pause" class="speech-overlay-button">⏸</button>
+            <button type="button" id="btn-speech-overlay-stop" class="speech-overlay-button">⏹</button>
+        </div>
     </div>
 </div>
 

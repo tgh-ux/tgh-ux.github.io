@@ -1,11 +1,9 @@
 /*
  * Localization and template engine.
  *
- * Stores all localized strings, manages the active language, and resolves
- * localization templates into final text.
+ * Stores all localized strings, manages the active language, and resolves localization templates into final text.
  *
- * The template language is intentionally lightweight, allowing narration,
- * role descriptions and UI text to be generated from reusable localization
+ * The template language is intentionally lightweight, allowing narration, role descriptions and UI text to be generated from reusable localization
  * keys rather than hard-coded strings.
  */
 
@@ -15,1039 +13,4259 @@ const Localization = (() => {
 	   Data
 	   ========================= */
 	
-	let LANG = "ENG";
+	// Representation of currently selected language (and also default if not previously selected)
+	let LANG = "SWE";
 	
+	// Persistent storage key for language selection
 	const LANGUAGE_STORE = "onuw_lang"
 	
-	//Safety limit preventing infinite recursion caused by cyclic template references.
-	//Increase as needed if deeper template resolution is required.
+	// Safety limit preventing an infinite loop caused by cyclic template references. Increase as needed if deeper template resolution is required.
 	const MAX_ITERATIONS = 20;
 	
-	/*
-	 * Localization data grouped by language.
-	 *
-	 * Keys are shared across every language and are expected to exist for each
-	 * localization. Prompt-related keys make extensive use of the template
-	 * language implemented below.
-	 *
-	 * Identity keys (roles and teams, e.g. ROLE_SEER, TEAM_WEREWOLF) follow a
-	 * fixed suffix convention that Interpreter's Identity/RoleName primitives
-	 * build up from the raw ID + requested grammatical form(s):
-	 *   <ID>, <ID>_PLURAL, <ID>_DEFINITE, <ID>_GENITIVE, and their
-	 *   combinations (e.g. ROLE_SEER_PLURAL_DEFINITE_GENITIVE). Every
-	 *   identity key is expected to have all applicable combinations defined
-	 *   here, since the interpreter constructs the key name rather than
-	 *   looking up a pre-built variant list.
-	 */
+/*
+ * Localization data grouped by key.
+ *
+ * Each entry is keyed by its localization key, and holds the translations for that key across languages as named fields (e.g. ENG, SWE),
+ * plus an optional COMMON field. This groups every translation of a given key together, rather than scattering them across separate
+ * per-language tables, so a missing or drifted translation is visible right where the key is defined instead of requiring a cross-table diff.
+ *
+ * COMMON holds a language-independent value used as a fallback when the current language has no entry of its own for that key - see getString().
+ * This is intended for keys that are pure structure (dispatchers, Select/If branch lists, bare Input/AutoKey calls) with no literal text of their
+ * own, so that branching logic and reusable prompt skeletons live in exactly one place rather than being duplicated - and risking drifting -
+ * across every language. A language's own entry always takes priority and can override COMMON where a language's grammar genuinely requires it
+ * to diverge (e.g. differing clause order, or an inserted conditional another language doesn't need).
+ *
+ * Typically, every key is expected to have a usable entry (its own language field, or a COMMON fallback) for every language, in particular for
+ * static content such as GUI strings. This isn't strictly enforced - Interpreter/Localization log and gracefully substitute a placeholder for any
+ * key that resolves to nothing at all - but a language with no entry and no applicable COMMON fallback should be treated as a bug to fix, not a
+ * silent gap. Some prompts require different grammatical helper keys for different forms in one language (e.g. one "card" vs two "cards") that
+ * another language's phrasing sidesteps entirely - those keys are added only where the language actually needs them, and their absence in another
+ * language's set is expected, not a gap. While not relevant for static content, this becomes very relevant with the templating implementation
+ * used extensively in the prompts for script generation.
+ *
+ * Identity keys (roles and teams, e.g. ROLE_SEER, TEAM_WEREWOLF) follow a fixed suffix convention that Interpreter's Identity/RoleName primitives
+ * build up from the raw ID + requested grammatical form(s):
+ *   <ID>, <ID>_PLURAL, <ID>_DEFINITE, <ID>_GENITIVE, and their combinations (e.g. ROLE_SEER_PLURAL_DEFINITE_GENITIVE). Every identity key is expected
+ *   to have all applicable combinations defined here, since the interpreter constructs the key name rather than looking up a pre-built variant list.
+ */
 	const LOCALIZATION_KEYS = {
-		ENG: {
-			LIST_AND: "and",
-			LIST_OR: "or",
-			TEAM_PREFIX: "Team",
-			TEAM_VARIABLE_SUFFIX: " (variable)",
-			PHASE_DAY_ROLE: "day role",
-			PHASE_DUSK_ROLE: "dusk role",
-			PHASE_NIGHT_ROLE: "night role",
-			PHASE_DAY: "day role",
-			PHASE_DUSK: "dusk role",
-			PHASE_NIGHT: "night role",
-			
-			ROLE_ALIEN: "Alien",
-			ROLE_ALIEN_DEFINITE: "the Alien",
-			ROLE_ALIEN_DEFINITE_GENITIVE: "the Alien's",
-			ROLE_ALIEN_GENITIVE: "Alien's",
-			ROLE_ALIEN_PLURAL: "Aliens",
-			ROLE_ALIEN_PLURAL_DEFINITE: "the Aliens",
-			ROLE_ALIEN_PLURAL_DEFINITE_GENITIVE: "the Aliens'",
-			ROLE_ALIEN_PLURAL_GENITIVE: "Aliens'",
-			ROLE_ALPHAWOLF: "Alpha Wolf",
-			ROLE_ALPHAWOLF_DEFINITE: "the Alpha Wolf",
-			ROLE_ALPHAWOLF_DEFINITE_GENITIVE: "the Alpha Wolf's",
-			ROLE_ALPHAWOLF_GENITIVE: "Alpha Wolf's",
-			ROLE_ALPHAWOLF_PLURAL: "Alpha Wolves",
-			ROLE_ALPHAWOLF_PLURAL_DEFINITE: "the Alpha Wolves",
-			ROLE_ALPHAWOLF_PLURAL_DEFINITE_GENITIVE: "the Alpha Wolves'",
-			ROLE_ALPHAWOLF_PLURAL_GENITIVE: "Alpha Wolves'",
-			ROLE_APPRENTICEASSASSIN: "Apprentice Assassin",
-			ROLE_APPRENTICEASSASSIN_DEFINITE: "the Apprentice Assassin",
-			ROLE_APPRENTICEASSASSIN_DEFINITE_GENITIVE: "the Apprentice Assassin's",
-			ROLE_APPRENTICEASSASSIN_GENITIVE: "Apprentice Assassin's",
-			ROLE_APPRENTICEASSASSIN_PLURAL: "Apprentice Assassins",
-			ROLE_APPRENTICEASSASSIN_PLURAL_DEFINITE: "the Apprentice Assassins",
-			ROLE_APPRENTICEASSASSIN_PLURAL_DEFINITE_GENITIVE: "the Apprentice Assassins'",
-			ROLE_APPRENTICEASSASSIN_PLURAL_GENITIVE: "Apprentice Assassins'",
-			ROLE_APPRENTICESEER: "Apprentice Seer",
-			ROLE_APPRENTICESEER_DEFINITE: "the Apprentice Seer",
-			ROLE_APPRENTICESEER_DEFINITE_GENITIVE: "the Apprentice Seer's",
-			ROLE_APPRENTICESEER_GENITIVE: "Apprentice Seer's",
-			ROLE_APPRENTICESEER_PLURAL: "Apprentice Seers",
-			ROLE_APPRENTICESEER_PLURAL_DEFINITE: "the Apprentice Seers",
-			ROLE_APPRENTICESEER_PLURAL_DEFINITE_GENITIVE: "the Apprentice Seers'",
-			ROLE_APPRENTICESEER_PLURAL_GENITIVE: "Apprentice Seers'",
-			ROLE_APPRENTICETANNER: "Apprentice Tanner",
-			ROLE_APPRENTICETANNER_DEFINITE: "the Apprentice Tanner",
-			ROLE_APPRENTICETANNER_DEFINITE_GENITIVE: "the Apprentice Tanner's",
-			ROLE_APPRENTICETANNER_GENITIVE: "Apprentice Tanner's",
-			ROLE_APPRENTICETANNER_PLURAL: "Apprentice Tanners",
-			ROLE_APPRENTICETANNER_PLURAL_DEFINITE: "the Apprentice Tanners",
-			ROLE_APPRENTICETANNER_PLURAL_DEFINITE_GENITIVE: "the Apprentice Tanners'",
-			ROLE_APPRENTICETANNER_PLURAL_GENITIVE: "Apprentice Tanners'",
-			ROLE_ASSASSIN: "Assassin",
-			ROLE_ASSASSIN_DEFINITE: "the Assassin",
-			ROLE_ASSASSIN_DEFINITE_GENITIVE: "the Assassin's",
-			ROLE_ASSASSIN_GENITIVE: "Assassin's",
-			ROLE_ASSASSIN_PLURAL: "Assassins",
-			ROLE_ASSASSIN_PLURAL_DEFINITE: "the Assassins",
-			ROLE_ASSASSIN_PLURAL_DEFINITE_GENITIVE: "the Assassins'",
-			ROLE_ASSASSIN_PLURAL_GENITIVE: "Assassins'",
-			ROLE_AURASEER: "Aura Seer",
-			ROLE_AURASEER_DEFINITE: "the Aura Seer",
-			ROLE_AURASEER_DEFINITE_GENITIVE: "the Aura Seer's",
-			ROLE_AURASEER_GENITIVE: "Aura Seer's",
-			ROLE_AURASEER_PLURAL: "Aura Seers",
-			ROLE_AURASEER_PLURAL_DEFINITE: "the Aura Seers",
-			ROLE_AURASEER_PLURAL_DEFINITE_GENITIVE: "the Aura Seers'",
-			ROLE_AURASEER_PLURAL_GENITIVE: "Aura Seers'",
-			ROLE_BEHOLDER: "Beholder",
-			ROLE_BEHOLDER_DEFINITE: "the Beholder",
-			ROLE_BEHOLDER_DEFINITE_GENITIVE: "the Beholder's",
-			ROLE_BEHOLDER_GENITIVE: "Beholder's",
-			ROLE_BEHOLDER_PLURAL: "Beholders",
-			ROLE_BEHOLDER_PLURAL_DEFINITE: "the Beholders",
-			ROLE_BEHOLDER_PLURAL_DEFINITE_GENITIVE: "the Beholders'",
-			ROLE_BEHOLDER_PLURAL_GENITIVE: "Beholders'",
-			ROLE_BLOB: "Blob",
-			ROLE_BLOB_DEFINITE: "the Blob",
-			ROLE_BLOB_DEFINITE_GENITIVE: "the Blob's",
-			ROLE_BLOB_GENITIVE: "Blob's",
-			ROLE_BLOB_PLURAL: "Blobs",
-			ROLE_BLOB_PLURAL_DEFINITE: "the Blobs",
-			ROLE_BLOB_PLURAL_DEFINITE_GENITIVE: "the Blobs'",
-			ROLE_BLOB_PLURAL_GENITIVE: "Blobs'",
-			ROLE_BODYGUARD: "Bodyguard",
-			ROLE_BODYGUARD_DEFINITE: "the Bodyguard",
-			ROLE_BODYGUARD_DEFINITE_GENITIVE: "the Bodyguard's",
-			ROLE_BODYGUARD_GENITIVE: "Bodyguard's",
-			ROLE_BODYGUARD_PLURAL: "Bodyguards",
-			ROLE_BODYGUARD_PLURAL_DEFINITE: "the Bodyguards",
-			ROLE_BODYGUARD_PLURAL_DEFINITE_GENITIVE: "the Bodyguards'",
-			ROLE_BODYGUARD_PLURAL_GENITIVE: "Bodyguards'",
-			ROLE_BODYSNATCHER: "Body Snatcher",
-			ROLE_BODYSNATCHER_DEFINITE: "the Body Snatcher",
-			ROLE_BODYSNATCHER_DEFINITE_GENITIVE: "the Body Snatcher's",
-			ROLE_BODYSNATCHER_GENITIVE: "Body Snatcher's",
-			ROLE_BODYSNATCHER_PLURAL: "Body Snatchers",
-			ROLE_BODYSNATCHER_PLURAL_DEFINITE: "the Body Snatchers",
-			ROLE_BODYSNATCHER_PLURAL_DEFINITE_GENITIVE: "the Body Snatchers'",
-			ROLE_BODYSNATCHER_PLURAL_GENITIVE: "Body Snatchers'",
-			ROLE_COPYCAT: "Copycat",
-			ROLE_COPYCAT_DEFINITE: "the Copycat",
-			ROLE_COPYCAT_DEFINITE_GENITIVE: "the Copycat's",
-			ROLE_COPYCAT_GENITIVE: "Copycat's",
-			ROLE_COPYCAT_PLURAL: "Copycats",
-			ROLE_COPYCAT_PLURAL_DEFINITE: "the Copycats",
-			ROLE_COPYCAT_PLURAL_DEFINITE_GENITIVE: "the Copycats'",
-			ROLE_COPYCAT_PLURAL_GENITIVE: "Copycats'",
-			ROLE_COUNT: "Count",
-			ROLE_COUNT_DEFINITE: "the Count",
-			ROLE_COUNT_DEFINITE_GENITIVE: "the Count's",
-			ROLE_COUNT_GENITIVE: "Count's",
-			ROLE_COUNT_PLURAL: "Counts",
-			ROLE_COUNT_PLURAL_DEFINITE: "the Counts",
-			ROLE_COUNT_PLURAL_DEFINITE_GENITIVE: "the Counts'",
-			ROLE_COUNT_PLURAL_GENITIVE: "Counts'",
-			ROLE_COW: "Cow",
-			ROLE_COW_DEFINITE: "the Cow",
-			ROLE_COW_DEFINITE_GENITIVE: "the Cow's",
-			ROLE_COW_GENITIVE: "Cow's",
-			ROLE_COW_PLURAL: "Cows",
-			ROLE_COW_PLURAL_DEFINITE: "the Cows",
-			ROLE_COW_PLURAL_DEFINITE_GENITIVE: "the Cows'",
-			ROLE_COW_PLURAL_GENITIVE: "Cows'",
-			ROLE_CUPID: "Cupid",
-			ROLE_CUPID_DEFINITE: "Cupid",
-			ROLE_CUPID_DEFINITE_GENITIVE: "Cupid's",
-			ROLE_CUPID_GENITIVE: "Cupid's",
-			ROLE_CUPID_PLURAL: "Cupids",
-			ROLE_CUPID_PLURAL_DEFINITE: "the Cupids",
-			ROLE_CUPID_PLURAL_DEFINITE_GENITIVE: "the Cupids'",
-			ROLE_CUPID_PLURAL_GENITIVE: "Cupids'",
-			ROLE_CURATOR: "Curator",
-			ROLE_CURATOR_DEFINITE: "the Curator",
-			ROLE_CURATOR_DEFINITE_GENITIVE: "the Curator's",
-			ROLE_CURATOR_GENITIVE: "Curator's",
-			ROLE_CURATOR_PLURAL: "Curators",
-			ROLE_CURATOR_PLURAL_DEFINITE: "the Curators",
-			ROLE_CURATOR_PLURAL_DEFINITE_GENITIVE: "the Curators'",
-			ROLE_CURATOR_PLURAL_GENITIVE: "Curators'",
-			ROLE_CURSED: "Cursed",
-			ROLE_CURSED_DEFINITE: "the Cursed",
-			ROLE_CURSED_DEFINITE_GENITIVE: "the Cursed's",
-			ROLE_CURSED_GENITIVE: "Cursed's",
-			ROLE_CURSED_PLURAL: "Cursed",
-			ROLE_CURSED_PLURAL_DEFINITE: "the Cursed",
-			ROLE_CURSED_PLURAL_DEFINITE_GENITIVE: "the Cursed's",
-			ROLE_CURSED_PLURAL_GENITIVE: "Cursed's",
-			ROLE_DISEASED: "Diseased",
-			ROLE_DISEASED_DEFINITE: "the Diseased",
-			ROLE_DISEASED_DEFINITE_GENITIVE: "the Diseased's",
-			ROLE_DISEASED_GENITIVE: "Diseased's",
-			ROLE_DISEASED_PLURAL: "Diseased",
-			ROLE_DISEASED_PLURAL_DEFINITE: "the Diseased",
-			ROLE_DISEASED_PLURAL_DEFINITE_GENITIVE: "the Diseased's",
-			ROLE_DISEASED_PLURAL_GENITIVE: "Diseased's",
-			ROLE_DOPPELGANGER: "Doppelganger",
-			ROLE_DOPPELGANGER_DEFINITE: "the Doppelganger",
-			ROLE_DOPPELGANGER_DEFINITE_GENITIVE: "the Doppelganger's",
-			ROLE_DOPPELGANGER_GENITIVE: "Doppelganger's",
-			ROLE_DOPPELGANGER_PLURAL: "Doppelgangers",
-			ROLE_DOPPELGANGER_PLURAL_DEFINITE: "the Doppelgangers",
-			ROLE_DOPPELGANGER_PLURAL_DEFINITE_GENITIVE: "the Doppelgangers'",
-			ROLE_DOPPELGANGER_PLURAL_GENITIVE: "Doppelgangers'",
-			ROLE_DREAMWOLF: "Dream Wolf",
-			ROLE_DREAMWOLF_DEFINITE: "the Dream Wolf",
-			ROLE_DREAMWOLF_DEFINITE_GENITIVE: "the Dream Wolf's",
-			ROLE_DREAMWOLF_GENITIVE: "Dream Wolf's",
-			ROLE_DREAMWOLF_PLURAL: "Dream Wolves",
-			ROLE_DREAMWOLF_PLURAL_DEFINITE: "the Dream Wolves",
-			ROLE_DREAMWOLF_PLURAL_DEFINITE_GENITIVE: "the Dream Wolves'",
-			ROLE_DREAMWOLF_PLURAL_GENITIVE: "Dream Wolves'",
-			ROLE_DRUNK: "Drunk",
-			ROLE_DRUNK_DEFINITE: "the Drunk",
-			ROLE_DRUNK_DEFINITE_GENITIVE: "the Drunk's",
-			ROLE_DRUNK_GENITIVE: "Drunk's",
-			ROLE_DRUNK_PLURAL: "Drunks",
-			ROLE_DRUNK_PLURAL_DEFINITE: "the Drunks",
-			ROLE_DRUNK_PLURAL_DEFINITE_GENITIVE: "the Drunks'",
-			ROLE_DRUNK_PLURAL_GENITIVE: "Drunks'",
-			ROLE_EMPATH: "Empath",
-			ROLE_EMPATH_DEFINITE: "the Empath",
-			ROLE_EMPATH_DEFINITE_GENITIVE: "the Empath's",
-			ROLE_EMPATH_GENITIVE: "Empath's",
-			ROLE_EMPATH_PLURAL: "Empaths",
-			ROLE_EMPATH_PLURAL_DEFINITE: "the Empaths",
-			ROLE_EMPATH_PLURAL_DEFINITE_GENITIVE: "the Empaths'",
-			ROLE_EMPATH_PLURAL_GENITIVE: "Empaths'",
-			ROLE_EXPOSER: "Exposer",
-			ROLE_EXPOSER_DEFINITE: "the Exposer",
-			ROLE_EXPOSER_DEFINITE_GENITIVE: "the Exposer's",
-			ROLE_EXPOSER_GENITIVE: "Exposer's",
-			ROLE_EXPOSER_PLURAL: "Exposers",
-			ROLE_EXPOSER_PLURAL_DEFINITE: "the Exposers",
-			ROLE_EXPOSER_PLURAL_DEFINITE_GENITIVE: "the Exposers'",
-			ROLE_EXPOSER_PLURAL_GENITIVE: "Exposers'",
-			ROLE_FEUDINGALIENS: "Groob and Zerb",
-			ROLE_FEUDINGALIENS_DEFINITE: "Groob and Zerb",
-			ROLE_FEUDINGALIENS_DEFINITE_GENITIVE: "Groob and Zerb's",
-			ROLE_FEUDINGALIENS_GENITIVE: "Groob and Zerb's",
-			ROLE_FEUDINGALIENS_PLURAL: "Groob and Zerb",
-			ROLE_FEUDINGALIENS_PLURAL_DEFINITE: "Groob and Zerb",
-			ROLE_FEUDINGALIENS_PLURAL_DEFINITE_GENITIVE: "Groob and Zerb's",
-			ROLE_FEUDINGALIENS_PLURAL_GENITIVE: "Groob and Zerb's",
-			ROLE_GREMLIN: "Gremlin",
-			ROLE_GREMLIN_DEFINITE: "the Gremlin",
-			ROLE_GREMLIN_DEFINITE_GENITIVE: "the Gremlin's",
-			ROLE_GREMLIN_GENITIVE: "Gremlin's",
-			ROLE_GREMLIN_PLURAL: "Gremlins",
-			ROLE_GREMLIN_PLURAL_DEFINITE: "the Gremlins",
-			ROLE_GREMLIN_PLURAL_DEFINITE_GENITIVE: "the Gremlins'",
-			ROLE_GREMLIN_PLURAL_GENITIVE: "Gremlins'",
-			ROLE_HUNTER: "Hunter",
-			ROLE_HUNTER_DEFINITE: "the Hunter",
-			ROLE_HUNTER_DEFINITE_GENITIVE: "the Hunter's",
-			ROLE_HUNTER_GENITIVE: "Hunter's",
-			ROLE_HUNTER_PLURAL: "Hunters",
-			ROLE_HUNTER_PLURAL_DEFINITE: "the Hunters",
-			ROLE_HUNTER_PLURAL_DEFINITE_GENITIVE: "the Hunters'",
-			ROLE_HUNTER_PLURAL_GENITIVE: "Hunters'",
-			ROLE_INSOMNIAC: "Insomniac",
-			ROLE_INSOMNIAC_DEFINITE: "the Insomniac",
-			ROLE_INSOMNIAC_DEFINITE_GENITIVE: "the Insomniac's",
-			ROLE_INSOMNIAC_GENITIVE: "Insomniac's",
-			ROLE_INSOMNIAC_PLURAL: "Insomniacs",
-			ROLE_INSOMNIAC_PLURAL_DEFINITE: "the Insomniacs",
-			ROLE_INSOMNIAC_PLURAL_DEFINITE_GENITIVE: "the Insomniacs'",
-			ROLE_INSOMNIAC_PLURAL_GENITIVE: "Insomniacs'",
-			ROLE_INSTIGATOR: "Instigator",
-			ROLE_INSTIGATOR_DEFINITE: "the Instigator",
-			ROLE_INSTIGATOR_DEFINITE_GENITIVE: "the Instigator's",
-			ROLE_INSTIGATOR_GENITIVE: "Instigator's",
-			ROLE_INSTIGATOR_PLURAL: "Instigators",
-			ROLE_INSTIGATOR_PLURAL_DEFINITE: "the Instigators",
-			ROLE_INSTIGATOR_PLURAL_DEFINITE_GENITIVE: "the Instigators'",
-			ROLE_INSTIGATOR_PLURAL_GENITIVE: "Instigators'",
-			ROLE_LEADER: "Leader",
-			ROLE_LEADER_DEFINITE: "the Leader",
-			ROLE_LEADER_DEFINITE_GENITIVE: "the Leader's",
-			ROLE_LEADER_GENITIVE: "Leader's",
-			ROLE_LEADER_PLURAL: "Leaders",
-			ROLE_LEADER_PLURAL_DEFINITE: "the Leaders",
-			ROLE_LEADER_PLURAL_DEFINITE_GENITIVE: "the Leaders'",
-			ROLE_LEADER_PLURAL_GENITIVE: "Leaders'",
-			ROLE_MARKSMAN: "Marksman",
-			ROLE_MARKSMAN_DEFINITE: "the Marksman",
-			ROLE_MARKSMAN_DEFINITE_GENITIVE: "the Marksman's",
-			ROLE_MARKSMAN_GENITIVE: "Marksman's",
-			ROLE_MARKSMAN_PLURAL: "Marksmen",
-			ROLE_MARKSMAN_PLURAL_DEFINITE: "the Marksmen",
-			ROLE_MARKSMAN_PLURAL_DEFINITE_GENITIVE: "the Marksmen's",
-			ROLE_MARKSMAN_PLURAL_GENITIVE: "Marksmen's",
-			ROLE_MASON: "Mason",
-			ROLE_MASON_DEFINITE: "the Mason",
-			ROLE_MASON_DEFINITE_GENITIVE: "the Mason's",
-			ROLE_MASON_GENITIVE: "Mason's",
-			ROLE_MASON_PLURAL: "Masons",
-			ROLE_MASON_PLURAL_DEFINITE: "the Masons",
-			ROLE_MASON_PLURAL_DEFINITE_GENITIVE: "the Masons'",
-			ROLE_MASON_PLURAL_GENITIVE: "Masons'",
-			ROLE_MASTER: "Master",
-			ROLE_MASTER_DEFINITE: "the Master",
-			ROLE_MASTER_DEFINITE_GENITIVE: "the Master's",
-			ROLE_MASTER_GENITIVE: "Master's",
-			ROLE_MASTER_PLURAL: "Masters",
-			ROLE_MASTER_PLURAL_DEFINITE: "the Masters",
-			ROLE_MASTER_PLURAL_DEFINITE_GENITIVE: "the Masters'",
-			ROLE_MASTER_PLURAL_GENITIVE: "Masters'",
-			ROLE_MINION: "Minion",
-			ROLE_MINION_DEFINITE: "the Minion",
-			ROLE_MINION_DEFINITE_GENITIVE: "the Minion's",
-			ROLE_MINION_GENITIVE: "Minion's",
-			ROLE_MINION_PLURAL: "Minions",
-			ROLE_MINION_PLURAL_DEFINITE: "the Minions",
-			ROLE_MINION_PLURAL_DEFINITE_GENITIVE: "the Minions'",
-			ROLE_MINION_PLURAL_GENITIVE: "Minions'",
-			ROLE_MORTICIAN: "Mortician",
-			ROLE_MORTICIAN_DEFINITE: "the Mortician",
-			ROLE_MORTICIAN_DEFINITE_GENITIVE: "the Mortician's",
-			ROLE_MORTICIAN_GENITIVE: "Mortician's",
-			ROLE_MORTICIAN_PLURAL: "Morticians",
-			ROLE_MORTICIAN_PLURAL_DEFINITE: "the Morticians",
-			ROLE_MORTICIAN_PLURAL_DEFINITE_GENITIVE: "the Morticians'",
-			ROLE_MORTICIAN_PLURAL_GENITIVE: "Morticians'",
-			ROLE_MYSTICWOLF: "Mystic Wolf",
-			ROLE_MYSTICWOLF_DEFINITE: "the Mystic Wolf",
-			ROLE_MYSTICWOLF_DEFINITE_GENITIVE: "the Mystic Wolf's",
-			ROLE_MYSTICWOLF_GENITIVE: "Mystic Wolf's",
-			ROLE_MYSTICWOLF_PLURAL: "Mystic Wolves",
-			ROLE_MYSTICWOLF_PLURAL_DEFINITE: "the Mystic Wolves",
-			ROLE_MYSTICWOLF_PLURAL_DEFINITE_GENITIVE: "the Mystic Wolves'",
-			ROLE_MYSTICWOLF_PLURAL_GENITIVE: "Mystic Wolves'",
-			ROLE_NOSTRADAMUS: "Nostradamus",
-			ROLE_NOSTRADAMUS_DEFINITE: "Nostradamus",
-			ROLE_NOSTRADAMUS_DEFINITE_GENITIVE: "Nostradamus'",
-			ROLE_NOSTRADAMUS_GENITIVE: "Nostradamus'",
-			ROLE_NOSTRADAMUS_PLURAL: "Nostradamuses",
-			ROLE_NOSTRADAMUS_PLURAL_DEFINITE: "the Nostradamuses",
-			ROLE_NOSTRADAMUS_PLURAL_DEFINITE_GENITIVE: "the Nostradamuses'",
-			ROLE_NOSTRADAMUS_PLURAL_GENITIVE: "Nostradamuses'",
-			ROLE_ORACLE: "Oracle",
-			ROLE_ORACLE_DEFINITE: "the Oracle",
-			ROLE_ORACLE_DEFINITE_GENITIVE: "the Oracle's",
-			ROLE_ORACLE_GENITIVE: "Oracle's",
-			ROLE_ORACLE_PLURAL: "Oracles",
-			ROLE_ORACLE_PLURAL_DEFINITE: "the Oracles",
-			ROLE_ORACLE_PLURAL_DEFINITE_GENITIVE: "the Oracles'",
-			ROLE_ORACLE_PLURAL_GENITIVE: "Oracles'",
-			ROLE_PARANORMALINVESTIGATOR: "Paranormal Investigator",
-			ROLE_PARANORMALINVESTIGATOR_DEFINITE: "the Paranormal Investigator",
-			ROLE_PARANORMALINVESTIGATOR_DEFINITE_GENITIVE: "the Paranormal Investigator's",
-			ROLE_PARANORMALINVESTIGATOR_GENITIVE: "Paranormal Investigator's",
-			ROLE_PARANORMALINVESTIGATOR_PLURAL: "Paranormal Investigators",
-			ROLE_PARANORMALINVESTIGATOR_PLURAL_DEFINITE: "the Paranormal Investigators",
-			ROLE_PARANORMALINVESTIGATOR_PLURAL_DEFINITE_GENITIVE: "the Paranormal Investigators'",
-			ROLE_PARANORMALINVESTIGATOR_PLURAL_GENITIVE: "Paranormal Investigators'",
-			ROLE_PICKPOCKET: "Pickpocket",
-			ROLE_PICKPOCKET_DEFINITE: "the Pickpocket",
-			ROLE_PICKPOCKET_DEFINITE_GENITIVE: "the Pickpocket's",
-			ROLE_PICKPOCKET_GENITIVE: "Pickpocket's",
-			ROLE_PICKPOCKET_PLURAL: "Pickpockets",
-			ROLE_PICKPOCKET_PLURAL_DEFINITE: "the Pickpockets",
-			ROLE_PICKPOCKET_PLURAL_DEFINITE_GENITIVE: "the Pickpockets'",
-			ROLE_PICKPOCKET_PLURAL_GENITIVE: "Pickpockets'",
-			ROLE_PRIEST: "Priest",
-			ROLE_PRIEST_DEFINITE: "the Priest",
-			ROLE_PRIEST_DEFINITE_GENITIVE: "the Priest's",
-			ROLE_PRIEST_GENITIVE: "Priest's",
-			ROLE_PRIEST_PLURAL: "Priests",
-			ROLE_PRIEST_PLURAL_DEFINITE: "the Priests",
-			ROLE_PRIEST_PLURAL_DEFINITE_GENITIVE: "the Priests'",
-			ROLE_PRIEST_PLURAL_GENITIVE: "Priests'",
-			ROLE_PRINCE: "Prince",
-			ROLE_PRINCE_DEFINITE: "the Prince",
-			ROLE_PRINCE_DEFINITE_GENITIVE: "the Prince's",
-			ROLE_PRINCE_GENITIVE: "Prince's",
-			ROLE_PRINCE_PLURAL: "Princes",
-			ROLE_PRINCE_PLURAL_DEFINITE: "the Princes",
-			ROLE_PRINCE_PLURAL_DEFINITE_GENITIVE: "the Princes'",
-			ROLE_PRINCE_PLURAL_GENITIVE: "Princes'",
-			ROLE_PSYCHIC: "Psychic",
-			ROLE_PSYCHIC_DEFINITE: "the Psychic",
-			ROLE_PSYCHIC_DEFINITE_GENITIVE: "the Psychic's",
-			ROLE_PSYCHIC_GENITIVE: "Psychic's",
-			ROLE_PSYCHIC_PLURAL: "Psychics",
-			ROLE_PSYCHIC_PLURAL_DEFINITE: "the Psychics",
-			ROLE_PSYCHIC_PLURAL_DEFINITE_GENITIVE: "the Psychics'",
-			ROLE_PSYCHIC_PLURAL_GENITIVE: "Psychics'",
-			ROLE_RASCAL: "Rascal",
-			ROLE_RASCAL_DEFINITE: "the Rascal",
-			ROLE_RASCAL_DEFINITE_GENITIVE: "the Rascal's",
-			ROLE_RASCAL_GENITIVE: "Rascal's",
-			ROLE_RASCAL_PLURAL: "Rascals",
-			ROLE_RASCAL_PLURAL_DEFINITE: "the Rascals",
-			ROLE_RASCAL_PLURAL_DEFINITE_GENITIVE: "the Rascals'",
-			ROLE_RASCAL_PLURAL_GENITIVE: "Rascals'",
-			ROLE_RENFIELD: "Renfield",
-			ROLE_RENFIELD_DEFINITE: "Renfield",
-			ROLE_RENFIELD_DEFINITE_GENITIVE: "Renfield's",
-			ROLE_RENFIELD_GENITIVE: "Renfield's",
-			ROLE_RENFIELD_PLURAL: "Renfields",
-			ROLE_RENFIELD_PLURAL_DEFINITE: "the Renfields",
-			ROLE_RENFIELD_PLURAL_DEFINITE_GENITIVE: "the Renfields'",
-			ROLE_RENFIELD_PLURAL_GENITIVE: "Renfields'",
-			ROLE_REVEALER: "Revealer",
-			ROLE_REVEALER_DEFINITE: "the Revealer",
-			ROLE_REVEALER_DEFINITE_GENITIVE: "the Revealer's",
-			ROLE_REVEALER_GENITIVE: "Revealer's",
-			ROLE_REVEALER_PLURAL: "Revealers",
-			ROLE_REVEALER_PLURAL_DEFINITE: "the Revealers",
-			ROLE_REVEALER_PLURAL_DEFINITE_GENITIVE: "the Revealers'",
-			ROLE_REVEALER_PLURAL_GENITIVE: "Revealers'",
-			ROLE_ROBBER: "Robber",
-			ROLE_ROBBER_DEFINITE: "the Robber",
-			ROLE_ROBBER_DEFINITE_GENITIVE: "the Robber's",
-			ROLE_ROBBER_GENITIVE: "Robber's",
-			ROLE_ROBBER_PLURAL: "Robbers",
-			ROLE_ROBBER_PLURAL_DEFINITE: "the Robbers",
-			ROLE_ROBBER_PLURAL_DEFINITE_GENITIVE: "the Robbers'",
-			ROLE_ROBBER_PLURAL_GENITIVE: "Robbers'",
-			ROLE_SEER: "Seer",
-			ROLE_SEER_DEFINITE: "the Seer",
-			ROLE_SEER_DEFINITE_GENITIVE: "the Seer's",
-			ROLE_SEER_GENITIVE: "Seer's",
-			ROLE_SEER_PLURAL: "Seers",
-			ROLE_SEER_PLURAL_DEFINITE: "the Seers",
-			ROLE_SEER_PLURAL_DEFINITE_GENITIVE: "the Seers'",
-			ROLE_SEER_PLURAL_GENITIVE: "Seers'",
-			ROLE_SENTINEL: "Sentinel",
-			ROLE_SENTINEL_DEFINITE: "the Sentinel",
-			ROLE_SENTINEL_DEFINITE_GENITIVE: "the Sentinel's",
-			ROLE_SENTINEL_GENITIVE: "Sentinel's",
-			ROLE_SENTINEL_PLURAL: "Sentinels",
-			ROLE_SENTINEL_PLURAL_DEFINITE: "the Sentinels",
-			ROLE_SENTINEL_PLURAL_DEFINITE_GENITIVE: "the Sentinels'",
-			ROLE_SENTINEL_PLURAL_GENITIVE: "Sentinels'",
-			ROLE_SQUIRE: "Squire",
-			ROLE_SQUIRE_DEFINITE: "the Squire",
-			ROLE_SQUIRE_DEFINITE_GENITIVE: "the Squire's",
-			ROLE_SQUIRE_GENITIVE: "Squire's",
-			ROLE_SQUIRE_PLURAL: "Squires",
-			ROLE_SQUIRE_PLURAL_DEFINITE: "the Squires",
-			ROLE_SQUIRE_PLURAL_DEFINITE_GENITIVE: "the Squires'",
-			ROLE_SQUIRE_PLURAL_GENITIVE: "Squires'",
-			ROLE_SYNTHETICALIEN: "Synthetic Alien",
-			ROLE_SYNTHETICALIEN_DEFINITE: "the Synthetic Alien",
-			ROLE_SYNTHETICALIEN_DEFINITE_GENITIVE: "the Synthetic Alien's",
-			ROLE_SYNTHETICALIEN_GENITIVE: "Synthetic Alien's",
-			ROLE_SYNTHETICALIEN_PLURAL: "Synthetic Aliens",
-			ROLE_SYNTHETICALIEN_PLURAL_DEFINITE: "the Synthetic Aliens",
-			ROLE_SYNTHETICALIEN_PLURAL_DEFINITE_GENITIVE: "the Synthetic Aliens'",
-			ROLE_SYNTHETICALIEN_PLURAL_GENITIVE: "Synthetic Aliens'",
-			ROLE_TANNER: "Tanner",
-			ROLE_TANNER_DEFINITE: "the Tanner",
-			ROLE_TANNER_DEFINITE_GENITIVE: "the Tanner's",
-			ROLE_TANNER_GENITIVE: "Tanner's",
-			ROLE_TANNER_PLURAL: "Tanners",
-			ROLE_TANNER_PLURAL_DEFINITE: "the Tanners",
-			ROLE_TANNER_PLURAL_DEFINITE_GENITIVE: "the Tanners'",
-			ROLE_TANNER_PLURAL_GENITIVE: "Tanners'",
-			ROLE_THING: "Thing",
-			ROLE_THING_DEFINITE: "the Thing",
-			ROLE_THING_DEFINITE_GENITIVE: "the Thing's",
-			ROLE_THING_GENITIVE: "Thing's",
-			ROLE_THING_PLURAL: "Things",
-			ROLE_THING_PLURAL_DEFINITE: "the Things",
-			ROLE_THING_PLURAL_DEFINITE_GENITIVE: "the Things'",
-			ROLE_THING_PLURAL_GENITIVE: "Things'",
-			ROLE_TROUBLEMAKER: "Troublemaker",
-			ROLE_TROUBLEMAKER_DEFINITE: "the Troublemaker",
-			ROLE_TROUBLEMAKER_DEFINITE_GENITIVE: "the Troublemaker's",
-			ROLE_TROUBLEMAKER_GENITIVE: "Troublemaker's",
-			ROLE_TROUBLEMAKER_PLURAL: "Troublemakers",
-			ROLE_TROUBLEMAKER_PLURAL_DEFINITE: "the Troublemakers",
-			ROLE_TROUBLEMAKER_PLURAL_DEFINITE_GENITIVE: "the Troublemakers'",
-			ROLE_TROUBLEMAKER_PLURAL_GENITIVE: "Troublemakers'",
-			ROLE_VAMPIRE: "Vampire",
-			ROLE_VAMPIRE_DEFINITE: "the Vampire",
-			ROLE_VAMPIRE_DEFINITE_GENITIVE: "the Vampire's",
-			ROLE_VAMPIRE_GENITIVE: "Vampire's",
-			ROLE_VAMPIRE_PLURAL: "Vampires",
-			ROLE_VAMPIRE_PLURAL_DEFINITE: "the Vampires",
-			ROLE_VAMPIRE_PLURAL_DEFINITE_GENITIVE: "the Vampires'",
-			ROLE_VAMPIRE_PLURAL_GENITIVE: "Vampires'",
-			ROLE_VILLAGEIDIOT: "Village Idiot",
-			ROLE_VILLAGEIDIOT_DEFINITE: "the Village Idiot",
-			ROLE_VILLAGEIDIOT_DEFINITE_GENITIVE: "the Village Idiot's",
-			ROLE_VILLAGEIDIOT_GENITIVE: "Village Idiot's",
-			ROLE_VILLAGEIDIOT_PLURAL: "Village Idiots",
-			ROLE_VILLAGEIDIOT_PLURAL_DEFINITE: "the Village Idiots",
-			ROLE_VILLAGEIDIOT_PLURAL_DEFINITE_GENITIVE: "the Village Idiots'",
-			ROLE_VILLAGEIDIOT_PLURAL_GENITIVE: "Village Idiots'",
-			ROLE_VILLAGER: "Villager",
-			ROLE_VILLAGER_DEFINITE: "the Villager",
-			ROLE_VILLAGER_DEFINITE_GENITIVE: "the Villager's",
-			ROLE_VILLAGER_GENITIVE: "Villager's",
-			ROLE_VILLAGER_PLURAL: "Villagers",
-			ROLE_VILLAGER_PLURAL_DEFINITE: "the Villagers",
-			ROLE_VILLAGER_PLURAL_DEFINITE_GENITIVE: "the Villagers'",
-			ROLE_VILLAGER_PLURAL_GENITIVE: "Villagers'",
-			ROLE_WEREWOLF: "Werewolf",
-			ROLE_WEREWOLF_DEFINITE: "the Werewolf",
-			ROLE_WEREWOLF_DEFINITE_GENITIVE: "the Werewolf's",
-			ROLE_WEREWOLF_GENITIVE: "Werewolf's",
-			ROLE_WEREWOLF_PLURAL: "Werewolves",
-			ROLE_WEREWOLF_PLURAL_DEFINITE: "the Werewolves",
-			ROLE_WEREWOLF_PLURAL_DEFINITE_GENITIVE: "the Werewolves'",
-			ROLE_WEREWOLF_PLURAL_GENITIVE: "Werewolves'",
-			ROLE_WITCH: "Witch",
-			ROLE_WITCH_DEFINITE: "the Witch",
-			ROLE_WITCH_DEFINITE_GENITIVE: "the Witch's",
-			ROLE_WITCH_GENITIVE: "Witch's",
-			ROLE_WITCH_PLURAL: "Witches",
-			ROLE_WITCH_PLURAL_DEFINITE: "the Witches",
-			ROLE_WITCH_PLURAL_DEFINITE_GENITIVE: "the Witches'",
-			ROLE_WITCH_PLURAL_GENITIVE: "Witches'",
-			SPECIAL_ALL: "All players",
-			SPECIAL_ALL_DEFINITE: "All players",
-			SPECIAL_ALL_DEFINITE_GENITIVE: "All players'",
-			SPECIAL_ALL_GENITIVE: "All players'",
-			SPECIAL_ALL_PLURAL: "All players",
-			SPECIAL_ALL_PLURAL_DEFINITE: "All players",
-			SPECIAL_ALL_PLURAL_DEFINITE_GENITIVE: "All players'",
-			SPECIAL_ALL_PLURAL_GENITIVE: "All players'",
-			SPECIAL_LOVERS: "Lovers",
-			SPECIAL_LOVERS_DEFINITE: "the Lovers",
-			SPECIAL_LOVERS_DEFINITE_GENITIVE: "the Lovers'",
-			SPECIAL_LOVERS_GENITIVE: "Lovers'",
-			SPECIAL_LOVERS_PLURAL: "Lovers",
-			SPECIAL_LOVERS_PLURAL_DEFINITE: "the Lovers",
-			SPECIAL_LOVERS_PLURAL_DEFINITE_GENITIVE: "the Lovers'",
-			SPECIAL_LOVERS_PLURAL_GENITIVE: "Lovers'",
-			TEAM_ALIEN: "Alien",
-			TEAM_ALIEN_DEFINITE: "the Aliens",
-			TEAM_ALIEN_DEFINITE_GENITIVE: "the Aliens'",
-			TEAM_ALIEN_GENITIVE: "Alien's",
-			TEAM_ALIEN_PLURAL: "Aliens",
-			TEAM_ALIEN_PLURAL_DEFINITE: "the Aliens",
-			TEAM_ALIEN_PLURAL_DEFINITE_GENITIVE: "the Aliens'",
-			TEAM_ALIEN_PLURAL_GENITIVE: "Aliens'",
-			TEAM_MINORITY: "Other",
-			TEAM_MINORITY_DEFINITE: "the Others",
-			TEAM_MINORITY_DEFINITE_GENITIVE: "the Others'",
-			TEAM_MINORITY_GENITIVE: "Other's",
-			TEAM_MINORITY_PLURAL: "Others",
-			TEAM_MINORITY_PLURAL_DEFINITE: "the Others",
-			TEAM_MINORITY_PLURAL_DEFINITE_GENITIVE: "the Others'",
-			TEAM_MINORITY_PLURAL_GENITIVE: "Others'",
-			TEAM_VAMPIRE: "Vampire",
-			TEAM_VAMPIRE_DEFINITE: "the Vampires",
-			TEAM_VAMPIRE_DEFINITE_GENITIVE: "the Vampires'",
-			TEAM_VAMPIRE_GENITIVE: "Vampire's",
-			TEAM_VAMPIRE_PLURAL: "Vampires",
-			TEAM_VAMPIRE_PLURAL_DEFINITE: "the Vampires",
-			TEAM_VAMPIRE_PLURAL_DEFINITE_GENITIVE: "the Vampires'",
-			TEAM_VAMPIRE_PLURAL_GENITIVE: "Vampires'",
-			TEAM_VILLAGE: "Villager",
-			TEAM_VILLAGE_DEFINITE: "the Villagers", 
-			TEAM_VILLAGE_DEFINITE_GENITIVE: "the Villagers'", 
-			TEAM_VILLAGE_GENITIVE: "Villager's",
-			TEAM_VILLAGE_PLURAL: "Villagers", 
-			TEAM_VILLAGE_PLURAL_DEFINITE: "the Villagers",
-			TEAM_VILLAGE_PLURAL_DEFINITE_GENITIVE: "the Villagers'",
-			TEAM_VILLAGE_PLURAL_GENITIVE: "Villagers'",
-			TEAM_WEREWOLF: "Werewolf",
-			TEAM_WEREWOLF_DEFINITE: "the Werewolves",
-			TEAM_WEREWOLF_DEFINITE_GENITIVE: "the Werewolves'",
-			TEAM_WEREWOLF_GENITIVE: "Werewolf's",
-			TEAM_WEREWOLF_PLURAL: "Werewolves",
-			TEAM_WEREWOLF_PLURAL_DEFINITE: "the Werewolves",
-			TEAM_WEREWOLF_PLURAL_DEFINITE_GENITIVE: "the Werewolves'",
-			TEAM_WEREWOLF_PLURAL_GENITIVE: "Werewolves'",
-			TOKEN_ARTIFACT_ALIEN: "{TEAM_ALIEN} artifact",
-			TOKEN_ARTIFACT_BODYGUARD: "Sword of the {ROLE_BODYGUARD}",
-			TOKEN_ARTIFACT_CLOAK: "Cloak of Shame",
-			TOKEN_ARTIFACT_HUNTER: "Rifle of the {ROLE_HUNTER}",
-			TOKEN_ARTIFACT_MUTED: "Mask of Muting",
-			TOKEN_ARTIFACT_PRINCE: "Crown of the {ROLE_PRINCE}",
-			TOKEN_ARTIFACT_TANNER: "Rack of the {ROLE_TANNER}",
-			TOKEN_ARTIFACT_TRAITOR: "Dagger of the Traitor",
-			TOKEN_ARTIFACT_VAMPIRE: "Bite of the {TEAM_VAMPIRE}",
-			TOKEN_ARTIFACT_VILLAGER: "Pitchfork of the Villager",
-			TOKEN_ARTIFACT_VOID: "Void",
-			TOKEN_ARTIFACT_WEREWOLF: "Claw of the {TEAM_WEREWOLF}",
-			TOKEN_MARK_ASSASSIN: "Mark of the {ROLE_ASSASSIN}",
-			TOKEN_MARK_CLARITY: "Mark of Clarity",
-			TOKEN_MARK_COUNT: "Mark of Fear",
-			TOKEN_MARK_CUPID: "Mark of Love",
-			TOKEN_MARK_DISEASED: "Mark of {ROLE_DISEASED_DEFINITE}",
-			TOKEN_MARK_INSTIGATOR: "Dagger of the Traitor",
-			TOKEN_MARK_RENFIELD: "Mark of {ROLE_RENFIELD}",
-			TOKEN_MARK_VAMPIRE: "Bite of the {TEAM_VAMPIRE}",
-			TOKEN_SHIELD: "Shield token",
-			
-			
-			UI_ABILITY_ALIEN: "Wakes up with all {TEAM_ALIEN_PLURAL} and identifies the other {TEAM_ALIEN_PLURAL}. May also collectively view one or more cards at random.",
-			UI_ABILITY_ALPHAWOLF: "Wakes up first with all {TEAM_WEREWOLF_PLURAL}. Then wakes up alone and swaps a non-{TEAM_WEREWOLF_PLURAL} player's card with the unused {TEAM_WEREWOLF} card in the center. If {ROLE_ALPHAWOLF_DEFINITE} is used, an additional {TEAM_WEREWOLF} card is placed in the center, rotated 90 degrees.",
-			UI_ABILITY_APPRENTICEASSASSIN: "Wakes up at the same time as {ROLE_ASSASSIN_DEFINITE} after the {TOKEN_MARK_ASSASSIN} has been placed so they can identify each other. If no {ROLE_ASSASSIN} is in play, {ROLE_APPRENTICEASSASSIN_DEFINITE} performs that action instead.",
-			UI_ABILITY_APPRENTICESEER: "Wakes up and may look at one of the center cards.",
-			UI_ABILITY_APPRENTICETANNER: "Wakes up and sees who {ROLE_TANNER_DEFINITE} is.",
-			UI_ABILITY_ARTIFACT_ALIEN: "The player is now an {TEAM_ALIEN}, regardless of previous role.",
-			UI_ABILITY_ARTIFACT_BODYGUARD: "The player is now a {ROLE_BODYGUARD}, regardless of previous role.",
-			UI_ABILITY_ARTIFACT_CLOAK: "The player must turn away from all other players.",
-			UI_ABILITY_ARTIFACT_HUNTER: "The player is now a {ROLE_HUNTER}, regardless of previous role.",
-			UI_ABILITY_ARTIFACT_MUTED: "The player may not speak during the day.",
-			UI_ABILITY_ARTIFACT_PRINCE: "The player is now a {ROLE_PRINCE}, regardless of previous role.",
-			UI_ABILITY_ARTIFACT_TANNER: "The player is now a {ROLE_TANNER}, regardless of previous role.",
-			UI_ABILITY_ARTIFACT_TRAITOR: "The player is now a traitor and will only win if their team loses.",
-			UI_ABILITY_ARTIFACT_VAMPIRE: "The player is now a {TEAM_VAMPIRE}, regardless of previous role.",
-			UI_ABILITY_ARTIFACT_VILLAGER: "The player is now a {ROLE_VILLAGER}, regardless of previous role.",
-			UI_ABILITY_ARTIFACT_VOID: "No effect is imparted on the player.",
-			UI_ABILITY_ARTIFACT_WEREWOLF: "The player is now a {TEAM_WEREWOLF}, regardless of previous role.",
-			UI_ABILITY_ASSASSIN: "Wakes up and selects a target by placing the {TOKEN_MARK_ASSASSIN} in front of a player.",
-			UI_ABILITY_AURASEER: "Wakes up and sees which players have looked at or moved a card during the night.",
-			UI_ABILITY_BEHOLDER: "Wakes up and sees who {ROLE_SEER_DEFINITE} and {ROLE_APPRENTICESEER_DEFINITE} are. May then check their cards to see if they were moved during the night.",
-			UI_ABILITY_BLOB: "Does not wake up. At the start of the day, it is announced which nearby players (0–4) {ROLE_BLOB_DEFINITE} must protect.",
-			UI_ABILITY_BODYGUARD: "The player voted for by {ROLE_BODYGUARD_DEFINITE} cannot be eliminated. The player with the second-highest votes is eliminated instead.",
-			UI_ABILITY_BODYSNATCHER: "Wakes up and may choose to swap another player's card with their own, then look at their new card. Both {ROLE_BODYSNATCHER_DEFINITE} and the other card become a member of {TEAM_ALIEN_PLURAL_DEFINITE}.",
-			UI_ABILITY_COPYCAT: "Wakes up and looks at one of the center cards. {ROLE_COPYCAT_DEFINITE} copies that role and team. The copied role and team follows the card if it is moved during the night. {ROLE_COPYCAT_DEFINITE} later wakes and performs that role's action.",
-			UI_ABILITY_COUNT: "Wakes up with all {TEAM_VAMPIRE_PLURAL}. Then wakes alone and places the {TOKEN_MARK_COUNT} on a non-{TEAM_VAMPIRE} player. That player may not wake or perform any action during the night.",
-			UI_ABILITY_COW: "Holds out a hand without waking. If one or more {TEAM_ALIEN_PLURAL} are adjacent to {ROLE_COW_DEFINITE}, they must touch {ROLE_COW_DEFINITE}'s hand.",
-			UI_ABILITY_CUPID: "Wakes up and places the {TOKEN_MARK_CUPID} on two players. Those players wake together and identify each other. If one is eliminated, the other is also eliminated.",
-			UI_ABILITY_CURATOR: "Wakes up and places a random artifact token in front of a player, including {ROLE_CURATOR_DEFINITE}. At the start of the day, that player may look at it. If it causes a role change, it overrides the player's card for ability and team.",
-			UI_ABILITY_CURSED: "If at least one {TEAM_WEREWOLF}, {TEAM_VAMPIRE}, or {TEAM_ALIEN} votes for {ROLE_CURSED_DEFINITE}, it changes to that team.",
-			UI_ABILITY_DISEASED: "Wakes up and places the {TOKEN_MARK_DISEASED} on a neighbor. Any player who votes for {ROLE_DISEASED_DEFINITE} or a marked player automatically loses, even if their team wins.",
-			UI_ABILITY_DOPPELGANGER: "Wakes up and looks at another player's card. {ROLE_DOPPELGANGER_DEFINITE} copies that role and team. The copied role and team follows the card if it is moved during the night. {ROLE_DOPPELGANGER_DEFINITE} later wakes and performs that role's action.",
-			UI_ABILITY_DREAMWOLF: "Shows a thumb instead of waking with {TEAM_WEREWOLF_PLURAL} so they can identify {ROLE_DREAMWOLF_DEFINITE}.",
-			UI_ABILITY_DRUNK: "Wakes up and swaps their card with a center card without looking at it.",
-			UI_ABILITY_EMPATH: "Wakes up and observes players perform a random action without waking them.",
-			UI_ABILITY_EXPOSER: "Wakes up and may flip 1–3 center cards face up, chosen randomly.",
-			UI_ABILITY_FEUDINGALIENS: "Wakes up with all {TEAM_ALIEN_PLURAL}, then wakes together and identifies each other.",
-			UI_ABILITY_GREMLIN: "Wakes up and swaps either two players' marks or two players' cards, but not both.",
-			UI_ABILITY_HUNTER: "If {ROLE_HUNTER_DEFINITE} is eliminated, the player they voted for is also eliminated.",
-			UI_ABILITY_INSOMNIAC: "Wakes last and looks at their own card.",
-			UI_ABILITY_INSTIGATOR: "Wakes up and gives a {TOKEN_MARK_INSTIGATOR} to a player. That player wins only if someone on their own team is eliminated.",
-			UI_ABILITY_LEADER: "Wakes up and sees which players are {TEAM_ALIEN_PLURAL}. Also sees which of them are {ROLE_FEUDINGALIENS_DEFINITE}. If all {TEAM_ALIEN_DEFINITE} point at {ROLE_LEADER_DEFINITE}, they win regardless of outcome.",
-			UI_ABILITY_MARKSMAN: "Wakes up and looks at one player's card and another player's mark. They must be different players.",
-			UI_ABILITY_MARK_ASSASSIN: "The player is the target of {ROLE_ASSASSIN_DEFINITE}, who will only win if the player is eliminated.",
-			UI_ABILITY_MARK_CLARITY: "The {TOKEN_MARK_CLARITY} has no effect, and is given to each player at the start of the game.",
-			UI_ABILITY_MARK_COUNT: "The player may not wake up during the night to perform their action.",
-			UI_ABILITY_MARK_CUPID: "The players who receive the mark are linked to each other. If one is eliminated, all are eliminated. The players will wake to identify each other.",
-			UI_ABILITY_MARK_DISEASED: "Any player who votes for the recipient of the {TOKEN_MARK_DISEASED} will be unable to win, regardless of their win condition.",
-			UI_ABILITY_MARK_INSTIGATOR: "The player is now a traitor and will only win if their team loses.",
-			UI_ABILITY_MARK_RENFIELD: "The mark has no effect and is used only by {ROLE_RENFIELD} to reset any mark given.",
-			UI_ABILITY_MARK_VAMPIRE: "The player is now a {TEAM_VAMPIRE}, regardless of previous role.",
-			UI_ABILITY_MASON: "Wakes up with the other {ROLE_MASON_DEFINITE} and identifies each other.",
-			UI_ABILITY_MASTER: "Wakes up with all {TEAM_VAMPIRE_PLURAL}. Becomes immune to elimination if at least one other {TEAM_VAMPIRE} votes for {ROLE_MASTER_DEFINITE}.",
-			UI_ABILITY_MINION: "Wakes up and sees which players are {TEAM_WEREWOLF}.",
-			UI_ABILITY_MORTICIAN: "Wakes up and looks at one or both neighbors' cards or their own, chosen randomly.",
-			UI_ABILITY_MYSTICWOLF: "Wakes with all {TEAM_WEREWOLF_PLURAL}, then wakes alone to view another player's card.",
-			UI_ABILITY_NOSTRADAMUS: "Wakes up and may look at up to three players' cards. If any are not {TEAM_VILLAGE_DEFINITE}, no more cards may be viewed and {ROLE_NOSTRADAMUS_DEFINITE} adopts that team. This follows the card if moved. The new team is announced.",
-			UI_ABILITY_ORACLE: "Wakes up and performs a random predefined action that is read aloud.",
-			UI_ABILITY_PARANORMALINVESTIGATOR: "Wakes up and may look at up to two players' cards. If any are not {TEAM_VILLAGE_DEFINITE}, no more cards may be viewed and {ROLE_PARANORMALINVESTIGATOR_DEFINITE} adopts that team.",
-			UI_ABILITY_PICKPOCKET: "Wakes up and may swap a player's mark with their own, then view their new mark.",
-			UI_ABILITY_PREFIX: "Ability/Action",
-			UI_ABILITY_PRIEST: "Wakes up and replaces their own and optionally another player's marks with the {TOKEN_MARK_CLARITY}.",
-			UI_ABILITY_PRINCE: "Cannot be eliminated. The player with the second-highest votes is eliminated instead.",
-			UI_ABILITY_PSYCHIC: "Wakes up and may look at another player's card with random restrictions.",
-			UI_ABILITY_RASCAL: "Wakes up and performs a random action from {ROLE_TROUBLEMAKER_DEFINITE}, {ROLE_ROBBER_DEFINITE}, {ROLE_WITCH_DEFINITE}, {ROLE_VILLAGEIDIOT_DEFINITE}, or {ROLE_DRUNK_DEFINITE}.",
-			UI_ABILITY_RENFIELD: "Wakes up and replaces their mark with {TOKEN_MARK_RENFIELD}. Sees all {TEAM_VAMPIRE_PLURAL} and which player received a {TOKEN_MARK_VAMPIRE}.",
-			UI_ABILITY_REVEALER: "Wakes up and turns another player's card face up. If not {TEAM_VILLAGE_DEFINITE}, it is turned back down.",
-			UI_ABILITY_ROBBER: "Wakes up and may swap cards with another player, then look at the new card. Does not wake again.",
-			UI_ABILITY_SEER: "Wakes up and may look at another player's card or two center cards.",
-			UI_ABILITY_SENTINEL: "Wakes up and places a {TOKEN_SHIELD} on another player's card. That card cannot be moved or viewed.",
-			UI_ABILITY_SHIELD: "A {TOKEN_SHIELD} placed on a player card forbids any player from interacting with the card, including the owner of the card.",
-			UI_ABILITY_SQUIRE: "Wakes up and sees which players are {TEAM_WEREWOLF}. Also checks if their cards were moved.",
-			UI_ABILITY_SYNTHETICALIEN: "Wakes with all {TEAM_ALIEN_PLURAL} and identifies them. May also collectively view random cards.",
-			UI_ABILITY_TANNER: "If {ROLE_TANNER_DEFINITE} is eliminated, {TEAM_WEREWOLF_DEFINITE}, {TEAM_VAMPIRE_DEFINITE}, and {TEAM_ALIEN_DEFINITE} lose.",
-			UI_ABILITY_THING: "Wakes up and touches one of their adjacent players.",
-			UI_ABILITY_TROUBLEMAKER: "Wakes up and swaps two other players' cards without looking.",
-			UI_ABILITY_VAMPIRE: "Wakes with all {TEAM_VAMPIRE_PLURAL} and identifies them. Collectively choose a player to give the {TOKEN_MARK_VAMPIRE}.",
-			UI_ABILITY_VILLAGEIDIOT: "Wakes up and may shift all other players' cards left, right, or not at all.",
-			UI_ABILITY_VILLAGER: "None.",
-			UI_ABILITY_WEREWOLF: "Wakes up with all {TEAM_WEREWOLF_PLURAL} and identifies them. If alone, may view one center card.",
-			UI_ABILITY_WITCH: "Wakes up and may look at a center card. If they do, they must give it to themselves or another player.",
-			UI_DAYTIMER_PAUSE: "Pause",
-			UI_DAYTIMER_START: "Start",
-			UI_DAYTIMER_STOP: "Stop",
-			UI_FILTER_COMPLEXITY: "Difficulty",
-			UI_FILTER_COMPLEXITY_EASY: "Easy",
-			UI_FILTER_COMPLEXITY_HARD: "Hard",
-			UI_FILTER_COMPLEXITY_MEDIUM: "Medium",
-			UI_FILTER_RULESET: "Ruleset",
-			UI_FILTER_RULESET_ADVANCED: "Advanced",
-			UI_FILTER_RULESET_ALIEN: "Aliens",
-			UI_FILTER_RULESET_BASIC: "Basic",
-			UI_FILTER_RULESET_VAMPIRE: "Vampires",
-			UI_GAMERULES: "Game Rules",
-			UI_GENERATED_PROMPT: "Game Prompt",
-			UI_PLAYER_COUNT: "Number of players:",
-			UI_PRINT: "Print",
-			UI_PROMPT_ERROR_INSUFFICIENT_PLAYERS: "Prompt cannot be generated: too few roles selected.",
-			UI_PROMPT_ERROR_INVALID_SETTINGS: "Prompt cannot be generated: check settings.",
-			UI_PROMPT_SINGLETURN: "Split",
-			UI_RERANDOMIZE: "Rerandomize",
-			UI_RESET: "Reset",
-			UI_ROLEDESCRIPTIONS: "Role Descriptions",
-			UI_ROLESELECTION: "Select Roles",
-			UI_SEARCH: "Search",
-			UI_SEARCH_PLACEHOLDER: "Filter roles...",
-			UI_SETTING: "Settings",
-			UI_SETTING_ALIENS_MAKE_ALIEN: "Turn another player into a {TEAM_ALIEN}",
-			UI_SETTING_ALIENS_MAKE_MINION: "Turn another player into a minion",
-			UI_SETTING_ALIENS_NOTHING: "No action",
-			UI_SETTING_ALIENS_SHOW_CARDS: "Show their cards to other {TEAM_ALIEN_DEFINITE}",
-			UI_SETTING_ALIENS_TRADE_CARDS: "Swap cards with other {TEAM_ALIEN_DEFINITE}",
-			UI_SETTING_ALIENS_VIEW_CARD_COLLECTIVE: "View cards collectively",
-			UI_SETTING_ALIENS_VIEW_CARD_INDIVIDUAL: "View cards individually",
-			UI_SETTING_BODYSNATCHER_FAKE_ACTION: "Chance to only pretend to perform the action.",
-			UI_SETTING_ERROR_WEIGHTGROUP_ORACLE_TEAM: "The total weight of the group must be greater than 0. At least one {TEAM_WEREWOLF}, {TEAM_ALIEN} or {TEAM_VAMPIRE} must be selected for the switch team weight to count.",
-			UI_SETTING_ERROR_WEIGHTGROUP_SUM_ZERO: "The total weight of the group must be greater than 0",
-			UI_SETTING_ERROR_WEIGHTGROUP_SUM_ZERO_CONTEXT: "The total weight of the group must be greater than 0, and satisfy the conditions for the currently selected roles.",
-			UI_SETTING_EXPOSER_FLIP_ONE: "Flip one center card",
-			UI_SETTING_EXPOSER_FLIP_THREE: "Flip three center cards",
-			UI_SETTING_EXPOSER_FLIP_TWO: "Flip two center cards",
-			UI_SETTING_LABEL_RASCAL: "Perform one of the following actions",
-			UI_SETTING_LABEL_VIEW_CARD: "View player cards",
-			UI_SETTING_ORACLE_BLOCK_ACTION: "Prevent another player from waking",
-			UI_SETTING_ORACLE_DRUNK: "Swap your card with a center card",
-			UI_SETTING_ORACLE_EVEN_ODD: "Announce whether {ROLE_ORACLE_DEFINITE} has an even or odd player number",
-			UI_SETTING_ORACLE_HUNT: "Oracle Hunt",
-			UI_SETTING_ORACLE_HUNT_ALLOW_BAD_TEAMS: "Allow waking for evil roles",
-			UI_SETTING_ORACLE_HUNT_CHANCE: "Probability",
-			UI_SETTING_ORACLE_SWITCH_TEAM: "Switch team",
-			UI_SETTING_ORACLE_SWITCH_TEAM_FULL: "Switch role",
-			UI_SETTING_ORACLE_SWITCH_TEAM_MODE: "Probability of switching role as well",
-			UI_SETTING_ORACLE_SWITCH_TEAM_PARTIAL: "Switch team only",
-			UI_SETTING_ORACLE_VIEW_CENTER: "View center cards",
-			UI_SETTING_ORACLE_VIEW_PLAYER: "View player cards",
-			UI_SETTING_PSYCHIC_VIEW_TWO_CARDS: "Chance to view two cards",
-			UI_SETTING_RIPPLE: "Space-time ripple",
-			UI_SETTING_RIPPLE_DOUBLE_VOTE: "Some players may cast two votes",
-			UI_SETTING_RIPPLE_DRUNK: "A player swaps their card with a center card",
-			UI_SETTING_RIPPLE_DUAL_VIEW_PLAYER: "Two players may view another player's card",
-			UI_SETTING_RIPPLE_INSOMNIAC: "Some players view their cards after the night",
-			UI_SETTING_RIPPLE_MUTED: "Some players may not speak",
-			UI_SETTING_RIPPLE_NONE: "Nothing happens",
-			UI_SETTING_RIPPLE_ONE_MINUTE: "Game time reduced to 1 minute",
-			UI_SETTING_RIPPLE_REBUKED: "Some players must turn away",
-			UI_SETTING_RIPPLE_REVEALER: "A player may reveal another player's card",
-			UI_SETTING_RIPPLE_ROBBER: "A player may steal another player's card",
-			UI_SETTING_RIPPLE_TROUBLEMAKER: "A player swaps two other players",
-			UI_SETTING_RIPPLE_VIEW_PLAYER: "A player may view another player's card",
-			UI_SETTING_RIPPLE_WITCH: "A player may view a center card and give it to a player",
-			UI_SETTING_VALIDATION_ERROR: "Error in settings",
-			UI_SETTING_VIEW_CARD_CENTER_FOUR: "Four center cards",
-			UI_SETTING_VIEW_CARD_CENTER_ONE: "One center card",
-			UI_SETTING_VIEW_CARD_CENTER_THREE: "Three center cards",
-			UI_SETTING_VIEW_CARD_CENTER_TWO: "Two center cards",
-			UI_SETTING_VIEW_CARD_PLAYER_ANY: "Any player",
-			UI_SETTING_VIEW_CARD_PLAYER_EVEN: "Even-numbered player",
-			UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR: "Neighbor",
-			UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR_BOTH: "Both neighbors",
-			UI_SETTING_VIEW_CARD_PLAYER_ODD: "Odd-numbered player",
-			UI_SETTING_VIEW_CARD_PLAYER_SELF: "Your own",
-			UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC: "Specific player",
-			UI_TITLE: "One Night Ultimate Werewolf – Prompt Builder",
-			UI_TOKENDESCRIPTIONS: "Tokens",
-			UI_TOKENS_PLACES: "Places",
-			UI_USEDBY_PREFIX: "Roles",
-			UI_WINCONDITION_APPRENTICEASSASSIN: "Wins if {ROLE_ASSASSIN_DEFINITE} is eliminated, or if the chosen target is eliminated when no {ROLE_ASSASSIN} is in play.",
-			UI_WINCONDITION_APPRENTICETANNER: "Wins if {ROLE_TANNER_DEFINITE} is eliminated, or if {ROLE_APPRENTICETANNER_DEFINITE} is eliminated when no {ROLE_TANNER} is in play.",
-			UI_WINCONDITION_ASSASSIN: "Wins if the chosen target is eliminated.",
-			UI_WINCONDITION_BLOB: "Wins if neither {ROLE_BLOB_DEFINITE} nor any players they must protect are eliminated.",
-			UI_WINCONDITION_COPYCAT: "{ROLE_COPYCAT_DEFINITE} also copies the win condition of whatever role was copied during the night.",
-			UI_WINCONDITION_CURSED: "{UI_WINCONDITION_TEAM_VILLAGE} If team alignment changes during the vote, so does the win condition.",
-			UI_WINCONDITION_DOPPELGANGER: "{UI_WINCONDITION_TEAM_VILLAGE} If {ROLE_DOPPELGANGER_DEFINITE} copies another role, it instead uses that role's win condition.",
-			UI_WINCONDITION_FEUDINGALIENS: "If only one is in play, they win with {TEAM_ALIEN}. If both are in play, one wins if the other is eliminated.",
-			UI_WINCONDITION_LEADER: "If both {ROLE_FEUDINGALIENS_DEFINITE} are in play, {ROLE_LEADER_DEFINITE} wins if both survive. Otherwise, {ROLE_LEADER_DEFINITE} wins with {TEAM_VILLAGE_DEFINITE}.",
-			UI_WINCONDITION_MINION: "If at least one {TEAM_WEREWOLF} is in play, {ROLE_MINION_DEFINITE} wins if no {TEAM_WEREWOLF} is eliminated, even if {ROLE_MINION_DEFINITE} is eliminated. If no {TEAM_WEREWOLF} is in play, {ROLE_MINION_DEFINITE} wins if at least one other player is eliminated.",
-			UI_WINCONDITION_MORTICIAN: "Wins if one of {ROLE_MORTICIAN_DEFINITE}'s neighbors is eliminated.",
-			UI_WINCONDITION_NOSTRADAMUS: "{UI_WINCONDITION_TEAM_VILLAGE} If {ROLE_NOSTRADAMUS_DEFINITE} sees a non-{TEAM_VILLAGE} role during the night, they adopt that role's win condition.",
-			UI_WINCONDITION_ORACLE: "{UI_WINCONDITION_TEAM_VILLAGE} {ROLE_ORACLE_DEFINITE_GENITIVE} win condition may change during the night.",
-			UI_WINCONDITION_PARANORMALINVESTIGATOR: "{UI_WINCONDITION_TEAM_VILLAGE} If {ROLE_PARANORMALINVESTIGATOR_DEFINITE} sees a non-{TEAM_VILLAGE} role during the night, they adopt that role's win condition.",
-			UI_WINCONDITION_PREFIX: "Win condition",
-			UI_WINCONDITION_RENFIELD: "If at least one {TEAM_VAMPIRE} is in play, {ROLE_RENFIELD_DEFINITE} wins if no {TEAM_VAMPIRE} is eliminated, even if {ROLE_RENFIELD_DEFINITE} is eliminated. If no {TEAM_VAMPIRE} is in play, {ROLE_RENFIELD_DEFINITE} wins with {TEAM_VILLAGE_DEFINITE}.",
-			UI_WINCONDITION_SQUIRE: "If at least one {TEAM_WEREWOLF} is in play, {ROLE_SQUIRE_DEFINITE} wins if no {TEAM_WEREWOLF} is eliminated, even if {ROLE_SQUIRE_DEFINITE} is eliminated. If no {TEAM_WEREWOLF} is in play, {ROLE_SQUIRE_DEFINITE} wins if at least one other player is eliminated.",
-			UI_WINCONDITION_SYNTHETICALIEN: "Wins if {ROLE_SYNTHETICALIEN_DEFINITE} is eliminated.",
-			UI_WINCONDITION_TANNER: "Wins if {ROLE_TANNER_DEFINITE} is eliminated.",
-			UI_WINCONDITION_TEAM_ALIEN: "Wins if no {TEAM_ALIEN} is eliminated.",
-			UI_WINCONDITION_TEAM_VAMPIRE: "Wins if no {TEAM_VAMPIRE} is eliminated.",
-			UI_WINCONDITION_TEAM_VILLAGE: "Wins if at least one {TEAM_WEREWOLF}, {TEAM_VAMPIRE}, or {TEAM_ALIEN} is eliminated.",
-			UI_WINCONDITION_TEAM_WEREWOLF: "Wins if no {TEAM_WEREWOLF} is eliminated.",
-			UI_WINCONDITION_VARIABLE_NOTE: "This card's win condition may change, such as when copying another role.",
-
-
-			//Prompts
-			DIRECTION_LEFT: "left",
-			DIRECTION_RIGHT: "right",
-			NUM_FOUR: "four",
-			NUM_ONE: "one",
-			NUM_THREE: "three",
-			NUM_TWO: "two",
-			NUM_WORD: "{Select:count,1,NUM_ONE,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR}",
-			GRAMMAR_CARD_SINGULAR: "card",
-			GRAMMAR_CARD_PLURAL: "cards",
-			GRAMMAR_PLAYER_SINGULAR: "player",
-			GRAMMAR_PLAYER_PLURAL: "players",
-
-			PROMPT_ALIEN_TEAM: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_ALIEN_TEAM_DOPPELGANGER} wake up and identify each other. {PROMPT_ALIEN_TEAM_ACTION} {If:hasCow,PROMPT_ALIEN_TEAM_COW} {Identity:instigator,plural}, go to sleep.",
-			PROMPT_ALIEN_TEAM_ACTION: "{Select:type,do_nothing,PROMPT_ALIEN_TEAM_ACTION_NOTHING,make_alien,PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN,make_alien_minion,PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION,show_team_cards,PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS,trade_team_cards,PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS,view_card_collective,PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE,view_card_individual,PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL}",
-			PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN: "All other players, hold out a hand in front of you. {Identity:instigator,plural}, touch another player's hand. That player is now an Alien regardless of what happens to their card. All players, put your hands down.",
-			PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION: "All other players, hold out a hand in front of you. {Identity:instigator,plural}, touch another player's hand. That player now wins if {Identity:instigator,plural,definite} win, regardless of whether they themselves are voted out and what happens to their card. All players, put your hands down.",
-			PROMPT_ALIEN_TEAM_ACTION_NOTHING: "Do nothing, just stare at each other until it gets awkward.",
-			PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS: "Show your cards to each other.",
-			PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS: "Give your cards to the nearest {Identity:instigator} to your {Select:restriction,left,DIRECTION_LEFT,right,DIRECTION_RIGHT}.",
-			PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE: "Together as a team, you may look at {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL: "Individually, you may look at {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_ALIEN_TEAM_COW: "{ROLE_COW}{If:hasDoppelganger,PROMPT_ALIEN_TEAM_COW_DOPPELGANGER}, hold out a hand in front of you. {Identity:instigator,plural}, if at least one of you is sitting next to {ROLE_COW_DEFINITE}, touch {ROLE_COW_DEFINITE_GENITIVE} hand. {ROLE_COW}, put your hand down.",
-			PROMPT_ALIEN_TEAM_COW_DOPPELGANGER: ", and {ROLE_DOPPELGANGER_DEFINITE} if you saw {ROLE_COW_DEFINITE}",
-			PROMPT_ALIEN_TEAM_DOPPELGANGER: "and {ROLE_DOPPELGANGER_DEFINITE} if you saw one of {Identity:instigator,definite,plural,genitive} cards,",
-			PROMPT_ALPHAWOLF: "{PROMPT_WAKE_CALL} Swap the extra card in the center for any non-{TEAM_WEREWOLF} player's card. {PROMPT_SLEEP_CALL}",
-			PROMPT_APPRENTICEASSASSIN: "{ROLE_APPRENTICEASSASSIN}, wake up. {PROMPT_APPRENTICEASSASSIN_ACTION} {ROLE_APPRENTICEASSASSIN}, go to sleep. {If:hasDoppelganger,PROMPT_APPRENTICEASSASSIN_DOPPELGANGER}",
-			PROMPT_APPRENTICEASSASSIN_ACTION: "Identify the Assassin. If there is no Assassin: {PROMPT_ASSASSIN_ACTION}",
-			PROMPT_APPRENTICEASSASSIN_DOPPELGANGER: "{ROLE_DOPPELGANGER}, if you saw {ROLE_APPRENTICEASSASSIN_DEFINITE}, wake up. {PROMPT_APPRENTICEASSASSIN_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_APPRENTICESEER: "{PROMPT_WAKE_CALL} You may look at one of the center cards. {PROMPT_SLEEP_CALL}",
-			PROMPT_APPRENTICETANNER: "{PROMPT_WAKE_CALL} {ROLE_TANNER}, hold out a thumb so {Identity:instigator,definite} can see who you are. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_APPRENTICETANNER_DOPPELGANGER} {ROLE_TANNER}, put your thumb down.",
-			PROMPT_APPRENTICETANNER_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {ROLE_TANNER}, keep holding out your thumb so {ROLE_DOPPELGANGER_DEFINITE} can see who you are. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_ASSASSIN: "{PROMPT_WAKE_CALL} {PROMPT_ASSASSIN_ACTION} {If:hasApprenticeAssassin,PROMPT_APPRENTICEASSASSIN} {PROMPT_SLEEP_CALL}",
-			PROMPT_ASSASSIN_ACTION: "Swap another player's marker for the {TOKEN_MARK_ASSASSIN}.",
-			PROMPT_AURASEER: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, if you looked at or moved a card, hold out a thumb so {Identity:instigator,definite} can see it. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_AURASEER_DOPPELGANGER} All players, put your thumbs down.",
-			PROMPT_AURASEER_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} Other players, keep holding out your thumb. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_BEHOLDER: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, hold out a thumb so {Identity:instigator,definite} can see who you are. {Identity:instigator}, you may look at their cards. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_BEHOLDER_DOPPELGANGER} {IdentityList:listDetectableRoles,and}, put your thumbs down.",
-			PROMPT_BEHOLDER_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} Other players, keep holding out your thumb. {ROLE_DOPPELGANGER}, you may look at their cards. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_BLOB: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {Select:blobTotal,0,PROMPT_BLOB_OBJECTIVE_ALONE,1,PROMPT_BLOB_OBJECTIVE_SINGLE,*,PROMPT_BLOB_OBJECTIVE_MULTI} {PROMPT_SLEEP_CALL}",
-			PROMPT_BLOB_OBJECTIVE_ALONE: "You only need to prevent yourself from being voted out.",
-			PROMPT_BLOB_OBJECTIVE_MULTI: "You must prevent the nearest {Value:blobLeft} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your left and {Value:blobRight} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your right from being voted out.",
-			PROMPT_BLOB_OBJECTIVE_SINGLE: "You must prevent the player nearest to your {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT} from being voted out.",
-			PROMPT_BODYSNATCHER: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {If:fakeAction,PROMPT_BODYSNATCHER_FAKE} {PROMPT_VIEW_CARD} Then swap your own card for the card you looked at. Your new card also becomes an {TEAM_ALIEN}. {PROMPT_SLEEP_CALL}",
-			PROMPT_BODYSNATCHER_FAKE: "<Narrator: show that the action is not to be performed>.",
-			PROMPT_BRIEF_ALIEN_MAKE_ALIEN: "touch a hand, that player becomes an Alien.",
-			PROMPT_BRIEF_ALIEN_MAKE_MINION: "touch a hand, that player wins with you.",
-			PROMPT_BRIEF_ALIEN_NOTHING: "do nothing.",
-			PROMPT_BRIEF_ALIEN_SHOW: "show your cards to each other.",
-			PROMPT_BRIEF_ALIEN_TEAM: "{Identity:instigator,plural}: identify each other. {PROMPT_BRIEF_ALIEN_TEAM_ACTION}{If:hasCow,PROMPT_BRIEF_ALIEN_TEAM_COW}",
-			PROMPT_BRIEF_ALIEN_TEAM_ACTION: "{Select:type,do_nothing,PROMPT_BRIEF_ALIEN_NOTHING,make_alien,PROMPT_BRIEF_ALIEN_MAKE_ALIEN,make_alien_minion,PROMPT_BRIEF_ALIEN_MAKE_MINION,show_team_cards,PROMPT_BRIEF_ALIEN_SHOW,trade_team_cards,PROMPT_BRIEF_ALIEN_TRADE,view_card_collective,PROMPT_BRIEF_ALIEN_VIEW_COLLECTIVE,view_card_individual,PROMPT_BRIEF_ALIEN_VIEW_INDIVIDUAL}",
-			PROMPT_BRIEF_ALIEN_TEAM_COW: " Cow: hold out your hand, neighbor touches it.",
-			PROMPT_BRIEF_ALIEN_TRADE: "swap cards with neighbor to the {Select:restriction,left,DIRECTION_LEFT,right,DIRECTION_RIGHT}.",
-			PROMPT_BRIEF_ALIEN_VIEW_COLLECTIVE: "look together at {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_BRIEF_ALIEN_VIEW_INDIVIDUAL: "look individually at {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_BRIEF_ALPHAWOLF: "{PROMPT_BRIEF_HEADER} swap the extra werewolf card.",
-			PROMPT_BRIEF_APPRENTICEASSASSIN: "{ROLE_APPRENTICEASSASSIN}: identify the Assassin (otherwise act as one).{If:hasDoppelganger,PROMPT_BRIEF_APPRENTICEASSASSIN_DOPPELGANGER}",
-			PROMPT_BRIEF_APPRENTICEASSASSIN_DOPPELGANGER: " {ROLE_DOPPELGANGER} (if seen): same.",
-			PROMPT_BRIEF_APPRENTICESEER: "{PROMPT_BRIEF_HEADER} look at one center card.",
-			PROMPT_BRIEF_APPRENTICETANNER: "{PROMPT_BRIEF_HEADER} look at {ROLE_TANNER}.",
-			PROMPT_BRIEF_ASSASSIN: "{PROMPT_BRIEF_HEADER} swap out a player's marker. {If:hasApprenticeAssassin,PROMPT_BRIEF_APPRENTICEASSASSIN}",
-			PROMPT_BRIEF_AURASEER: "{PROMPT_BRIEF_HEADER} see who acted: {IdentityList:listDetectableRoles}.",
-			PROMPT_BRIEF_BEHOLDER: "{PROMPT_BRIEF_HEADER} look at cards for {IdentityList:listDetectableRoles}.",
-			PROMPT_BRIEF_BLOB: "{PROMPT_BRIEF_HEADER} protect {Select:blobTotal,0,PROMPT_BRIEF_BLOB_ALONE,1,PROMPT_BRIEF_BLOB_SINGLE,*,PROMPT_BRIEF_BLOB_MULTI}.",
-			PROMPT_BRIEF_BLOB_ALONE: "only yourself",
-			PROMPT_BRIEF_BLOB_MULTI: "{Value:blobLeft} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to the left and {Value:blobRight} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to the right",
-			PROMPT_BRIEF_BLOB_SINGLE: "the player to your {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT}",
-			PROMPT_BRIEF_BODYSNATCHER: "{PROMPT_BRIEF_HEADER}{If:fakeAction,PROMPT_BRIEF_FAKE_NOTE} swap cards with {PROMPT_VIEW_CARD_ENTRY}, become an Alien.",
-			PROMPT_BRIEF_CHECK_MARKS: "{PROMPT_BRIEF_HEADER} check your markers.",
-			PROMPT_BRIEF_COPYCAT: "{PROMPT_BRIEF_HEADER} look at a center card, become that role.",
-			PROMPT_BRIEF_COUNT: "{PROMPT_BRIEF_HEADER} place a {TOKEN_MARK_COUNT}.",
-			PROMPT_BRIEF_CUPID: "{PROMPT_BRIEF_HEADER} place a {TOKEN_MARK_CUPID} in front of two players.",
-			PROMPT_BRIEF_CURATOR: "{PROMPT_BRIEF_HEADER} place an artifact.",
-			PROMPT_BRIEF_DISEASED: "{PROMPT_BRIEF_HEADER} place the {TOKEN_MARK_DISEASED} on a neighbor.",
-			PROMPT_BRIEF_DOPPELGANGER: "{PROMPT_BRIEF_HEADER} look at a player's card, become that role.{If:hasImmediateActionRoles,PROMPT_BRIEF_DOPPELGANGER_IMMEDIATE}",
-			PROMPT_BRIEF_DOPPELGANGER_IMMEDIATE: " If: {IdentityList:listImmediateActionRoles,or} — act now.",
-			PROMPT_BRIEF_DRUNK: "{PROMPT_BRIEF_HEADER} swap your card for a center card.",
-			PROMPT_BRIEF_EMPATH: "{PROMPT_BRIEF_HEADER} {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}: {LocalizedValue:question}",
-			PROMPT_BRIEF_EXPOSER: "{PROMPT_BRIEF_HEADER} flip {Value:count} center {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL}.",
-			PROMPT_BRIEF_FAKE_NOTE: " (fake)",
-			PROMPT_BRIEF_FEUDINGALIENS: "{Identity:instigator,plural}: identify each other.",
-			PROMPT_BRIEF_GREMLIN: "{PROMPT_BRIEF_HEADER} swap two markers or cards.",
-			PROMPT_BRIEF_HEADER: "{If:copiedRole,PROMPT_BRIEF_HEADER_ECHO,PROMPT_BRIEF_HEADER_DIRECT}",
-			PROMPT_BRIEF_HEADER_DIRECT: "{Identity:instigator}:",
-			PROMPT_BRIEF_HEADER_ECHO: "{Identity:instigator} ({Identity:copiedRole}):",
-			PROMPT_BRIEF_INSOMNIAC: "{PROMPT_BRIEF_HEADER} look at your own card.",
-			PROMPT_BRIEF_INSTIGATOR: "{PROMPT_BRIEF_HEADER} swap out a player's marker.",
-			PROMPT_BRIEF_LEADER: "{PROMPT_BRIEF_HEADER} look at {TEAM_ALIEN_PLURAL}. {If:hasFeudingAliens,PROMPT_BRIEF_LEADER_FEUDINGALIENS}",
-			PROMPT_BRIEF_LEADER_FEUDINGALIENS: "Wins if both Groob and Zerb survive.",
-			PROMPT_BRIEF_LOVERS: "{PROMPT_BRIEF_HEADER} identify each other.",
-			PROMPT_BRIEF_MARKSMAN: "{PROMPT_BRIEF_HEADER} look at a player's card + marker.",
-			PROMPT_BRIEF_MASON: "{PROMPT_BRIEF_HEADER} identify each other.",
-			PROMPT_BRIEF_MINION: "{PROMPT_BRIEF_HEADER} look at {TEAM_WEREWOLF_PLURAL}.",
-			PROMPT_BRIEF_MORTICIAN: "{PROMPT_BRIEF_HEADER} look at {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_BRIEF_MYSTICWOLF: "{PROMPT_BRIEF_HEADER} look at a player's card.",
-			PROMPT_BRIEF_NOSTRADAMUS: "{PROMPT_BRIEF_HEADER} look at 1-3 cards.{If:hasDangerRoles,PROMPT_BRIEF_NOSTRADAMUS_WARNING} Announce team: {LocalizedValue:fallbackTeam}.",
-			PROMPT_BRIEF_NOSTRADAMUS_WARNING: " Warning on: {IdentityList:listDangerRoles,or}.",
-			PROMPT_BRIEF_ORACLE: "{PROMPT_BRIEF_HEADER} {Select:type,view_card,PROMPT_BRIEF_ORACLE_VIEW,oracle_change_team,PROMPT_BRIEF_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_BRIEF_ORACLE_BLOCK_ACTION,role_action,PROMPT_BRIEF_ORACLE_ROLE_ACTION,oracle_announce_even_odd,PROMPT_BRIEF_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_BRIEF_ORACLE_HUNT}",
-			PROMPT_BRIEF_ORACLE_BLOCK_ACTION: "block a player's action.",
-			PROMPT_BRIEF_ORACLE_CHANGE_TEAM: "offer a team change ({Identity:joinTeam}, {Select:joinFull,true,PROMPT_BRIEF_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_BRIEF_ORACLE_CHANGE_TEAM_PARTIAL}).",
-			PROMPT_BRIEF_ORACLE_CHANGE_TEAM_FULL: "fully",
-			PROMPT_BRIEF_ORACLE_CHANGE_TEAM_PARTIAL: "partially",
-			PROMPT_BRIEF_ORACLE_EVEN_ODD: "<Narrator: announce even/odd>.",
-			PROMPT_BRIEF_ORACLE_HUNT: "{Select:huntActive,true,PROMPT_BRIEF_ORACLE_HUNT_STARTED,false,PROMPT_BRIEF_ORACLE_HUNT_AVOIDED}",
-			PROMPT_BRIEF_ORACLE_HUNT_AVOIDED: "hunt avoided — may wake once to observe all-seeing.{If:showExclusionWarning,PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE}",
-			PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE: " Not for: {IdentityList:listExcludedRoles,or}.",
-			PROMPT_BRIEF_ORACLE_HUNT_STARTED: "hunt begins — players' goal changes to finding the Oracle.",
-			PROMPT_BRIEF_ORACLE_ROLE_ACTION: "act as {RoleName:role}.",
-			PROMPT_BRIEF_ORACLE_VIEW: "look at {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_BRIEF_PARANORMALINVESTIGATOR: "{PROMPT_BRIEF_HEADER} look at 1-2 cards. Warning on: {IdentityList:listDangerRoles,or}.",
-			PROMPT_BRIEF_PICKPOCKET: "{PROMPT_BRIEF_HEADER} swap markers with a player, look at it.",
-			PROMPT_BRIEF_PRIEST: "{PROMPT_BRIEF_HEADER} replace your mark with a {TOKEN_MARK_CLARITY}, optionally another player's.",
-			PROMPT_BRIEF_PSYCHIC: "{PROMPT_BRIEF_HEADER} look at {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_BRIEF_RASCAL: "{PROMPT_BRIEF_HEADER} act as {RoleName:role}.",
-			PROMPT_BRIEF_RENFIELD: "{PROMPT_BRIEF_HEADER} identify {TEAM_VAMPIRE_DEFINITE}, swap your marker.",
-			PROMPT_BRIEF_REVEALER: "{PROMPT_BRIEF_HEADER} flip a card, flip back if: {IdentityList:listHiddenRoles,or}.",
-			PROMPT_BRIEF_RIPPLE: "{If:noRipple,PROMPT_BRIEF_RIPPLE_NONE} Ripple: {PROMPT_BRIEF_RIPPLE_SELECTOR}",
-			PROMPT_BRIEF_RIPPLE_DOUBLE_VOTE: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} get double votes.",
-			PROMPT_BRIEF_RIPPLE_MUTED: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} may not speak.",
-			PROMPT_BRIEF_RIPPLE_NONE: "(only if forced by the Oracle)",
-			PROMPT_BRIEF_RIPPLE_REBUKED: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} turn away.",
-			PROMPT_BRIEF_RIPPLE_ROLE_ACTION: "player {Value:player} acts as {RoleName:role}.",
-			PROMPT_BRIEF_RIPPLE_SELECTOR: "{Select:type,ripple_timer,PROMPT_BRIEF_RIPPLE_TIMER,ripple_role_action,PROMPT_BRIEF_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_BRIEF_RIPPLE_MUTED,ripple_rebuked,PROMPT_BRIEF_RIPPLE_REBUKED,ripple_view_player,PROMPT_BRIEF_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_BRIEF_RIPPLE_DOUBLE_VOTE}",
-			PROMPT_BRIEF_RIPPLE_TIMER: "one minute left to discuss.",
-			PROMPT_BRIEF_RIPPLE_VIEW_PLAYER: "player {Value:player} look at {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} for {ValueList:players}.",
-			PROMPT_BRIEF_ROBBER: "{PROMPT_BRIEF_HEADER} swap cards with a player, look at it.",
-			PROMPT_BRIEF_SEER: "{PROMPT_BRIEF_HEADER} look at a player's card, or two center cards.",
-			PROMPT_BRIEF_SENTINEL: "{PROMPT_BRIEF_HEADER} place a {TOKEN_SHIELD}.",
-			PROMPT_BRIEF_SQUIRE: "{PROMPT_BRIEF_HEADER} look at cards for {TEAM_WEREWOLF_PLURAL}.",
-			PROMPT_BRIEF_THING: "{PROMPT_BRIEF_HEADER} touch a neighbor's hand.",
-			PROMPT_BRIEF_TROUBLEMAKER: "{PROMPT_BRIEF_HEADER} swap two players' cards.",
-			PROMPT_BRIEF_VAMPIRE_TEAM: "{Identity:instigator,plural}: identify each other, mark a player.",
-			PROMPT_BRIEF_VILLAGEIDIOT: "{PROMPT_BRIEF_HEADER} move all cards one step, or not at all.",
-			PROMPT_BRIEF_WEREWOLF_DREAMWOLF: "{Identity:instigator,plural} (except {ROLE_DREAMWOLF}): identify each other. {ROLE_DREAMWOLF}: show your thumb to them.",
-			PROMPT_BRIEF_WEREWOLF_STANDARD: "{Identity:instigator,plural}: identify each other (alone: look at center cards).",
-			PROMPT_BRIEF_WEREWOLF_TEAM: "{If:hasDreamWolf,PROMPT_BRIEF_WEREWOLF_DREAMWOLF,PROMPT_BRIEF_WEREWOLF_STANDARD}",
-			PROMPT_BRIEF_WITCH: "{PROMPT_BRIEF_HEADER} look at a center card, give it away if you want.",
-			PROMPT_CHECK_MARKS: "{PROMPT_WAKE_CALL} Check your markers without showing them to anyone else. {PROMPT_SLEEP_CALL}",
-			PROMPT_COPYCAT: "{PROMPT_WAKE_CALL} Look at one of the center cards. You are now the role you saw. When that role is called, wake up and perform its action. {PROMPT_SLEEP_CALL}",
-			PROMPT_COUNT: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_COUNT_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_COUNT_ACTION: "Swap another player's marker for {ROLE_COUNT_DEFINITE_GENITIVE} marker.",
-			PROMPT_CUPID: "{PROMPT_WAKE_CALL} Swap two other players' markers for {ROLE_CUPID_DEFINITE_GENITIVE} marker. {PROMPT_SLEEP_CALL}",
-			PROMPT_CURATOR: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_CURATOR_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_CURATOR_ACTION: "Place an artifact face-down on another player's card without looking at it.",
-			PROMPT_DISEASED: "{PROMPT_WAKE_CALL} Swap one of your neighbors' markers for {Identity:instigator,definite,genitive} marker. {PROMPT_SLEEP_CALL}",
-			PROMPT_DOPPELGANGER: "{PROMPT_WAKE_CALL} Look at another player's card. You are now the role you saw. {If:hasImmediateActionRoles,PROMPT_DOPPELGANGER_IMMEDIATE_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_DOPPELGANGER_IMMEDIATE_ACTION: "If the role you saw was {IdentityList:listImmediateActionRoles,or}, perform its action now.",
-			PROMPT_DO_ROLE_ACTION: "{RoleAction:role}",
-			PROMPT_DRUNK: "{PROMPT_WAKE_CALL} {PROMPT_DRUNK_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_DRUNK_ACTION: "Swap your card for one of the center cards without looking at it.",
-			PROMPT_EMPATH: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} Observe what the other players do. {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}, without waking up, {LocalizedValue:question} {PROMPT_SLEEP_CALL}",
-			PROMPT_EMPATH_QUESTION_10: "give a thumbs up if you think you will win, or a thumbs down if you think you will lose.",
-			PROMPT_EMPATH_QUESTION_11: "point to the player you think is most likely to have already forgotten their role.",
-			PROMPT_EMPATH_QUESTION_1: "point to a player you think will win.",
-			PROMPT_EMPATH_QUESTION_2: "point to a player you think will be eliminated.",
-			PROMPT_EMPATH_QUESTION_3: "point to the player you trust the most.",
-			PROMPT_EMPATH_QUESTION_4: "point to the player you trust the least.",
-			PROMPT_EMPATH_QUESTION_5: "point to a player you think is part of {TEAM_VILLAGE_DEFINITE}.",
-			PROMPT_EMPATH_QUESTION_6: "point to the player you think will talk the most.",
-			PROMPT_EMPATH_QUESTION_7: "point to the player you think will talk the least.",
-			PROMPT_EMPATH_QUESTION_8: "point to the player you think is best at bluffing.",
-			PROMPT_EMPATH_QUESTION_9: "point to the player you think is worst at bluffing.",
-			PROMPT_EXPOSER: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} You may {PROMPT_EXPOSER_ACTION}. {PROMPT_SLEEP_CALL}",
-			PROMPT_EXPOSER_ACTION: "turn over {NUM_WORD} of the center cards",
-			PROMPT_FEUDINGALIENS: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_FEUDINGALIENS_DOPPELGANGER} wake up and identify each other. {PROMPT_SLEEP_CALL}",
-			PROMPT_FEUDINGALIENS_DOPPELGANGER: "and {ROLE_DOPPELGANGER_DEFINITE} if you saw one of {Identity:instigator,plural,definite,genitive} cards,",
-			PROMPT_GREMLIN: "{PROMPT_WAKE_CALL} {PROMPT_GREMLIN_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_GREMLIN_ACTION: "Swap the positions of two other players' markers, or two other players' cards, without looking at either.",
-			PROMPT_INSOMNIAC: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_INSOMNIAC_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_INSOMNIAC_ACTION: "Look at your own card.",
-			PROMPT_INSTIGATOR: "{PROMPT_WAKE_CALL} Swap another player's marker for {ROLE_INSTIGATOR_DEFINITE_GENITIVE} marker. {PROMPT_SLEEP_CALL}",
-			PROMPT_LEADER: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, hold out a thumb so {Identity:instigator,definite} can see. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, put your thumbs down.",
-			PROMPT_LEADER_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_ALIEN_PLURAL}, keep holding out your thumbs so {ROLE_DOPPELGANGER_DEFINITE} can see. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_LEADER_FEUDINGALIENS: "{ROLE_FEUDINGALIENS}, hold out both thumbs. {Identity:instigator}, if you see both {ROLE_FEUDINGALIENS_DEFINITE}, you win if neither of them is voted out.",
-			PROMPT_LOVERS: "{PROMPT_WAKE_CALL} Identify each other. If one of you is voted out, the other is voted out too. {PROMPT_SLEEP_CALL}",
-			PROMPT_MARKSMAN: "{PROMPT_WAKE_CALL} {PROMPT_MARKSMAN_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_MARKSMAN_ACTION: "Look at another player's card, plus another player's marker. It must not be the same player.",
-			PROMPT_MASON: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_MASON_DOPPELGANGER} wake up and identify each other. {Identity:instigator,plural}, go to sleep.",
-			PROMPT_MASON_DOPPELGANGER: "and {ROLE_DOPPELGANGER_DEFINITE} if you saw one of {Identity:instigator,plural,definite},",
-			PROMPT_MINION: "{PROMPT_WAKE_CALL} {TEAM_WEREWOLF_PLURAL}, hold out a thumb so {Identity:instigator,definite} can see who you are. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_MINION_DOPPELGANGER} {TEAM_WEREWOLF_PLURAL}, put your thumbs down.",
-			PROMPT_MINION_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, keep holding out your thumb so {ROLE_DOPPELGANGER_DEFINITE} can see who you are. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_MORTICIAN: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_VIEW_CARD} {PROMPT_SLEEP_CALL}",
-			PROMPT_MYSTICWOLF: "{PROMPT_WAKE_CALL} You may look at another player's card. {PROMPT_SLEEP_CALL}",
-			PROMPT_NOSTRADAMUS: "{PROMPT_WAKE_CALL} You may look at one to three other players' cards. {If:hasDangerRoles,PROMPT_NOSTRADAMUS_WARNING} {PROMPT_SLEEP_CALL}",
-			PROMPT_NOSTRADAMUS_DOPPELGANGER: "{ROLE_DOPPELGANGER}, if you saw {Identity:instigator,definite}, the same win condition applies to you.",
-			PROMPT_NOSTRADAMUS_WARNING: "If you see: {IdentityList:listDangerRoles,or}, you must stop. <Narrator: announce which team {Identity:instigator,definite} now belongs to, or {LocalizedValue:fallbackTeam}>. If you are not voted out and that team wins, you win too. {If:hasDoppelganger,PROMPT_NOSTRADAMUS_DOPPELGANGER}",
-			PROMPT_ORACLE: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {Select:type,view_card,PROMPT_VIEW_CARD,oracle_change_team,PROMPT_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_ORACLE_BLOCK_ACTION,role_action,PROMPT_DO_ROLE_ACTION,oracle_announce_even_odd,PROMPT_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_ORACLE_HUNT} {PROMPT_SLEEP_CALL}",
-			PROMPT_ORACLE_BLOCK_ACTION: "All other players, hold out a hand in front of you. {Identity:instigator}, touch another player's hand that you want to block. That player may not wake up or perform any action during the night, regardless of their role.",
-			PROMPT_ORACLE_CHANGE_TEAM: "Do you want to join {Identity:joinTeam,definite,genitive} team? If yes, {Select:joinFull,true,PROMPT_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_ORACLE_CHANGE_TEAM_PARTIAL} If no, {Identity:instigator,definite} remains on {TEAM_VILLAGE_DEFINITE_GENITIVE} team.",
-			PROMPT_ORACLE_CHANGE_TEAM_FULL: "{Identity:instigator,definite} is now that role, and wakes up together with them.",
-			PROMPT_ORACLE_CHANGE_TEAM_PARTIAL: "{Identity:instigator,definite} now wins together with that team, but is not that role and does not wake up together with them.",
-			PROMPT_ORACLE_EVEN_ODD: "<Narrator: reveal whether {Identity:instigator,definite} has an even or odd player number>.",
-			PROMPT_ORACLE_HUNT: "Guess a number between 1 and 10. {Select:huntActive,true,PROMPT_ORACLE_HUNT_STARTED,false,PROMPT_ORACLE_HUNT_AVOIDED}",
-			PROMPT_ORACLE_HUNT_AVOIDED: "Correct. Whenever another role is told to wake up, you may wake up with them once during the night to observe who they are and what they do. {If:showExclusionWarning,PROMPT_ORACLE_HUNT_OMNISCIENCE}",
-			PROMPT_ORACLE_HUNT_OMNISCIENCE: "However, you may not wake up to observe any of the following roles: {IdentityList:listExcludedRoles,or}.",
-			PROMPT_ORACLE_HUNT_STARTED: "Wrong. {Identity:instigator}, you now only win if you are not voted out. All other players, regardless of previous role and team, now have only one win condition: find {Identity:instigator,definite}.",
-			PROMPT_PARANORMALINVESTIGATOR: "{PROMPT_WAKE_CALL} You may look at one to two other players' cards. {If:hasDangerRoles,PROMPT_PARANORMALINVESTIGATOR_WARNING} {PROMPT_SLEEP_CALL}",
-			PROMPT_PARANORMALINVESTIGATOR_WARNING: "If you see: {IdentityList:listDangerRoles,or}, you must stop. You now belong to their team.",
-			PROMPT_PICKPOCKET: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_PICKPOCKET_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_PICKPOCKET_ACTION: "You may choose to steal another player's marker and replace it with your own. Then look at the marker you stole.",
-			PROMPT_PRIEST: "{PROMPT_WAKE_CALL} Swap your marker for a {TOKEN_MARK_CLARITY}. If you want, you may also swap another player's marker for a {TOKEN_MARK_CLARITY}. {PROMPT_SLEEP_CALL}",
-			PROMPT_PSYCHIC: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_VIEW_CARD} {PROMPT_SLEEP_CALL}",
-			PROMPT_RASCAL: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_RASCAL_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_RASCAL_ACTION: "{PROMPT_DO_ROLE_ACTION}",
-			PROMPT_RENFIELD: "{PROMPT_WAKE_CALL} {TEAM_VAMPIRE_PLURAL}, point at the player you have given {TEAM_VAMPIRE_DEFINITE_GENITIVE} marker. {Identity:instigator}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_RENFIELD_DOPPELGANGER} {TEAM_VAMPIRE_PLURAL}, stop pointing.",
-			PROMPT_RENFIELD_ACTION: "identify {TEAM_VAMPIRE_DEFINITE} and swap your marker for {Identity:instigator,definite,genitive} marker.",
-			PROMPT_RENFIELD_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_VAMPIRE_PLURAL}, keep pointing at the player you have given {TEAM_VAMPIRE_DEFINITE_GENITIVE} marker. {ROLE_DOPPELGANGER}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_REVEALER: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_REVEALER_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_REVEALER_ACTION: "Turn another player's card face up. {If:hasHiddenRoles,PROMPT_REVEALER_HIDDEN_ROLE}",
-			PROMPT_REVEALER_HIDDEN_ROLE: "If the card is: {IdentityList:listHiddenRoles,or}, turn the card back face down.",
-			PROMPT_RIPPLE: "{If:noRipple,PROMPT_RIPPLE_NONE} A ripple has occurred in space-time. {PROMPT_RIPPLE_SELECTOR}",
-			PROMPT_RIPPLE_DOUBLE_VOTE: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} may use both hands when voting, for double votes.",
-			PROMPT_RIPPLE_MUTED: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} may not speak until after the vote.",
-			PROMPT_RIPPLE_NONE: "<Narrator: ignore the following unless {ROLE_ORACLE_DEFINITE} has chosen to force a ripple>",
-			PROMPT_RIPPLE_REBUKED: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} must turn away from the table until after the vote.",
-			PROMPT_RIPPLE_ROLE_ACTION: "Player {Value:player}, wake up. {PROMPT_DO_ROLE_ACTION} Player {Value:player}, go to sleep.",
-			PROMPT_RIPPLE_SELECTOR: "{Select:type,ripple_timer,PROMPT_RIPPLE_TIMER,ripple_role_action,PROMPT_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_RIPPLE_MUTED,ripple_rebuked,PROMPT_RIPPLE_REBUKED,ripple_view_player,PROMPT_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_RIPPLE_DOUBLE_VOTE}",
-			PROMPT_RIPPLE_TIMER: "You have only one minute left before you must vote.",
-			PROMPT_RIPPLE_VIEW_PLAYER: "Player {Value:player}, wake up. You may look at the {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} belonging to {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}. Player {Value:player}, go to sleep.",
-			PROMPT_ROBBER: "{PROMPT_WAKE_CALL} {PROMPT_ROBBER_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_ROBBER_ACTION: "You may choose to steal another player's card and replace it with your own. Then look at the card you stole. Do not wake up when your new role is called.",
-			PROMPT_SEER: "{PROMPT_WAKE_CALL} You may look at another player's card, or two of the center cards. {PROMPT_SLEEP_CALL}",
-			PROMPT_SENTINEL: "{PROMPT_WAKE_CALL} Place a {TOKEN_SHIELD} on another player's card. {PROMPT_SLEEP_CALL}",
-			PROMPT_SLEEP_CALL: "{Identity:instigator}, go to sleep.",
-			PROMPT_SLEEP_CALL_DOPPELGANGER: "{ROLE_DOPPELGANGER}, go to sleep.",
-			PROMPT_SQUIRE: "{PROMPT_WAKE_CALL} {TEAM_WEREWOLF_PLURAL}, hold out a thumb so {Identity:instigator,definite} can see who you are. {Identity:instigator}, you may look at their cards. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_SQUIRE_DOPPELGANGER} {TEAM_WEREWOLF_PLURAL}, put your thumbs down.",
-			PROMPT_SQUIRE_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, keep holding out your thumb so {ROLE_DOPPELGANGER_DEFINITE} can see who you are. {ROLE_DOPPELGANGER}, you may look at their cards. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_THING: "{PROMPT_WAKE_CALL} All other players, hold out a hand in front of you. {ROLE_THING}, touch the hand belonging to the players nearest to your right or left. {PROMPT_SLEEP_CALL}",
-			PROMPT_TROUBLEMAKER: "{PROMPT_WAKE_CALL} {PROMPT_TROUBLEMAKER_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_TROUBLEMAKER_ACTION: "Swap the positions of two other players' cards, without looking at either.",
-			PROMPT_VAMPIRE_TEAM: "{If:hasDoppelganger,PROMPT_VAMPIRE_TEAM_DOPPELGANGER_PREFIX} {Identity:instigator,plural}, wake up and identify each other. Together, choose a player whose marker you swap for {Identity:instigator,plural,definite,genitive} marker. {Identity:instigator,plural}, go to sleep.",
-			PROMPT_VAMPIRE_TEAM_DOPPELGANGER_PREFIX: "{ROLE_DOPPELGANGER}, if you saw one of {Identity:instigator,plural,definite}, wake up together with them when they are called.",
-			PROMPT_VIEW_CARD: "You may look at {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_VIEW_CARD_CENTER: "{NUM_WORD} of the center cards",
-			PROMPT_VIEW_CARD_ENTRY: "{Select:target,center,PROMPT_VIEW_CARD_CENTER,neighbor,PROMPT_VIEW_CARD_NEIGHBOR,even_player,PROMPT_VIEW_CARD_EVEN,odd_player,PROMPT_VIEW_CARD_ODD,player,PROMPT_VIEW_CARD_PLAYER,self,PROMPT_VIEW_CARD_SELF}",
-			PROMPT_VIEW_CARD_EVEN: "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} from even-numbered players",
-			PROMPT_VIEW_CARD_NEIGHBOR: "{Select:restriction,left,PROMPT_VIEW_CARD_NEIGHBOR_LEFT,right,PROMPT_VIEW_CARD_NEIGHBOR_RIGHT,both,PROMPT_VIEW_CARD_NEIGHBOR_BOTH,any,PROMPT_VIEW_CARD_NEIGHBOR_ANY}",
-			PROMPT_VIEW_CARD_NEIGHBOR_ANY: "one of your neighbors' cards",
-			PROMPT_VIEW_CARD_NEIGHBOR_BOTH: "both of your neighbors' cards",
-			PROMPT_VIEW_CARD_NEIGHBOR_LEFT: "your left neighbor's card",
-			PROMPT_VIEW_CARD_NEIGHBOR_RIGHT: "your right neighbor's card",
-			PROMPT_VIEW_CARD_ODD: "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} from odd-numbered players",
-			PROMPT_VIEW_CARD_PLAYER: "{Select:restriction,any,PROMPT_VIEW_CARD_PLAYER_ANY,specific,PROMPT_VIEW_CARD_PLAYER_SPECIFIC}",
-			PROMPT_VIEW_CARD_PLAYER_ANY: "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} from another player",
-			PROMPT_VIEW_CARD_PLAYER_SPECIFIC: "the {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} belonging to {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}",
-			PROMPT_VIEW_CARD_SELF: "your own card",
-			PROMPT_VILLAGEIDIOT: "{PROMPT_WAKE_CALL} {PROMPT_VILLAGEIDIOT_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_VILLAGEIDIOT_ACTION: "You may choose to move every player's card one step to the left, to the right, or not at all.",
-			PROMPT_WAKE_CALL: "{Identity:instigator}, wake up.",
-			PROMPT_WAKE_CALL_DOPPELGANGER_ECHO: "{ROLE_DOPPELGANGER}, if you saw {Identity:copiedRole,definite}, wake up.",
-			PROMPT_WAKE_CALL_DOPPELGANGER_INLINE: "{ROLE_DOPPELGANGER}, if you saw {Identity:instigator,definite}, wake up.",
-			PROMPT_WEREWOLF_TEAM: "{If:hasDoppelganger,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX} {If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF,PROMPT_WEREWOLF_TEAM_CORE_STANDARD}",
-			PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF: "{Identity:instigator,plural}, except for {ROLE_DREAMWOLF_DEFINITE}, wake up and identify each other. If there is only one {Identity:instigator}, you may look at one of the center cards. {ROLE_DREAMWOLF}, stick out your thumb so the other {Identity:instigator,plural} can see who you are. {ROLE_DREAMWOLF}, put your thumb down. {Identity:instigator,plural}, go to sleep.",
-			PROMPT_WEREWOLF_TEAM_CORE_STANDARD: "{Identity:instigator,plural}, wake up and identify each other. If there is only one {Identity:instigator}, you may look at one of the center cards. {Identity:instigator,plural}, go to sleep.",
-			PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX: "{If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_DREAMWOLF,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_STANDARD}",
-			PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_DREAMWOLF: "{ROLE_DOPPELGANGER}, if you saw one of {Identity:instigator,plural,definite} other than {ROLE_DREAMWOLF_DEFINITE}, wake up together with them when they are called. If you saw {ROLE_DREAMWOLF_DEFINITE}, do not wake up, but follow that role's instructions.",
-			PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_STANDARD: "{ROLE_DOPPELGANGER}, if you saw one of {Identity:instigator,plural,definite}, wake up together with them when they are called.",
-			PROMPT_WITCH: "{PROMPT_WAKE_CALL} {PROMPT_WITCH_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_WITCH_ACTION: "You may choose to look at one of the center cards. If you do, you must give that card to yourself or to another player.",	
-			
-			
-			UI_RULES_FULL: `
-				<h2>Game Rules – One Night Ultimate Werewolf</h2>
+		DIRECTION_LEFT: {
+			ENG: "left",
+			SWE: "vänster",
+		},
+		DIRECTION_RIGHT: {
+			ENG: "right",
+			SWE: "höger",
+		},
+		GRAMMAR_CARD_PLURAL: {
+			ENG: "cards",
+			SWE: "kort",
+		},
+		GRAMMAR_CARD_SINGULAR: {
+			ENG: "card",
+			SWE: "kort",
+		},
+		GRAMMAR_PLAYER_PLURAL: {
+			ENG: "players",
+			SWE: "spelare",
+		},
+		GRAMMAR_PLAYER_SINGULAR: {
+			ENG: "player",
+			SWE: "spelare",
+		},
+		LIST_AND: {
+			ENG: "and",
+			SWE: "och",
+		},
+		LIST_OR: {
+			ENG: "or",
+			SWE: "eller",
+		},
+		NUM_EIGHT: {
+			ENG: "eight",
+			SWE: "åtta",
+		},
+		NUM_FIVE: {
+			ENG: "five",
+			SWE: "fem",
+		},
+		NUM_FOUR: {
+			ENG: "four",
+			SWE: "fyra",
+		},
+		NUM_NINE: {
+			ENG: "nine",
+			SWE: "nio",
+		},
+		NUM_ONE: {
+			ENG: "one",
+			SWE: "ett",
+		},
+		NUM_SEVEN: {
+			ENG: "seven",
+			SWE: "sju",
+		},
+		NUM_SIX: {
+			ENG: "six",
+			SWE: "sex",
+		},
+		NUM_THREE: {
+			ENG: "three",
+			SWE: "tre",
+		},
+		NUM_TWO: {
+			ENG: "two",
+			SWE: "två",
+		},
+		NUM_WORD: {
+			COMMON: "{Select:count,1,NUM_ONE,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,5,NUM_FIVE,6,NUM_SIX,7,NUM_SEVEN,8,NUM_EIGHT,9,NUM_NINE}",
+		},
+		PHASE_DAY: {
+			ENG: "day role",
+			SWE: "dag",
+		},
+		PHASE_DAY_ROLE: {
+			ENG: "day role",
+			SWE: "dagroll",
+		},
+		PHASE_DUSK: {
+			ENG: "dusk role",
+			SWE: "skymmning",
+		},
+		PHASE_DUSK_ROLE: {
+			ENG: "dusk role",
+			SWE: "skymmningsroll",
+		},
+		PHASE_NIGHT: {
+			ENG: "night role",
+			SWE: "natt",
+		},
+		PHASE_NIGHT_ROLE: {
+			ENG: "night role",
+			SWE: "nattroll",
+		},
+		PROMPT_ALIEN_TEAM: {
+			ENG: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_ALIEN_TEAM_DOPPELGANGER} wake up and identify each other. {Pause:short} {PROMPT_ALIEN_TEAM_ACTION} {If:hasCow,PROMPT_ALIEN_TEAM_COW} {Identity:instigator,plural}, go to sleep.",
+			SWE: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_ALIEN_TEAM_DOPPELGANGER} vakna och identifiera varandra. {Pause:short} {PROMPT_ALIEN_TEAM_ACTION} {If:hasCow,PROMPT_ALIEN_TEAM_COW} {Identity:instigator,plural}, somna.",
+		},
+		PROMPT_ALIEN_TEAM_ACTION: {
+			COMMON: "{Select:type,do_nothing,PROMPT_ALIEN_TEAM_ACTION_NOTHING,make_alien,PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN,make_alien_minion,PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION,show_team_cards,PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS,trade_team_cards,PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS,view_card_collective,PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE,view_card_individual,PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL}",
+		},
+		PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN: {
+			ENG: "All other players, hold out a hand in front of you. {Identity:instigator,plural}, touch another player's hand that you want to turn into an {Identity:instigator}. {Pause:short} That player is now an {Identity:instigator} regardless of what happens to their card. All players, put your hands down.",
+			SWE: "Alla andra spelare, håll ut en hand framför er. {Identity:instigator,plural}, rör vid en annan spelares hand som ni vill göra till en {Identity:instigator}. {Pause:short} Spelaren är nu en {Identity:instigator} oavsett vad som händer med deras kort. Alla spelare, ner med händerna.",
+		},
+		PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION: {
+			ENG: "All other players, hold out a hand in front of you. {Identity:instigator,plural}, touch another player's hand that you want to turn into a helper. {Pause:short} That player now wins if {Identity:instigator,plural,definite} win, regardless of whether they themselves are voted out and what happens to their card. All players, put your hands down.",
+			SWE: "Alla andra spelare, håll ut en hand framför er. {Identity:instigator,plural}, rör vid en annan spelares hand som ni vill göra till en medhjälpare. {Pause:short} Spelaren vinner nu om {Identity:instigator,plural,definite} vinner oavsett om de själva blir utröstade och vad som händer med deras kort. Alla spelare, ner med händerna.",
+		},
+		PROMPT_ALIEN_TEAM_ACTION_NOTHING: {
+			ENG: "Do nothing, just stare at each other until it gets awkward. {Pause:short}",
+			SWE: "Gör ingenting, stirra bara på varandra tills det blir pinsamt. {Pause:short}",
+		},
+		PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS: {
+			ENG: "Show your cards to each other. {Pause:short}",
+			SWE: "Visa era kort för varandra. {Pause:short}",
+		},
+		PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS: {
+			ENG: "Give your cards to the nearest {Identity:instigator} to your {Select:restriction,left,DIRECTION_LEFT,right,DIRECTION_RIGHT}. {Pause:short}",
+			SWE: "Ge era kort till närmaste {Identity:instigator} till {Select:restriction,left,DIRECTION_LEFT,right,DIRECTION_RIGHT} om er. {Pause:short}",
+		},
+		PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE: {
+			ENG: "Together as a team, you may look at {PROMPT_VIEW_CARD_ENTRY}. {Pause:medium}",
+			SWE: "Gemensamt inom laget får ni titta på {PROMPT_VIEW_CARD_ENTRY}. {Pause:medium}",
+		},
+		PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL: {
+			ENG: "Individually, you may look at {PROMPT_VIEW_CARD_ENTRY}. {Pause:medium}",
+			SWE: "Individuellt får ni titta på {PROMPT_VIEW_CARD_ENTRY}. {Pause:medium}",
+		},
+		PROMPT_ALIEN_TEAM_COW: {
+			ENG: "{ROLE_COW}{If:hasDoppelganger,PROMPT_ALIEN_TEAM_COW_DOPPELGANGER}, hold out a hand in front of you. {Identity:instigator,plural}, if at least one of you is sitting next to {ROLE_COW_DEFINITE}, touch {ROLE_COW_DEFINITE_GENITIVE} hand. {Pause:short} {ROLE_COW}, put your hand down.",
+			SWE: "{ROLE_COW}{If:hasDoppelganger,PROMPT_ALIEN_TEAM_COW_DOPPELGANGER}, håll ut en hand framför dig. {Identity:instigator,plural}, om minst en av er är granne med {ROLE_COW_DEFINITE}, rör vid {ROLE_COW_DEFINITE_GENITIVE} hand. {Pause:short} {ROLE_COW}, ner med handen.",
+		},
+		PROMPT_ALIEN_TEAM_COW_DOPPELGANGER: {
+			ENG: ", and {ROLE_DOPPELGANGER_DEFINITE} if you saw {ROLE_COW_DEFINITE}",
+			SWE: ", och {ROLE_DOPPELGANGER_DEFINITE} om du såg {ROLE_COW_DEFINITE}",
+		},
+		PROMPT_ALIEN_TEAM_DOPPELGANGER: {
+			ENG: "and {ROLE_DOPPELGANGER_DEFINITE} if you saw one of {Identity:instigator,definite,plural,genitive} cards,",
+			SWE: "och {ROLE_DOPPELGANGER_DEFINITE} om du såg ett av {Identity:instigator,definite,plural,genitive} kort,",
+		},
+		PROMPT_ALPHAWOLF: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_ALPHAWOLF_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_ALPHAWOLF_ACTION: {
+			ENG: "Swap the extra card in the center for any non-{TEAM_WEREWOLF} player's card. {Pause:short}",
+			SWE: "Byt det extra kortet i mitten mot någon annan spelares kort som inte redan är varulv. {Pause:short}",
+		},
+		PROMPT_APPRENTICEASSASSIN: {
+			ENG: "{ROLE_APPRENTICEASSASSIN}, wake up. {PROMPT_APPRENTICEASSASSIN_ACTION} {ROLE_APPRENTICEASSASSIN}, go to sleep. {If:hasDoppelganger,PROMPT_APPRENTICEASSASSIN_DOPPELGANGER}",
+			SWE: "{ROLE_APPRENTICEASSASSIN}, vakna. {PROMPT_APPRENTICEASSASSIN_ACTION} {ROLE_APPRENTICEASSASSIN}, somna. {If:hasDoppelganger,PROMPT_APPRENTICEASSASSIN_DOPPELGANGER}",
+		},
+		PROMPT_APPRENTICEASSASSIN_ACTION: {
+			ENG: "Identify the Assassin. If there is no Assassin: {PROMPT_ASSASSIN_ACTION}",
+			SWE: "Identifiera {ROLE_ASSASSIN_DEFINITE}. Om det inte finns någon {ROLE_ASSASSIN}: {PROMPT_ASSASSIN_ACTION}",
+		},
+		PROMPT_APPRENTICEASSASSIN_DOPPELGANGER: {
+			ENG: "{ROLE_DOPPELGANGER}, if you saw {ROLE_APPRENTICEASSASSIN_DEFINITE}, wake up. {PROMPT_APPRENTICEASSASSIN_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{ROLE_DOPPELGANGER}, om du såg {ROLE_APPRENTICEASSASSIN_DEFINITE}, vakna. {PROMPT_APPRENTICEASSASSIN_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+		},
+		PROMPT_APPRENTICESEER: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_APPRENTICESEER_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_APPRENTICESEER_ACTION: {
+			ENG: "You may look at one of the center cards. {Pause:short}",
+			SWE: "Du får titta på ett av mittenkorten. {Pause:short}",
+		},
+		PROMPT_APPRENTICETANNER: {
+			ENG: "{PROMPT_WAKE_CALL} {ROLE_TANNER}, hold out a thumb so {Identity:instigator,definite} can see who you are. {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_APPRENTICETANNER_DOPPELGANGER} {ROLE_TANNER}, put your thumb down.",
+			SWE: "{PROMPT_WAKE_CALL} {ROLE_TANNER}, håll ut en tumme så att {Identity:instigator,definite} kan se vem du är. {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_APPRENTICETANNER_DOPPELGANGER} {ROLE_TANNER}, ner med tummen.",
+		},
+		PROMPT_APPRENTICETANNER_DOPPELGANGER: {
+			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {ROLE_TANNER}, keep holding out your thumb so {ROLE_DOPPELGANGER_DEFINITE} can see who you are. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {ROLE_TANNER}, fortsätt hålla ut tummen så att {ROLE_DOPPELGANGER_DEFINITE} kan se vem du är. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+		},
+		PROMPT_ASSASSIN: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_ASSASSIN_ACTION} {If:hasApprenticeAssassin,PROMPT_APPRENTICEASSASSIN} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_ASSASSIN_ACTION: {
+			ENG: "Swap another player's marker for the {TOKEN_MARK_ASSASSIN}. {Pause:medium}",
+			SWE: "Byt ut en annan spelares märke mot {TOKEN_MARK_ASSASSIN}. {Pause:medium}",
+		},
+		PROMPT_AURASEER: {
+			ENG: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, if you looked at or moved a card, hold out a thumb so {Identity:instigator,definite} can see it. {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_AURASEER_DOPPELGANGER} All players, put your thumbs down.",
+			SWE: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, om ni har tittat på eller flyttat kort, håll ut en tumme så att {Identity:instigator,definite} kan se den. {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_AURASEER_DOPPELGANGER} Samtliga spelare, ner med tummarna.",
+		},
+		PROMPT_AURASEER_DOPPELGANGER: {
+			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} Other players, keep holding out your thumb. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} Övriga spelare, fortsätt hålla ut tummen. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+		},
+		PROMPT_AUTO_RIPPLE: {
+			COMMON: "{If:noRipple,PROMPT_AUTO_RIPPLE_IF_FORCED,PROMPT_RIPPLE_CONTENT}",
+		},
+		PROMPT_AUTO_RIPPLE_IF_FORCED: {
+			COMMON: "{If:oracleForcedRipple,PROMPT_RIPPLE_CONTENT}",
+		},
+		PROMPT_BEHOLDER: {
+			ENG: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, hold out a thumb so {Identity:instigator,definite} can see who you are. {Identity:instigator}, you may look at their cards. {Pause:medium} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_BEHOLDER_DOPPELGANGER} {IdentityList:listDetectableRoles,and}, put your thumbs down.",
+			SWE: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, håll ut en tumme så att {Identity:instigator,definite} kan se vem ni är. {Identity:instigator}, du får titta på deras kort. {Pause:medium} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_BEHOLDER_DOPPELGANGER} {IdentityList:listDetectableRoles,and}, ner med tummen.",
+		},
+		PROMPT_BEHOLDER_DOPPELGANGER: {
+			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} Other players, keep holding out your thumb. {ROLE_DOPPELGANGER}, you may look at their cards. {Pause:medium} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {IdentityList:listDetectableRoles,and}, fortsätt hålla ut tummen. {ROLE_DOPPELGANGER}, du får titta på deras kort. {Pause:medium} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+		},
+		PROMPT_BLOB: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {Select:blobTotal,0,PROMPT_BLOB_OBJECTIVE_ALONE,1,PROMPT_BLOB_OBJECTIVE_SINGLE,*,PROMPT_BLOB_OBJECTIVE_MULTI} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_BLOB_OBJECTIVE_ALONE: {
+			ENG: "You only need to prevent yourself from being voted out.",
+			SWE: "Du behöver bara förhindra att du själv blir utröstad.",
+		},
+		PROMPT_BLOB_OBJECTIVE_MULTI: {
+			ENG: "You must prevent the nearest {Value:blobLeft} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your left and {Value:blobRight} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your right from being voted out.",
+			SWE: "Du måste förhindra att närmaste {Value:blobLeft} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till vänster och {Value:blobRight} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till höger blir utröstade.",
+		},
+		PROMPT_BLOB_OBJECTIVE_SINGLE: {
+			ENG: "You must prevent the player nearest to your {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT} from being voted out.",
+			SWE: "Du måste förhindra att spelaren närmast till {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT} blir utröstad.",
+		},
+		PROMPT_BODYSNATCHER: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_BODYSNATCHER_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_BODYSNATCHER_ACTION: {
+			ENG: "{If:fakeAction,PROMPT_BODYSNATCHER_FAKE} {PROMPT_VIEW_CARD} Then swap your own card for the card you looked at. {Pause:short} Your new card also becomes an {TEAM_ALIEN}.",
+			SWE: "{If:fakeAction,PROMPT_BODYSNATCHER_FAKE} {PROMPT_VIEW_CARD} Byt sedan ditt eget kort mot kortet du tittade på. {Pause:short} Ditt nya kort är nu också en {TEAM_ALIEN}.",
+		},
+		PROMPT_BODYSNATCHER_FAKE: {
+			ENG: "<Narrator: show that the action is not to be performed>.",
+			SWE: "<Berättare: visa att handlingen inte ska utföras>.",
+		},
+		PROMPT_BRIEF_ALIEN_MAKE_ALIEN: {
+			ENG: "touch a hand, that player becomes an Alien.",
+			SWE: "rör en hand, spelaren blir Utomjording.",
+		},
+		PROMPT_BRIEF_ALIEN_MAKE_MINION: {
+			ENG: "touch a hand, that player wins with you.",
+			SWE: "rör en hand, spelaren vinner med er.",
+		},
+		PROMPT_BRIEF_ALIEN_NOTHING: {
+			ENG: "do nothing.",
+			SWE: "gör ingenting.",
+		},
+		PROMPT_BRIEF_ALIEN_SHOW: {
+			ENG: "show your cards to each other.",
+			SWE: "visa era kort för varandra.",
+		},
+		PROMPT_BRIEF_ALIEN_TEAM: {
+			ENG: "{Identity:instigator,plural}: identify each other. {PROMPT_BRIEF_ALIEN_TEAM_ACTION}{If:hasCow,PROMPT_BRIEF_ALIEN_TEAM_COW}",
+			SWE: "{Identity:instigator,plural}: identifiera varandra. {PROMPT_BRIEF_ALIEN_TEAM_ACTION}{If:hasCow,PROMPT_BRIEF_ALIEN_TEAM_COW}",
+		},
+		PROMPT_BRIEF_ALIEN_TEAM_ACTION: {
+			ENG: "{Select:type,do_nothing,PROMPT_BRIEF_ALIEN_NOTHING,make_alien,PROMPT_BRIEF_ALIEN_MAKE_ALIEN,make_alien_minion,PROMPT_BRIEF_ALIEN_MAKE_MINION,show_team_cards,PROMPT_BRIEF_ALIEN_SHOW,trade_team_cards,PROMPT_BRIEF_ALIEN_TRADE,view_card_collective,PROMPT_BRIEF_ALIEN_VIEW_COLLECTIVE,view_card_individual,PROMPT_BRIEF_ALIEN_VIEW_INDIVIDUAL}",
+			SWE: "{Select:type,do_nothing,PROMPT_BRIEF_ALIEN_NOTHING,make_alien,PROMPT_BRIEF_ALIEN_MAKE_ALIEN,make_alien_minion,PROMPT_BRIEF_ALIEN_MAKE_MINION,show_team_cards,PROMPT_BRIEF_ALIEN_SHOW,trade_team_cards,PROMPT_BRIEF_ALIEN_TRADE,view_card_collective,PROMPT_BRIEF_ALIEN_VIEW_COLLECTIVE,view_card_individual,PROMPT_BRIEF_ALIEN_VIEW_INDIVIDUAL}",
+		},
+		PROMPT_BRIEF_ALIEN_TEAM_COW: {
+			ENG: " Cow: hold out your hand, neighbor touches it.",
+			SWE: " Ko: håll ut handen, granne rör vid den.",
+		},
+		PROMPT_BRIEF_ALIEN_TRADE: {
+			ENG: "swap cards with neighbor to the {Select:restriction,left,DIRECTION_LEFT,right,DIRECTION_RIGHT}.",
+			SWE: "byt kort med granne till {Select:restriction,left,DIRECTION_LEFT,right,DIRECTION_RIGHT}.",
+		},
+		PROMPT_BRIEF_ALIEN_VIEW_COLLECTIVE: {
+			ENG: "look together at {PROMPT_VIEW_CARD_ENTRY}.",
+			SWE: "titta gemensamt på {PROMPT_VIEW_CARD_ENTRY}.",
+		},
+		PROMPT_BRIEF_ALIEN_VIEW_INDIVIDUAL: {
+			ENG: "look individually at {PROMPT_VIEW_CARD_ENTRY}.",
+			SWE: "titta individuellt på {PROMPT_VIEW_CARD_ENTRY}.",
+		},
+		PROMPT_BRIEF_ALPHAWOLF: {
+			ENG: "{PROMPT_BRIEF_HEADER} swap the extra werewolf card.",
+			SWE: "{PROMPT_BRIEF_HEADER} byt det extra varulvskortet.",
+		},
+		PROMPT_BRIEF_APPRENTICEASSASSIN: {
+			ENG: "{ROLE_APPRENTICEASSASSIN}: identify the Assassin (otherwise act as one).{If:hasDoppelganger,PROMPT_BRIEF_APPRENTICEASSASSIN_DOPPELGANGER}",
+			SWE: "{ROLE_APPRENTICEASSASSIN}: identifiera Lönnmördaren (annars agera som denne).{If:hasDoppelganger,PROMPT_BRIEF_APPRENTICEASSASSIN_DOPPELGANGER}",
+		},
+		PROMPT_BRIEF_APPRENTICEASSASSIN_DOPPELGANGER: {
+			ENG: " {ROLE_DOPPELGANGER} (if seen): same.",
+			SWE: " {ROLE_DOPPELGANGER} (om sedd): samma.",
+		},
+		PROMPT_BRIEF_APPRENTICESEER: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at one center card.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på ett mittenkort.",
+		},
+		PROMPT_BRIEF_APPRENTICETANNER: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at {ROLE_TANNER}.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på {ROLE_TANNER}.",
+		},
+		PROMPT_BRIEF_ASSASSIN: {
+			ENG: "{PROMPT_BRIEF_HEADER} swap out a player's marker. {If:hasApprenticeAssassin,PROMPT_BRIEF_APPRENTICEASSASSIN}",
+			SWE: "{PROMPT_BRIEF_HEADER} byt ut en spelares märke. {If:hasApprenticeAssassin,PROMPT_BRIEF_APPRENTICEASSASSIN}",
+		},
+		PROMPT_BRIEF_AURASEER: {
+			ENG: "{PROMPT_BRIEF_HEADER} see who acted: {IdentityList:listDetectableRoles}.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på vilka som agerat: {IdentityList:listDetectableRoles}.",
+		},
+		PROMPT_BRIEF_BEHOLDER: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at cards for {IdentityList:listDetectableRoles}.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på kort för {IdentityList:listDetectableRoles}.",
+		},
+		PROMPT_BRIEF_BLOB: {
+			ENG: "{PROMPT_BRIEF_HEADER} protect {Select:blobTotal,0,PROMPT_BRIEF_BLOB_ALONE,1,PROMPT_BRIEF_BLOB_SINGLE,*,PROMPT_BRIEF_BLOB_MULTI}.",
+			SWE: "{PROMPT_BRIEF_HEADER} skydda {Select:blobTotal,0,PROMPT_BRIEF_BLOB_ALONE,1,PROMPT_BRIEF_BLOB_SINGLE,*,PROMPT_BRIEF_BLOB_MULTI}.",
+		},
+		PROMPT_BRIEF_BLOB_ALONE: {
+			ENG: "only yourself",
+			SWE: "endast dig själv",
+		},
+		PROMPT_BRIEF_BLOB_MULTI: {
+			ENG: "{Value:blobLeft} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to the left and {Value:blobRight} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to the right",
+			SWE: "{Value:blobLeft} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till vänster och {Value:blobRight} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till höger",
+		},
+		PROMPT_BRIEF_BLOB_SINGLE: {
+			ENG: "the player to your {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT}",
+			SWE: "spelaren till {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT}",
+		},
+		PROMPT_BRIEF_BODYSNATCHER: {
+			ENG: "{PROMPT_BRIEF_HEADER}{If:fakeAction,PROMPT_BRIEF_FAKE_NOTE} swap cards with {PROMPT_VIEW_CARD_ENTRY}, become an Alien.",
+			SWE: "{PROMPT_BRIEF_HEADER}{If:fakeAction,PROMPT_BRIEF_FAKE_NOTE} byt kort med {PROMPT_VIEW_CARD_ENTRY}, bli Utomjording.",
+		},
+		PROMPT_BRIEF_CHECK_MARKS: {
+			ENG: "{PROMPT_BRIEF_HEADER} check your markers.",
+			SWE: "{PROMPT_BRIEF_HEADER} kolla era märken.",
+		},
+		PROMPT_BRIEF_COPYCAT: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at a center card, become that role.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på ett mittenkort, bli den rollen.",
+		},
+		PROMPT_BRIEF_COUNT: {
+			ENG: "{PROMPT_BRIEF_HEADER} place a {TOKEN_MARK_COUNT}.",
+			SWE: "{PROMPT_BRIEF_HEADER} placera {TOKEN_MARK_COUNT}.",
+		},
+		PROMPT_BRIEF_CUPID: {
+			ENG: "{PROMPT_BRIEF_HEADER} place a {TOKEN_MARK_CUPID} in front of two players.",
+			SWE: "{PROMPT_BRIEF_HEADER} placera {TOKEN_MARK_CUPID} framför två spelare.",
+		},
+		PROMPT_BRIEF_CURATOR: {
+			ENG: "{PROMPT_BRIEF_HEADER} place an artifact.",
+			SWE: "{PROMPT_BRIEF_HEADER} placera en artefakt.",
+		},
+		PROMPT_BRIEF_DISEASED: {
+			ENG: "{PROMPT_BRIEF_HEADER} place the {TOKEN_MARK_DISEASED} on a neighbor.",
+			SWE: "{PROMPT_BRIEF_HEADER} placera {TOKEN_MARK_DISEASED}.",
+		},
+		PROMPT_BRIEF_DOPPELGANGER: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at a player's card, become that role.{If:hasImmediateActionRoles,PROMPT_BRIEF_DOPPELGANGER_IMMEDIATE}",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på ett spelarkort, bli den rollen.{If:hasImmediateActionRoles,PROMPT_BRIEF_DOPPELGANGER_IMMEDIATE}",
+		},
+		PROMPT_BRIEF_DOPPELGANGER_IMMEDIATE: {
+			ENG: " If: {IdentityList:listImmediateActionRoles,or} — act now.",
+			SWE: " Om: {IdentityList:listImmediateActionRoles,or} — agera nu.",
+		},
+		PROMPT_BRIEF_DRUNK: {
+			ENG: "{PROMPT_BRIEF_HEADER} swap your card for a center card.",
+			SWE: "{PROMPT_BRIEF_HEADER} byt ditt kort mot ett mittenkort.",
+		},
+		PROMPT_BRIEF_EMPATH: {
+			ENG: "{PROMPT_BRIEF_HEADER} {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}: {LocalizedValue:question}",
+			SWE: "{PROMPT_BRIEF_HEADER} {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}: {LocalizedValue:question}",
+		},
+		PROMPT_BRIEF_EXPOSER: {
+			ENG: "{PROMPT_BRIEF_HEADER} flip {Value:count} center {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL}.",
+			SWE: "{PROMPT_BRIEF_HEADER} vänd {Value:count} mittenkort.",
+		},
+		PROMPT_BRIEF_FAKE_NOTE: {
+			ENG: " (fake)",
+			SWE: " (fejk)",
+		},
+		PROMPT_BRIEF_FEUDINGALIENS: {
+			ENG: "{Identity:instigator,plural}: identify each other.",
+			SWE: "{Identity:instigator,plural}: identifiera varandra.",
+		},
+		PROMPT_BRIEF_GREMLIN: {
+			ENG: "{PROMPT_BRIEF_HEADER} swap two markers or cards.",
+			SWE: "{PROMPT_BRIEF_HEADER} byt plats på två märken eller kort.",
+		},
+		PROMPT_BRIEF_HEADER: {
+			ENG: "{If:copiedRole,PROMPT_BRIEF_HEADER_ECHO,PROMPT_BRIEF_HEADER_DIRECT}",
+			SWE: "{If:copiedRole,PROMPT_BRIEF_HEADER_ECHO,PROMPT_BRIEF_HEADER_DIRECT}",
+		},
+		PROMPT_BRIEF_HEADER_DIRECT: {
+			ENG: "{Identity:instigator}:",
+			SWE: "{Identity:instigator}:",
+		},
+		PROMPT_BRIEF_HEADER_ECHO: {
+			ENG: "{Identity:instigator} ({Identity:copiedRole}):",
+			SWE: "{Identity:instigator} ({Identity:copiedRole}):",
+		},
+		PROMPT_BRIEF_INSOMNIAC: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at your own card.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på ditt eget kort.",
+		},
+		PROMPT_BRIEF_INSTIGATOR: {
+			ENG: "{PROMPT_BRIEF_HEADER} swap out a player's marker.",
+			SWE: "{PROMPT_BRIEF_HEADER} byt ut en spelares märke.",
+		},
+		PROMPT_BRIEF_LEADER: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at {TEAM_ALIEN_PLURAL}. {If:hasFeudingAliens,PROMPT_BRIEF_LEADER_FEUDINGALIENS}",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på {TEAM_ALIEN_PLURAL}. {If:hasFeudingAliens,PROMPT_BRIEF_LEADER_FEUDINGALIENS}",
+		},
+		PROMPT_BRIEF_LEADER_FEUDINGALIENS: {
+			ENG: "Wins if both Groob and Zerb survive.",
+			SWE: "Vinner om både Groob och Zerb överlever.",
+		},
+		PROMPT_BRIEF_LOVERS: {
+			ENG: "{PROMPT_BRIEF_HEADER} identify each other.",
+			SWE: "{PROMPT_BRIEF_HEADER} identifiera varandra.",
+		},
+		PROMPT_BRIEF_MARKSMAN: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at a player's card + marker.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på en spelares kort + märke.",
+		},
+		PROMPT_BRIEF_MASON: {
+			ENG: "{PROMPT_BRIEF_HEADER} identify each other.",
+			SWE: "{PROMPT_BRIEF_HEADER} identifiera varandra.",
+		},
+		PROMPT_BRIEF_MINION: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at {TEAM_WEREWOLF_PLURAL}.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på {TEAM_WEREWOLF_PLURAL}.",
+		},
+		PROMPT_BRIEF_MORTICIAN: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at {PROMPT_VIEW_CARD_ENTRY}.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på {PROMPT_VIEW_CARD_ENTRY}.",
+		},
+		PROMPT_BRIEF_MYSTICWOLF: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at a player's card.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på en spelares kort.",
+		},
+		PROMPT_BRIEF_NOSTRADAMUS: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at 1-3 cards.{If:hasDangerRoles,PROMPT_BRIEF_NOSTRADAMUS_WARNING} Announce team: {LocalizedValue:fallbackTeam}.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på 1-3 kort.{If:hasDangerRoles,PROMPT_BRIEF_NOSTRADAMUS_WARNING} Annonsera lag: {LocalizedValue:fallbackTeam}.",
+		},
+		PROMPT_BRIEF_NOSTRADAMUS_WARNING: {
+			ENG: " Warning on: {IdentityList:listDangerRoles,or}.",
+			SWE: " Varning vid: {IdentityList:listDangerRoles,or}.",
+		},
+		PROMPT_BRIEF_ORACLE: {
+			ENG: "{PROMPT_BRIEF_HEADER} {Select:type,view_card,PROMPT_BRIEF_ORACLE_VIEW,oracle_change_team,PROMPT_BRIEF_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_BRIEF_ORACLE_BLOCK_ACTION,role_action,PROMPT_BRIEF_ORACLE_ROLE_ACTION,oracle_announce_even_odd,PROMPT_BRIEF_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_BRIEF_ORACLE_HUNT}",
+			SWE: "{PROMPT_BRIEF_HEADER} {Select:type,view_card,PROMPT_BRIEF_ORACLE_VIEW,oracle_change_team,PROMPT_BRIEF_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_BRIEF_ORACLE_BLOCK_ACTION,role_action,PROMPT_BRIEF_ORACLE_ROLE_ACTION,oracle_announce_even_odd,PROMPT_BRIEF_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_BRIEF_ORACLE_HUNT,oracle_force_ripple,PROMPT_BRIEF_ORACLE_FORCE_RIPPLE}",
+		},
+		PROMPT_BRIEF_ORACLE_BLOCK_ACTION: {
+			ENG: "block a player's action.",
+			SWE: "blockera en spelares handling.",
+		},
+		PROMPT_BRIEF_ORACLE_CHANGE_TEAM: {
+			ENG: "offer a team change ({Identity:joinTeam}, {Select:joinFull,true,PROMPT_BRIEF_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_BRIEF_ORACLE_CHANGE_TEAM_PARTIAL}).",
+			SWE: "erbjud lagbyte ({Identity:joinTeam}, {Select:joinFull,true,PROMPT_BRIEF_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_BRIEF_ORACLE_CHANGE_TEAM_PARTIAL}).",
+		},
+		PROMPT_BRIEF_ORACLE_CHANGE_TEAM_FULL: {
+			ENG: "fully",
+			SWE: "helt",
+		},
+		PROMPT_BRIEF_ORACLE_CHANGE_TEAM_PARTIAL: {
+			ENG: "partially",
+			SWE: "delvis",
+		},
+		PROMPT_BRIEF_ORACLE_EVEN_ODD: {
+			ENG: "<Narrator: announce even/odd>.",
+			SWE: "<Berättare: annonsera jämn/udda>.",
+		},
+		PROMPT_BRIEF_ORACLE_FORCE_RIPPLE: {
+			ENG: "<Ask of the player wants to force a ripple (yes/no)>.",
+			SWE: "<Fråga om spelaren vill tvinga fram en krusning (ja/nej)>.",
+		},
+		PROMPT_BRIEF_ORACLE_HUNT: {
+			ENG: "{Select:huntActive,true,PROMPT_BRIEF_ORACLE_HUNT_STARTED,false,PROMPT_BRIEF_ORACLE_HUNT_AVOIDED}",
+			SWE: "{Select:huntActive,true,PROMPT_BRIEF_ORACLE_HUNT_STARTED,false,PROMPT_BRIEF_ORACLE_HUNT_AVOIDED}",
+		},
+		PROMPT_BRIEF_ORACLE_HUNT_AVOIDED: {
+			ENG: "hunt avoided — may wake once to observe all-seeing.{If:showExclusionWarning,PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE}",
+			SWE: "jakten undviks — får vakna en gång för allseende.{If:showExclusionWarning,PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE}",
+		},
+		PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE: {
+			ENG: " Not for: {IdentityList:listExcludedRoles,or}.",
+			SWE: " Ej vid: {IdentityList:listExcludedRoles,or}.",
+		},
+		PROMPT_BRIEF_ORACLE_HUNT_STARTED: {
+			ENG: "hunt begins — players' goal changes to finding the Oracle.",
+			SWE: "jakten startar — spelarnas mål byts till att hitta Oraklet.",
+		},
+		PROMPT_BRIEF_ORACLE_ROLE_ACTION: {
+			ENG: "act as {RoleName:role}.",
+			SWE: "agera som {RoleName:role}.",
+		},
+		PROMPT_BRIEF_ORACLE_VIEW: {
+			ENG: "look at {PROMPT_VIEW_CARD_ENTRY}.",
+			SWE: "titta på {PROMPT_VIEW_CARD_ENTRY}.",
+		},
+		PROMPT_BRIEF_PARANORMALINVESTIGATOR: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at 1-2 cards. Warning on: {IdentityList:listDangerRoles,or}.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på 1-2 kort. Varning vid: {IdentityList:listDangerRoles,or}.",
+		},
+		PROMPT_BRIEF_PICKPOCKET: {
+			ENG: "{PROMPT_BRIEF_HEADER} swap markers with a player, look at it.",
+			SWE: "{PROMPT_BRIEF_HEADER} byt märke med en spelare, titta på det.",
+		},
+		PROMPT_BRIEF_PRIEST: {
+			ENG: "{PROMPT_BRIEF_HEADER} replace your mark with a {TOKEN_MARK_CLARITY}, optionally another player's.",
+			SWE: "{PROMPT_BRIEF_HEADER} ersätt ditt märke med ett {TOKEN_MARK_CLARITY}, och valfritt även en annan spelares.",
+		},
+		PROMPT_BRIEF_PSYCHIC: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at {PROMPT_VIEW_CARD_ENTRY}.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på {PROMPT_VIEW_CARD_ENTRY}.",
+		},
+		PROMPT_BRIEF_RASCAL: {
+			ENG: "{PROMPT_BRIEF_HEADER} act as {RoleName:role}.",
+			SWE: "{PROMPT_BRIEF_HEADER} agera som {RoleName:role}.",
+		},
+		PROMPT_BRIEF_RENFIELD: {
+			ENG: "{PROMPT_BRIEF_HEADER} identify {TEAM_VAMPIRE_DEFINITE}, swap your marker.",
+			SWE: "{PROMPT_BRIEF_HEADER} identifiera {TEAM_VAMPIRE_DEFINITE}, byt ditt märke.",
+		},
+		PROMPT_BRIEF_REVEALER: {
+			ENG: "{PROMPT_BRIEF_HEADER} flip a card, flip back if: {IdentityList:listHiddenRoles,or}.",
+			SWE: "{PROMPT_BRIEF_HEADER} vänd ett kort, vänd tillbaka om: {IdentityList:listHiddenRoles,or}.",
+		},
+		PROMPT_BRIEF_RIPPLE: {
+			ENG: "{If:noRipple,PROMPT_BRIEF_RIPPLE_NONE} Ripple: {PROMPT_BRIEF_RIPPLE_SELECTOR}",
+			SWE: "{If:noRipple,PROMPT_BRIEF_RIPPLE_NONE} Krusning: {PROMPT_BRIEF_RIPPLE_SELECTOR}",
+		},
+		PROMPT_BRIEF_RIPPLE_DOUBLE_VOTE: {
+			ENG: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} get double votes.",
+			SWE: "spelare {ValueList:players} får dubbla röster.",
+		},
+		PROMPT_BRIEF_RIPPLE_MUTED: {
+			ENG: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} may not speak.",
+			SWE: "spelare {ValueList:players} får inte prata.",
+		},
+		PROMPT_BRIEF_RIPPLE_NONE: {
+			ENG: "(only if forced by the Oracle)",
+			SWE: "(endast om Orakel tvingar)",
+		},
+		PROMPT_BRIEF_RIPPLE_REBUKED: {
+			ENG: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} turn away.",
+			SWE: "spelare {ValueList:players} vänder sig bort.",
+		},
+		PROMPT_BRIEF_RIPPLE_ROLE_ACTION: {
+			ENG: "player {Value:player} acts as {RoleName:role}.",
+			SWE: "spelare {Value:player} agerar som {RoleName:role}.",
+		},
+		PROMPT_BRIEF_RIPPLE_SELECTOR: {
+			ENG: "{Select:type,ripple_timer,PROMPT_BRIEF_RIPPLE_TIMER,ripple_role_action,PROMPT_BRIEF_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_BRIEF_RIPPLE_MUTED,ripple_rebuked,PROMPT_BRIEF_RIPPLE_REBUKED,ripple_view_player,PROMPT_BRIEF_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_BRIEF_RIPPLE_DOUBLE_VOTE}",
+			SWE: "{Select:type,ripple_timer,PROMPT_BRIEF_RIPPLE_TIMER,ripple_role_action,PROMPT_BRIEF_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_BRIEF_RIPPLE_MUTED,ripple_rebuked,PROMPT_BRIEF_RIPPLE_REBUKED,ripple_view_player,PROMPT_BRIEF_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_BRIEF_RIPPLE_DOUBLE_VOTE}",
+		},
+		PROMPT_BRIEF_RIPPLE_TIMER: {
+			ENG: "one minute left to discuss.",
+			SWE: "en minut kvar att diskutera.",
+		},
+		PROMPT_BRIEF_RIPPLE_VIEW_PLAYER: {
+			ENG: "player {Value:player} look at {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} for {ValueList:players}.",
+			SWE: "spelare {Value:player} titta på {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} för {ValueList:players}.",
+		},
+		PROMPT_BRIEF_ROBBER: {
+			ENG: "{PROMPT_BRIEF_HEADER} swap cards with a player, look at it.",
+			SWE: "{PROMPT_BRIEF_HEADER} byt kort med en spelare, titta på det.",
+		},
+		PROMPT_BRIEF_SEER: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at a player's card, or two center cards.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på ett spelarkort, eller två mittenkort.",
+		},
+		PROMPT_BRIEF_SENTINEL: {
+			ENG: "{PROMPT_BRIEF_HEADER} place a {TOKEN_SHIELD}.",
+			SWE: "{PROMPT_BRIEF_HEADER} placera en {TOKEN_SHIELD}.",
+		},
+		PROMPT_BRIEF_SQUIRE: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at cards for {TEAM_WEREWOLF_PLURAL}.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på kort för {TEAM_WEREWOLF_PLURAL}.",
+		},
+		PROMPT_BRIEF_THING: {
+			ENG: "{PROMPT_BRIEF_HEADER} touch a neighbor's hand.",
+			SWE: "{PROMPT_BRIEF_HEADER} rör en grannes hand.",
+		},
+		PROMPT_BRIEF_TROUBLEMAKER: {
+			ENG: "{PROMPT_BRIEF_HEADER} swap two players' cards.",
+			SWE: "{PROMPT_BRIEF_HEADER} byt plats på två spelares kort.",
+		},
+		PROMPT_BRIEF_VAMPIRE_TEAM: {
+			ENG: "{Identity:instigator,plural}: identify each other, mark a player.",
+			SWE: "{Identity:instigator,plural}: identifiera varandra, märk en spelare.",
+		},
+		PROMPT_BRIEF_VILLAGEIDIOT: {
+			ENG: "{PROMPT_BRIEF_HEADER} move all cards one step, or not at all.",
+			SWE: "{PROMPT_BRIEF_HEADER} flytta alla kort ett steg, eller inte alls.",
+		},
+		PROMPT_BRIEF_WEREWOLF_DREAMWOLF: {
+			ENG: "{Identity:instigator,plural} (except {ROLE_DREAMWOLF}): identify each other. {ROLE_DREAMWOLF}: show your thumb to them.",
+			SWE: "{Identity:instigator,plural} (ej {ROLE_DREAMWOLF}): identifiera varandra. {ROLE_DREAMWOLF}: visa tumme för dem.",
+		},
+		PROMPT_BRIEF_WEREWOLF_STANDARD: {
+			ENG: "{Identity:instigator,plural}: identify each other (alone: look at center cards).",
+			SWE: "{Identity:instigator,plural}: identifiera varandra (ensam: titta på mittenkort).",
+		},
+		PROMPT_BRIEF_WEREWOLF_TEAM: {
+			ENG: "{If:hasDreamWolf,PROMPT_BRIEF_WEREWOLF_DREAMWOLF,PROMPT_BRIEF_WEREWOLF_STANDARD}",
+			SWE: "{If:hasDreamWolf,PROMPT_BRIEF_WEREWOLF_DREAMWOLF,PROMPT_BRIEF_WEREWOLF_STANDARD}",
+		},
+		PROMPT_BRIEF_WITCH: {
+			ENG: "{PROMPT_BRIEF_HEADER} look at a center card, give it away if you want.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på ett mittenkort, ge bort det om du vill.",
+		},
+		PROMPT_CHECK_MARKS: {
+			COMMON: "{PROMPT_WAKE_CALL} {PROMPT_CHECK_MARKS_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_CHECK_MARKS_ACTION: {
+			ENG: "Check your markers without showing them to anyone else. {Pause:short}",
+			SWE: "Kontrollera era märken utan att visa dem för någon annan. {Pause:short}",
+		},
+		PROMPT_COPYCAT: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_COPYCAT_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_COPYCAT_ACTION: {
+			ENG: "Look at one of the center cards. {Pause:short} You are now the role you saw. When that role is called, wake up and perform its action.",
+			SWE: "Titta på ett av mittenkorten. {Pause:short} Du är nu rollen du såg. När rollen ropas upp, vakna och utför dess handling.",
+		},
+		PROMPT_COUNT: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_COUNT_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_COUNT_ACTION: {
+			ENG: "Swap another player's marker for {ROLE_COUNT_DEFINITE_GENITIVE} marker. {Pause:short}",
+			SWE: "Byt ut en annan spelares märke mot {ROLE_COUNT_DEFINITE_GENITIVE} märke. {Pause:short}",
+		},
+		PROMPT_CUPID: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_CUPID_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_CUPID_ACTION: {
+			ENG: "Swap two other players' markers for {ROLE_CUPID_DEFINITE_GENITIVE} marker. {Pause:medium}",
+			SWE: "Byt ut två andra spelares märken mot {ROLE_CUPID_DEFINITE_GENITIVE} märke. {Pause:medium}",
+		},
+		PROMPT_CURATOR: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_CURATOR_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_CURATOR_ACTION: {
+			ENG: "Place an artifact face-down in front of another player without looking at it. {Pause:short}",
+			SWE: "Placera en artefakt utan att titta på den med ansiktet ner framför en annan spelare. {Pause:short}",
+		},
+		PROMPT_DISEASED: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_DISEASED_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_DISEASED_ACTION: {
+			ENG: "Swap one of your neighbors' markers for {Identity:instigator,definite,genitive} marker. {Pause:short}",
+			SWE: "Byt ut en av dina grannars märken mot {Identity:instigator,definite,genitive} märke. {Pause:short}",
+		},
+		PROMPT_DOPPELGANGER: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_DOPPELGANGER_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_DOPPELGANGER_ACTION: {
+			ENG: "Look at another player's card. {Pause:short} You are now the role you saw. {If:hasImmediateActionRoles,PROMPT_DOPPELGANGER_IMMEDIATE_ACTION}",
+			SWE: "Titta på en annan spelares kort. {Pause:short} Du är nu rollen du såg. {If:hasImmediateActionRoles,PROMPT_DOPPELGANGER_IMMEDIATE_ACTION}",
+		},
+		PROMPT_DOPPELGANGER_IMMEDIATE_ACTION: {
+			ENG: "If the role you saw was {IdentityList:listImmediateActionRoles,or}, perform its action now. {Pause:long}",
+			SWE: "Om rollen du såg var {IdentityList:listImmediateActionRoles,or}, utför dess handling nu. {Pause:long}",
+		},
+		PROMPT_DO_ROLE_ACTION: {
+			COMMON: "{RoleAction:role}",
+		},
+		PROMPT_DRUNK: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_DRUNK_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_DRUNK_ACTION: {
+			ENG: "Swap your card for one of the center cards without looking at it. {Pause:short}",
+			SWE: "Byt ditt kort mot ett av mittenkorten utan att se vad det är. {Pause:short}",
+		},
+		PROMPT_EMPATH: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_EMPATH_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_EMPATH_ACTION: {
+			ENG: "Observe what the other players do. {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}, without waking up, {LocalizedValue:question} {Pause:short}",
+			SWE: "Iaktta vad de andra spelarna gör. Spelare {ValueList:players}, utan att vakna, {LocalizedValue:question} {Pause:short}",
+		},
+		PROMPT_EMPATH_QUESTION_10: {
+			ENG: "give a thumbs up if you think you will win, or a thumbs down if you think you will lose.",
+			SWE: "visa tummen upp om du tror att du kommer vinna, eller tummen ner om du tror att du kommer förlora.",
+		},
+		PROMPT_EMPATH_QUESTION_11: {
+			ENG: "point to the player you think is most likely to have already forgotten their role.",
+			SWE: "peka på den spelare som du tror är mest sannolik att redan ha glömt sin roll.",
+		},
+		PROMPT_EMPATH_QUESTION_1: {
+			ENG: "point to a player you think will win.",
+			SWE: "peka på en spelare som du tror kommer vinna.",
+		},
+		PROMPT_EMPATH_QUESTION_2: {
+			ENG: "point to a player you think will be eliminated.",
+			SWE: "peka på en spelare som du tror blir utröstad.",
+		},
+		PROMPT_EMPATH_QUESTION_3: {
+			ENG: "point to the player you trust the most.",
+			SWE: "peka på den spelare som du litar mest på.",
+		},
+		PROMPT_EMPATH_QUESTION_4: {
+			ENG: "point to the player you trust the least.",
+			SWE: "peka på den spelare som du litar minst på.",
+		},
+		PROMPT_EMPATH_QUESTION_5: {
+			ENG: "point to a player you think is part of {TEAM_VILLAGE_DEFINITE}.",
+			SWE: "peka på en spelare som du tror är en av {TEAM_VILLAGE_DEFINITE}.",
+		},
+		PROMPT_EMPATH_QUESTION_6: {
+			ENG: "point to the player you think will talk the most.",
+			SWE: "peka på den spelare som du tror kommer prata mest.",
+		},
+		PROMPT_EMPATH_QUESTION_7: {
+			ENG: "point to the player you think will talk the least.",
+			SWE: "peka på den spelare som du tror kommer prata minst.",
+		},
+		PROMPT_EMPATH_QUESTION_8: {
+			ENG: "point to the player you think is best at bluffing.",
+			SWE: "peka på den spelare som du tror är bäst på att bluffa.",
+		},
+		PROMPT_EMPATH_QUESTION_9: {
+			ENG: "point to the player you think is worst at bluffing.",
+			SWE: "peka på den spelare som du tror är sämst på att bluffa.",
+		},
+		PROMPT_EXPOSER: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_EXPOSER_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_EXPOSER_ACTION: {
+			ENG: "You may turn over {NUM_WORD} of the center cards. {Pause:short}",
+			SWE: "Du får vända {NUM_WORD} av mittenkorten. {Pause:short}",
+		},
+		PROMPT_FEUDINGALIENS: {
+			ENG: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_FEUDINGALIENS_DOPPELGANGER} wake up and identify each other. {Pause:short} {PROMPT_SLEEP_CALL}",
+			SWE: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_FEUDINGALIENS_DOPPELGANGER} vakna och identifiera varandra. {Pause:short} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_FEUDINGALIENS_DOPPELGANGER: {
+			ENG: "and {ROLE_DOPPELGANGER_DEFINITE} if you saw one of {Identity:instigator,plural,definite,genitive} cards,",
+			SWE: "och {ROLE_DOPPELGANGER_DEFINITE} om du såg ett av {Identity:instigator,plural,definite,genitive} kort,",
+		},
+		PROMPT_GREMLIN: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_GREMLIN_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_GREMLIN_ACTION: {
+			ENG: "Swap the positions of two other players' markers, or two other players' cards, without looking at either. {Pause:short}",
+			SWE: "Byt plats på två andra spelares märken eller två andra spelares kort, utan att titta på något av dem. {Pause:short}",
+		},
+		PROMPT_INSOMNIAC: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_INSOMNIAC_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_INSOMNIAC_ACTION: {
+			ENG: "Look at your own card. {Pause:short}",
+			SWE: "Titta på ditt eget kort. {Pause:short}",
+		},
+		PROMPT_INSTIGATOR: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_INSTIGATOR_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_INSTIGATOR_ACTION: {
+			ENG: "Swap another player's marker for {ROLE_INSTIGATOR_DEFINITE_GENITIVE} marker. {Pause:short}",
+			SWE: "Byt ut en annan spelares märke mot {ROLE_INSTIGATOR_DEFINITE_GENITIVE} märke. {Pause:short}",
+		},
+		PROMPT_LEADER: {
+			ENG: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, hold out a thumb so {Identity:instigator,definite} can see. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, put your thumbs down.",
+			SWE: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, håll ut en tumme så att {Identity:instigator,definite} kan se. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, dra tillbaka tummarna.",
+		},
+		PROMPT_LEADER_DOPPELGANGER: {
+			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_ALIEN_PLURAL}, keep holding out your thumbs so {ROLE_DOPPELGANGER_DEFINITE} can see. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_ALIEN_PLURAL}, fortsätt hålla ut tummarna så att {ROLE_DOPPELGANGER_DEFINITE} kan se. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+		},
+		PROMPT_LEADER_FEUDINGALIENS: {
+			ENG: "{ROLE_FEUDINGALIENS}, hold out both thumbs. {Identity:instigator}, if you see both {ROLE_FEUDINGALIENS_DEFINITE}, you win if neither of them is voted out.",
+			SWE: "{ROLE_FEUDINGALIENS}, håll ut båda tummarna. {Identity:instigator}, om du ser både {ROLE_FEUDINGALIENS_DEFINITE} vinner du om ingen av dem röstas ut.",
+		},
+		PROMPT_LOVERS: {
+			COMMON: "{PROMPT_WAKE_CALL} {PROMPT_LOVERS_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_LOVERS_ACTION: {
+			ENG: "Identify each other. If one of you is voted out, the other is voted out too. {Pause:short}",
+			SWE: "Identifiera varandra. Om en av er röstas ut så kommer samtliga att röstas ut. {Pause:short}",
+		},
+		PROMPT_MARKSMAN: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_MARKSMAN_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_MARKSMAN_ACTION: {
+			ENG: "Look at another player's card, plus another player's marker. It must not be the same player. {Pause:medium}",
+			SWE: "Titta på en annan spelares kort, samt ytterligare en annan spelares märke. Det får inte vara samma spelare. {Pause:medium}",
+		},
+		PROMPT_MASON: {
+			ENG: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_MASON_DOPPELGANGER} wake up and identify each other. {Pause:short} {Identity:instigator,plural}, go to sleep.",
+			SWE: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_MASON_DOPPELGANGER} vakna och identifiera varandra. {Pause:short} {Identity:instigator,plural}, somna.",
+		},
+		PROMPT_MASON_DOPPELGANGER: {
+			ENG: "and {ROLE_DOPPELGANGER_DEFINITE} if you saw one of {Identity:instigator,plural,definite},",
+			SWE: "och {ROLE_DOPPELGANGER_DEFINITE} om du såg en av {Identity:instigator,plural,definite},",
+		},
+		PROMPT_MINION: {
+			ENG: "{PROMPT_WAKE_CALL} {TEAM_WEREWOLF_PLURAL}, hold out a thumb so {Identity:instigator,definite} can see who you are. {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_MINION_DOPPELGANGER} {TEAM_WEREWOLF_PLURAL}, put your thumbs down.",
+			SWE: "{PROMPT_WAKE_CALL} {TEAM_WEREWOLF_PLURAL}, håll ut en tumme så att {Identity:instigator,definite} kan se vem ni är. {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_MINION_DOPPELGANGER} {TEAM_WEREWOLF_PLURAL}, ner med tummarna.",
+		},
+		PROMPT_MINION_DOPPELGANGER: {
+			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, keep holding out your thumb so {ROLE_DOPPELGANGER_DEFINITE} can see who you are. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, fortsätt hålla ut tummen så att {ROLE_DOPPELGANGER_DEFINITE} kan se vem ni är. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+		},
+		PROMPT_MORTICIAN: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_VIEW_CARD} {Pause:short} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_MYSTICWOLF: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_MYSTICWOLF_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_MYSTICWOLF_ACTION: {
+			ENG: "You may look at another player's card. {Pause:short}",
+			SWE: "Du får titta på en annan spelares kort. {Pause:short}",
+		},
+		PROMPT_NOSTRADAMUS: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_NOSTRADAMUS_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_NOSTRADAMUS_ACTION: {
+			ENG: "You may look at one to three other players' cards. {If:hasDangerRoles,PROMPT_NOSTRADAMUS_WARNING,PROMPT_NOSTRADAMUS_NO_WARNING}",
+			SWE: "Du kan titta på en till tre andra spelares kort. {If:hasDangerRoles,PROMPT_NOSTRADAMUS_WARNING,PROMPT_NOSTRADAMUS_NO_WARNING}",
+		},
+		PROMPT_NOSTRADAMUS_DOPPELGANGER: {
+			ENG: "{ROLE_DOPPELGANGER}, if you saw {Identity:instigator,definite}, the same win condition applies to you.",
+			SWE: "{ROLE_DOPPELGANGER}, om du såg {Identity:instigator,definite} gäller samma vinstvillkor för dig.",
+		},
+		PROMPT_NOSTRADAMUS_NO_WARNING: {
+			COMMON: "{Pause:medium}",
+		},
+		PROMPT_NOSTRADAMUS_SUFFIX: {
+			ENG: "If you are not voted out and that team wins, you win too. {If:hasDoppelganger,PROMPT_NOSTRADAMUS_DOPPELGANGER}",
+			SWE: "Om du inte blir utröstad och det laget vinner så vinner även du. {If:hasDoppelganger,PROMPT_NOSTRADAMUS_DOPPELGANGER}",
+		},
+		PROMPT_NOSTRADAMUS_WARNING: {
+			ENG: "If you see: {IdentityList:listDangerRoles,or}, you must stop. {Input:nostradamusTeam,value,PROMPT_NOSTRADAMUS_WARNING_MANUAL,long,fallbackTeam,availableTeams,PROMPT_NOSTRADAMUS_WARNING_RESOLVED}",
+			SWE: "Om du ser: {IdentityList:listDangerRoles,or} måste du sluta. {Input:nostradamusTeam,value,PROMPT_NOSTRADAMUS_WARNING_MANUAL,long,fallbackTeam,availableTeams,PROMPT_NOSTRADAMUS_WARNING_RESOLVED}",
+		},
+		PROMPT_NOSTRADAMUS_WARNING_MANUAL: {
+			ENG: "<Narrator: announce which team {Identity:instigator,definite} now belongs to, or {LocalizedValue:fallbackTeam}>. {PROMPT_NOSTRADAMUS_SUFFIX}",
+			SWE: "<Berättare: annonsera vilket lag {Identity:instigator,definite} nu tillhör, eller {LocalizedValue:fallbackTeam}>. {PROMPT_NOSTRADAMUS_SUFFIX}",
+		},
+		PROMPT_NOSTRADAMUS_WARNING_RESOLVED: {
+			ENG: "{Identity:instigator,definite} now belongs to {LocalizedValue:nostradamusTeam}. {PROMPT_NOSTRADAMUS_SUFFIX}",
+			SWE: "{Identity:instigator,definite} tillhör nu {LocalizedValue:nostradamusTeam}. {PROMPT_NOSTRADAMUS_SUFFIX}",
+		},
+		PROMPT_ORACLE: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {Select:type,view_card,PROMPT_ORACLE_VIEW_CARD,oracle_change_team,PROMPT_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_ORACLE_BLOCK_ACTION,role_action,PROMPT_DO_ROLE_ACTION,oracle_announce_even_odd,PROMPT_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_ORACLE_HUNT,oracle_force_ripple,PROMPT_ORACLE_FORCE_RIPPLE} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_ORACLE_BLOCK_ACTION: {
+			ENG: "All other players, hold out a hand in front of you. {Identity:instigator}, touch another player's hand that you want to block. That player may not wake up or perform any action during the night, regardless of their role. {Pause:short}",
+			SWE: "Samtliga andra spelare, räck ut en hand framför er. {Identity:instigator}, rör vid en annan spelares hand som du vill blockera. Spelaren får inte vakna eller utföra någon handling under natten oavsett vad deras roll är. {Pause:short}",
+		},
+		PROMPT_ORACLE_CHANGE_TEAM: {
+			ENG: "Do you want to join {Identity:joinTeam,definite,genitive} team? {Input:oracleJoinAccepted,choice,PROMPT_ORACLE_CHANGE_TEAM_MANUAL,medium,defaultJoinAccepted,true,UI_YES,PROMPT_ORACLE_CHANGE_TEAM_ACCEPTED,false,UI_NO,PROMPT_ORACLE_CHANGE_TEAM_DECLINED}",
+			SWE: "Vill du gå med i {Identity:joinTeam,definite,genitive} lag? {Input:oracleJoinAccepted,choice,PROMPT_ORACLE_CHANGE_TEAM_MANUAL,medium,defaultJoinAccepted,true,UI_YES,PROMPT_ORACLE_CHANGE_TEAM_ACCEPTED,false,UI_NO,PROMPT_ORACLE_CHANGE_TEAM_DECLINED}",
+		},
+		PROMPT_ORACLE_CHANGE_TEAM_ACCEPTED: {
+			ENG: "{Select:joinFull,true,PROMPT_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_ORACLE_CHANGE_TEAM_PARTIAL}",
+			SWE: "{Select:joinFull,true,PROMPT_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_ORACLE_CHANGE_TEAM_PARTIAL}",
+		},
+		PROMPT_ORACLE_CHANGE_TEAM_DECLINED: {
+			ENG: "{Identity:instigator,definite} remains on {TEAM_VILLAGE_DEFINITE_GENITIVE} team.",
+			SWE: "{Identity:instigator,definite} är kvar i {TEAM_VILLAGE_DEFINITE_GENITIVE} lag.",
+		},
+		PROMPT_ORACLE_CHANGE_TEAM_FULL: {
+			ENG: "{Identity:instigator,definite} is now that role, and wakes up together with them.",
+			SWE: "{Identity:instigator,definite} är nu den rollen, och vaknar tillsammans med dem.",
+		},
+		PROMPT_ORACLE_CHANGE_TEAM_MANUAL: {
+			ENG: "If yes, {Select:joinFull,true,PROMPT_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_ORACLE_CHANGE_TEAM_PARTIAL} If no, {Identity:instigator,definite} remains on {TEAM_VILLAGE_DEFINITE_GENITIVE} team.",
+			SWE: "Om ja, {Select:joinFull,true,PROMPT_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_ORACLE_CHANGE_TEAM_PARTIAL} Om nej, {Identity:instigator,definite} är kvar i {TEAM_VILLAGE_DEFINITE_GENITIVE} lag.",
+		},
+		PROMPT_ORACLE_CHANGE_TEAM_PARTIAL: {
+			ENG: "{Identity:instigator,definite} now wins together with that team, but is not that role and does not wake up together with them.",
+			SWE: "{Identity:instigator,definite} vinner nu tillsammans med det laget, men är inte den rollen och vaknar inte tillsammans med dem.",
+		},
+		PROMPT_ORACLE_EVEN_ODD: {
+			COMMON: "{AutoKey:PROMPT_ORACLE_EVEN_ODD_MANUAL,PROMPT_ORACLE_EVEN_ODD_AUTO}",
+		},
+		PROMPT_ORACLE_EVEN_ODD_AUTO: {
+			ENG: "State whether you have an even or odd player number. {Input:oracleEvenOdd,choice,PROMPT_ORACLE_EVEN_ODD_MANUAL,short,defaultEvenOdd,even,UI_EVEN,PROMPT_ORACLE_EVEN_ODD_RESULT,odd,UI_ODD,PROMPT_ORACLE_EVEN_ODD_RESULT}",
+			SWE: "Ange om du har ett jämnt eller udda spelarnummer. {Input:oracleEvenOdd,choice,PROMPT_ORACLE_EVEN_ODD_MANUAL,short,defaultEvenOdd,even,UI_EVEN,PROMPT_ORACLE_EVEN_ODD_RESULT,odd,UI_ODD,PROMPT_ORACLE_EVEN_ODD_RESULT}",
+		},
+		PROMPT_ORACLE_EVEN_ODD_MANUAL: {
+			ENG: "<Narrator: reveal whether {Identity:instigator,definite} has an even or odd player number>.",
+			SWE: "<Berättare: avslöja om {Identity:instigator,definite} har ett jämt eller udda spelarnummer>.",
+		},
+		PROMPT_ORACLE_EVEN_ODD_RESULT: {
+			ENG: "{Identity:instigator,definite} has an {Select:oracleEvenOdd,even,UI_EVEN,odd,UI_ODD} player number.",
+			SWE: "{Identity:instigator,definite} har ett {Select:oracleEvenOdd,even,UI_EVEN,odd,UI_ODD} spelarnummer.",
+		},
+		PROMPT_ORACLE_FORCE_RIPPLE: {
+			ENG: "Do you want to force a ripple in space-time? {Input:oracleForcedRipple,choice,PROMPT_ORACLE_FORCE_RIPPLE_MANUAL,short,defaultRippleForce,true,UI_YES,PROMPT_ORACLE_FORCE_RIPPLE_YES,false,UI_NO,PROMPT_ORACLE_FORCE_RIPPLE_NO}",
+			SWE: "Vill du tvinga fram en krusning i rum-tiden? {Input:oracleForcedRipple,choice,PROMPT_ORACLE_FORCE_RIPPLE_MANUAL,short,defaultRippleForce,true,UI_YES,PROMPT_ORACLE_FORCE_RIPPLE_YES,false,UI_NO,PROMPT_ORACLE_FORCE_RIPPLE_NO}",
+		},
+		PROMPT_ORACLE_FORCE_RIPPLE_MANUAL: {
+			ENG: "<If yes: {PROMPT_ORACLE_FORCE_RIPPLE_YES} If no: {PROMPT_ORACLE_FORCE_RIPPLE_NO}>",
+			SWE: "<Om ja: {PROMPT_ORACLE_FORCE_RIPPLE_YES} Om nej: {PROMPT_ORACLE_FORCE_RIPPLE_NO}>",
+		},
+		PROMPT_ORACLE_FORCE_RIPPLE_NO: {
+			ENG: "No ripple is guaranteed, but one may still occur at random.",
+			SWE: "Ingen krusning är garanterad, men kan fortfarande inträffa slumpmässigt.",
+		},
+		PROMPT_ORACLE_FORCE_RIPPLE_YES: {
+			ENG: "A ripple is now guaranteed to occur.",
+			SWE: "En krusning är nu garanterad att inträffa.",
+		},
+		PROMPT_ORACLE_HUNT: {
+			ENG: "Guess a number between 1 and 10. {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_AUTO}",
+			SWE: "Gissa ett tal mellan 1 och 10. {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_AUTO}",
+		},
+		PROMPT_ORACLE_HUNT_AUTO: {
+			COMMON: "{Input:oracleHuntGuess,choice,PROMPT_ORACLE_HUNT_MANUAL,short,defaultHuntGuess,1,UI_NUM_1,PROMPT_ORACLE_HUNT_RESOLVE,2,UI_NUM_2,PROMPT_ORACLE_HUNT_RESOLVE,3,UI_NUM_3,PROMPT_ORACLE_HUNT_RESOLVE,4,UI_NUM_4,PROMPT_ORACLE_HUNT_RESOLVE,5,UI_NUM_5,PROMPT_ORACLE_HUNT_RESOLVE,6,UI_NUM_6,PROMPT_ORACLE_HUNT_RESOLVE,7,UI_NUM_7,PROMPT_ORACLE_HUNT_RESOLVE,8,UI_NUM_8,PROMPT_ORACLE_HUNT_RESOLVE,9,UI_NUM_9,PROMPT_ORACLE_HUNT_RESOLVE,10,UI_NUM_10,PROMPT_ORACLE_HUNT_RESOLVE}",
+		},
+		PROMPT_ORACLE_HUNT_AVOIDED: {
+			ENG: "Correct. Whenever another role is told to wake up, you may wake up with them once during the night to observe who they are and what they do. {If:showExclusionWarning,PROMPT_ORACLE_HUNT_OMNISCIENCE}",
+			SWE: "Korrekt. När en annan roll blir tillsagd att vakna kan du en gång under natten vakna tillsammans med dem för att iaktta vem de är och vad de gör. {If:showExclusionWarning,PROMPT_ORACLE_HUNT_OMNISCIENCE}",
+		},
+		PROMPT_ORACLE_HUNT_MANUAL: {
+			COMMON: "{Select:huntActive,true,PROMPT_ORACLE_HUNT_STARTED,false,PROMPT_ORACLE_HUNT_AVOIDED}",
+		},
+		PROMPT_ORACLE_HUNT_OMNISCIENCE: {
+			ENG: "However, you may not wake up to observe any of the following roles: {IdentityList:listExcludedRoles,or}.",
+			SWE: "Du får dock inte vakna för att iaktta någon av följande roller: {IdentityList:listExcludedRoles,or}.",
+		},
+		PROMPT_ORACLE_HUNT_RESOLVE: {
+			COMMON: "{Select:huntActive,true,PROMPT_ORACLE_HUNT_STARTED,false,PROMPT_ORACLE_HUNT_AVOIDED}",
+		},
+		PROMPT_ORACLE_HUNT_STARTED: {
+			ENG: "Wrong. {Identity:instigator}, you now only win if you are not voted out. All other players, regardless of previous role and team, now have only one win condition: find {Identity:instigator,definite}.",
+			SWE: "Fel. {Identity:instigator}, du vinner nu endast om du inte blir utröstad. Övriga spelare, oberoende av tidigare roll- och lagtillhörighet har ni nu endast ett vinstvillkor: hitta {Identity:instigator,definite}.",
+		},
+		PROMPT_ORACLE_VIEW_CARD: {
+			COMMON: "{PROMPT_VIEW_CARD} {Pause:medium}",
+		},
+		PROMPT_PARANORMALINVESTIGATOR: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_PARANORMALINVESTIGATOR_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_PARANORMALINVESTIGATOR_ACTION: {
+			ENG: "You may look at one to two other players' cards. {If:hasDangerRoles,PROMPT_PARANORMALINVESTIGATOR_WARNING} {Pause:medium}",
+			SWE: "Du kan titta på en till två andra spelares kort. {If:hasDangerRoles,PROMPT_PARANORMALINVESTIGATOR_WARNING} {Pause:medium}",
+		},
+		PROMPT_PARANORMALINVESTIGATOR_WARNING: {
+			ENG: "If you see: {IdentityList:listDangerRoles,or}, you must stop, and will join their team.",
+			SWE: "Om du ser: {IdentityList:listDangerRoles,or}, måste du sluta, och tillhör då deras lag.",
+		},
+		PROMPT_PICKPOCKET: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_PICKPOCKET_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_PICKPOCKET_ACTION: {
+			ENG: "You may choose to steal another player's marker and replace it with your own. Then look at the marker you stole. {Pause:short}",
+			SWE: "Du kan välja att stjäla en annan spelares märke och ersätta det med ditt märke. Titta sedan på märket du stal. {Pause:short}",
+		},
+		PROMPT_PRIEST: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_PRIEST_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_PRIEST_ACTION: {
+			ENG: "Swap your marker for a {TOKEN_MARK_CLARITY}. If you want, you may also swap another player's marker for a {TOKEN_MARK_CLARITY}. {Pause:medium}",
+			SWE: "Byt ut ditt märke mot ett {TOKEN_MARK_CLARITY}. Om du vill får du även byta ut en annan spelares märke mot ett {TOKEN_MARK_CLARITY}. {Pause:medium}",
+		},
+		PROMPT_PSYCHIC: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_VIEW_CARD} {Pause:medium} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_RASCAL: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_RASCAL_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_RASCAL_ACTION: {
+			ENG: "{PROMPT_DO_ROLE_ACTION}",
+			SWE: "{PROMPT_DO_ROLE_ACTION}",
+		},
+		PROMPT_RENFIELD: {
+			ENG: "{PROMPT_WAKE_CALL} {TEAM_VAMPIRE_PLURAL}, point at the player you have given {TEAM_VAMPIRE_DEFINITE_GENITIVE} marker. {Identity:instigator}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_RENFIELD_DOPPELGANGER} {TEAM_VAMPIRE_PLURAL}, stop pointing.",
+			SWE: "{PROMPT_WAKE_CALL} {TEAM_VAMPIRE_PLURAL}, peka på den spelare som ni har gett {TEAM_VAMPIRE_DEFINITE_GENITIVE} märke. {Identity:instigator}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_RENFIELD_DOPPELGANGER} {TEAM_VAMPIRE_PLURAL}, sluta peka.",
+		},
+		PROMPT_RENFIELD_ACTION: {
+			ENG: "identify {TEAM_VAMPIRE_DEFINITE} and swap your marker for {Identity:instigator,definite,genitive} marker. {Pause:medium}",
+			SWE: "identifiera {TEAM_VAMPIRE_DEFINITE} och byt ut ditt märke mot {Identity:instigator,definite,genitive} märke. {Pause:medium}",
+		},
+		PROMPT_RENFIELD_DOPPELGANGER: {
+			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_VAMPIRE_PLURAL}, keep pointing at the player you have given {TEAM_VAMPIRE_DEFINITE_GENITIVE} marker. {ROLE_DOPPELGANGER}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_VAMPIRE_PLURAL}, fortsätt peka på den spelare som ni har gett {TEAM_VAMPIRE_DEFINITE_GENITIVE} märke. {ROLE_DOPPELGANGER}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+		},
+		PROMPT_REVEALER: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_REVEALER_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_REVEALER_ACTION: {
+			ENG: "Turn another player's card face up. {If:hasHiddenRoles,PROMPT_REVEALER_HIDDEN_ROLE} {Pause:short}",
+			SWE: "Vänd upp en annan spelares kort. {If:hasHiddenRoles,PROMPT_REVEALER_HIDDEN_ROLE} {Pause:short}",
+		},
+		PROMPT_REVEALER_HIDDEN_ROLE: {
+			ENG: "If the card is: {IdentityList:listHiddenRoles,or}, turn the card back face down.",
+			SWE: "Om kortet är: {IdentityList:listHiddenRoles,or}, vänd kortet tillbaka.",
+		},
+		PROMPT_RIPPLE: {
+			COMMON: "{If:noRipple,PROMPT_RIPPLE_NONE} {PROMPT_RIPPLE_CONTENT}",
+		},
+		PROMPT_RIPPLE_CONTENT: {
+			ENG: "A ripple has occurred in space-time. {PROMPT_RIPPLE_SELECTOR}",
+			SWE: "Det har inträffat en krusning i rum-tiden. {PROMPT_RIPPLE_SELECTOR}",
+		},
+		PROMPT_RIPPLE_DOUBLE_VOTE: {
+			ENG: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} may use both hands when voting, for double votes.",
+			SWE: "Spelare {ValueList:players} får under omröstningen använda båda händerna för dubbla röster.",
+		},
+		PROMPT_RIPPLE_MUTED: {
+			ENG: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} may not speak until after the vote.",
+			SWE: "Spelare {ValueList:players} får inte prata förrän efter omröstningen.",
+		},
+		PROMPT_RIPPLE_NONE: {
+			ENG: "<Narrator: ignore the following unless {ROLE_ORACLE_DEFINITE} has chosen to force a ripple>",
+			SWE: "<Berättare: ignorera följande om inte {ROLE_ORACLE_DEFINITE} valt att tvinga fram en krusning>",
+		},
+		PROMPT_RIPPLE_REBUKED: {
+			ENG: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} must turn away from the table until after the vote.",
+			SWE: "Spelare {ValueList:players} måste vända sig från bordet förrän efter omröstningen.",
+		},
+		PROMPT_RIPPLE_ROLE_ACTION: {
+			ENG: "Player {Value:player}, wake up. {PROMPT_DO_ROLE_ACTION} Player {Value:player}, go to sleep.",
+			SWE: "Spelare {Value:player}, vakna. {PROMPT_DO_ROLE_ACTION} Spelare {Value:player}, somna.",
+		},
+		PROMPT_RIPPLE_SELECTOR: {
+			COMMON: "{Select:type,ripple_timer,PROMPT_RIPPLE_TIMER,ripple_role_action,PROMPT_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_RIPPLE_MUTED,ripple_rebuked,PROMPT_RIPPLE_REBUKED,ripple_view_player,PROMPT_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_RIPPLE_DOUBLE_VOTE}",
+		},
+		PROMPT_RIPPLE_TIMER: {
+			ENG: "You have only one minute left before you must vote.",
+			SWE: "Ni har endast en minut på er innan ni måste rösta.",
+		},
+		PROMPT_RIPPLE_VIEW_PLAYER: {
+			ENG: "Player {Value:player}, wake up. You may look at the {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} belonging to {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}. {Pause:medium} Player {Value:player}, go to sleep.",
+			SWE: "Spelare {Value:player}, vakna. Du får titta på {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} för {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}. {Pause:medium} Spelare {Value:player}, somna.",
+		},
+		PROMPT_ROBBER: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_ROBBER_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_ROBBER_ACTION: {
+			ENG: "You may choose to steal another player's card and replace it with your own. Then look at the card you stole. Do not wake up when your new role is called. {Pause:short}",
+			SWE: "Du kan välja att stjäla en annan spelares kort och ersätta det med ditt kort. Titta sedan på kortet du stal. Du ska inte vakna när din nya roll ropas upp. {Pause:short}",
+		},
+		PROMPT_SEER: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_SEER_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_SEER_ACTION: {
+			ENG: "You may look at another player's card, or two of the center cards. {Pause:short}",
+			SWE: "Du kan titta på en annan spelares kort, eller två av mittenkorten. {Pause:short}",
+		},
+		PROMPT_SENTINEL: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_SENTINEL_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_SENTINEL_ACTION: {
+			ENG: "Place a {TOKEN_SHIELD} on another player's card. {Pause:short}",
+			SWE: "Placera en {TOKEN_SHIELD} på en annan spelares kort. {Pause:short}",
+		},
+		PROMPT_SLEEP_CALL: {
+			ENG: "{Identity:instigator}, go to sleep.",
+			SWE: "{Identity:instigator}, somna.",
+		},
+		PROMPT_SLEEP_CALL_DOPPELGANGER: {
+			ENG: "{ROLE_DOPPELGANGER}, go to sleep.",
+			SWE: "{ROLE_DOPPELGANGER}, somna.",
+		},
+		PROMPT_SQUIRE: {
+			ENG: "{PROMPT_WAKE_CALL} {TEAM_WEREWOLF_PLURAL}, hold out a thumb so {Identity:instigator,definite} can see who you are. {Identity:instigator}, you may look at their cards. {Pause:medium} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_SQUIRE_DOPPELGANGER} {TEAM_WEREWOLF_PLURAL}, put your thumbs down.",
+			SWE: "{PROMPT_WAKE_CALL} {TEAM_WEREWOLF_PLURAL}, håll ut en tumme så att {Identity:instigator,definite} kan se vem ni är. {Identity:instigator}, du får titta på deras kort. {Pause:medium} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_SQUIRE_DOPPELGANGER} {TEAM_WEREWOLF_PLURAL}, ner med tummarna.",
+		},
+		PROMPT_SQUIRE_DOPPELGANGER: {
+			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, keep holding out your thumb so {ROLE_DOPPELGANGER_DEFINITE} can see who you are. {ROLE_DOPPELGANGER}, you may look at their cards. {Pause:medium} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, fortsätt hålla ut tummen så att {ROLE_DOPPELGANGER_DEFINITE} kan se vem ni är. {ROLE_DOPPELGANGER}, du får titta på deras kort. {Pause:medium} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+		},
+		PROMPT_THING: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_THING_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_THING_ACTION: {
+			ENG: "All other players, hold out a hand in front of you. {Identity:instigator}, touch the hand belonging to the players nearest to your right or left. {Pause:short}",
+			SWE: "Samtliga andra spelare, räck ut en hand framför er. {Identity:instigator}, rör handen tillhörande spelaren närmast till höger eller vänster. {Pause:short}",
+		},
+		PROMPT_TROUBLEMAKER: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_TROUBLEMAKER_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_TROUBLEMAKER_ACTION: {
+			ENG: "Swap the positions of two other players' cards, without looking at either. {Pause:short}",
+			SWE: "Byt plats på två andra spelares kort, utan att titta på något av dem. {Pause:short}",
+		},
+		PROMPT_UNIVERSAL_SLEEP: {
+			COMMON: "{PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_UNIVERSAL_WAKE: {
+			COMMON: "{PROMPT_WAKE_CALL}",
+		},
+		PROMPT_VAMPIRE_TEAM: {
+			ENG: "{If:hasDoppelganger,PROMPT_VAMPIRE_TEAM_DOPPELGANGER_PREFIX} {Identity:instigator,plural}, wake up and identify each other. Together, choose a player whose marker you swap for {Identity:instigator,plural,definite,genitive} marker. {Pause:medium} {Identity:instigator,plural}, go to sleep.",
+			SWE: "{If:hasDoppelganger,PROMPT_VAMPIRE_TEAM_DOPPELGANGER_PREFIX} {Identity:instigator,plural}, vakna och identifiera varandra. Tillsammans får ni välja en spelare vars märke ni byter ut mot {Identity:instigator,plural,definite,genitive} märke. {Pause:medium} {Identity:instigator,plural}, somna.",
+		},
+		PROMPT_VAMPIRE_TEAM_DOPPELGANGER_PREFIX: {
+			ENG: "{ROLE_DOPPELGANGER}, if you saw one of {Identity:instigator,plural,definite}, wake up together with them when they are called.",
+			SWE: "{ROLE_DOPPELGANGER}, om du såg någon av {Identity:instigator,plural,definite}, vakna tillsammans med dem när de blir ombedda.",
+		},
+		PROMPT_VIEW_CARD: {
+			ENG: "You may look at {PROMPT_VIEW_CARD_ENTRY}.",
+			SWE: "Du får titta på {PROMPT_VIEW_CARD_ENTRY}.",
+		},
+		PROMPT_VIEW_CARD_CENTER: {
+			ENG: "{NUM_WORD} of the center cards",
+			SWE: "{NUM_WORD} av mittenkorten",
+		},
+		PROMPT_VIEW_CARD_ENTRY: {
+			COMMON: "{Select:target,center,PROMPT_VIEW_CARD_CENTER,neighbor,PROMPT_VIEW_CARD_NEIGHBOR,even_player,PROMPT_VIEW_CARD_EVEN,odd_player,PROMPT_VIEW_CARD_ODD,player,PROMPT_VIEW_CARD_PLAYER,self,PROMPT_VIEW_CARD_SELF}",
+		},
+		PROMPT_VIEW_CARD_EVEN: {
+			ENG: "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} from even-numbered players",
+			SWE: "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} från jämna spelare",
+		},
+		PROMPT_VIEW_CARD_NEIGHBOR: {
+			COMMON: "{Select:restriction,left,PROMPT_VIEW_CARD_NEIGHBOR_LEFT,right,PROMPT_VIEW_CARD_NEIGHBOR_RIGHT,both,PROMPT_VIEW_CARD_NEIGHBOR_BOTH,any,PROMPT_VIEW_CARD_NEIGHBOR_ANY}",
+		},
+		PROMPT_VIEW_CARD_NEIGHBOR_ANY: {
+			ENG: "one of your neighbors' cards",
+			SWE: "en grannes kort",
+		},
+		PROMPT_VIEW_CARD_NEIGHBOR_BOTH: {
+			ENG: "both of your neighbors' cards",
+			SWE: "båda grannars kort",
+		},
+		PROMPT_VIEW_CARD_NEIGHBOR_LEFT: {
+			ENG: "your left neighbor's card",
+			SWE: "vänster grannes kort",
+		},
+		PROMPT_VIEW_CARD_NEIGHBOR_RIGHT: {
+			ENG: "your right neighbor's card",
+			SWE: "höger grannes kort",
+		},
+		PROMPT_VIEW_CARD_ODD: {
+			ENG: "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} from odd-numbered players",
+			SWE: "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} från udda spelare",
+		},
+		PROMPT_VIEW_CARD_PLAYER: {
+			COMMON: "{Select:restriction,any,PROMPT_VIEW_CARD_PLAYER_ANY,specific,PROMPT_VIEW_CARD_PLAYER_SPECIFIC}",
+		},
+		PROMPT_VIEW_CARD_PLAYER_ANY: {
+			ENG: "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} from {Select:count,1,PROMPT_VIEW_CARD_PLAYER_ANY_SINGLE,PROMPT_VIEW_CARD_PLAYER_ANY_MULTI} {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL}",
+			SWE: "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} från {Select:count,1,PROMPT_VIEW_CARD_PLAYER_ANY_SINGLE,PROMPT_VIEW_CARD_PLAYER_ANY_MULTI} {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL}",
+		},
+		PROMPT_VIEW_CARD_PLAYER_ANY_MULTI: {
+			ENG: "other",
+			SWE: "andra",
+		},
+		PROMPT_VIEW_CARD_PLAYER_ANY_SINGLE: {
+			ENG: "another",
+			SWE: "en annan",
+		},
+		PROMPT_VIEW_CARD_PLAYER_SPECIFIC: {
+			ENG: "the {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} belonging to {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}",
+			SWE: "{Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} som tillhör {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}",
+		},
+		PROMPT_VIEW_CARD_SELF: {
+			ENG: "your own card",
+			SWE: "ditt eget kort",
+		},
+		PROMPT_VILLAGEIDIOT: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_VILLAGEIDIOT_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_VILLAGEIDIOT_ACTION: {
+			ENG: "You may choose to move every player's card one step to the left, to the right, or not at all. {Pause:long}",
+			SWE: "Du kan välja att flytta samtliga spelares kort ett steg åt vänster, åt höger, eller inte alls. {Pause:long}",
+		},
+		PROMPT_WAKE_CALL: {
+			ENG: "{Identity:instigator}, wake up.",
+			SWE: "{Identity:instigator}, vakna.",
+		},
+		PROMPT_WAKE_CALL_DOPPELGANGER_ECHO: {
+			ENG: "{ROLE_DOPPELGANGER}, if you saw {Identity:copiedRole,definite}, wake up.",
+			SWE: "{ROLE_DOPPELGANGER}, om du såg {Identity:copiedRole,definite}, vakna.",
+		},
+		PROMPT_WAKE_CALL_DOPPELGANGER_INLINE: {
+			ENG: "{ROLE_DOPPELGANGER}, if you saw {Identity:instigator,definite}, wake up.",
+			SWE: "{ROLE_DOPPELGANGER}, om du såg {Identity:instigator,definite}, vakna.",
+		},
+		PROMPT_WEREWOLF_TEAM: {
+			ENG: "{If:hasDoppelganger,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX} {If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF,PROMPT_WEREWOLF_TEAM_CORE_STANDARD}",
+			SWE: "{If:hasDoppelganger,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX} {If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF,PROMPT_WEREWOLF_TEAM_CORE_STANDARD}",
+		},
+		PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF: {
+			ENG: "{Identity:instigator,plural}, except for {ROLE_DREAMWOLF_DEFINITE}, wake up and identify each other. {ROLE_DREAMWOLF}, stick out your thumb so the other {Identity:instigator,plural} can see who you are. If there is only one {Identity:instigator}, you may look at one of the center cards. {Pause:medium} {ROLE_DREAMWOLF}, put your thumb down. {Identity:instigator,plural}, go to sleep.",
+			SWE: "{Identity:instigator,plural}, med undantag för {ROLE_DREAMWOLF_DEFINITE}, vakna och identifiera varandra. {ROLE_DREAMWOLF}, stick ut tummen så att andra {Identity:instigator,plural} kan se vem du är. Om det bara finns en {Identity:instigator} får du titta på ett av mittenkorten. {Pause:medium} {ROLE_DREAMWOLF}, ner med tummen. {Identity:instigator,plural}, somna.",
+		},
+		PROMPT_WEREWOLF_TEAM_CORE_STANDARD: {
+			ENG: "{Identity:instigator,plural}, wake up and identify each other. If there is only one {Identity:instigator}, you may look at one of the center cards. {Pause:medium} {Identity:instigator,plural}, go to sleep.",
+			SWE: "{Identity:instigator,plural}, vakna och identifiera varandra. Om det bara finns en {Identity:instigator} får du titta på ett av mittenkorten. {Pause:medium} {Identity:instigator,plural}, somna.",
+		},
+		PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX: {
+			ENG: "{If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_DREAMWOLF,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_STANDARD}",
+			SWE: "{If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_DREAMWOLF,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_STANDARD}",
+		},
+		PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_DREAMWOLF: {
+			ENG: "{ROLE_DOPPELGANGER}, if you saw one of {Identity:instigator,plural,definite} other than {ROLE_DREAMWOLF_DEFINITE}, wake up together with them when they are called. If you saw {ROLE_DREAMWOLF_DEFINITE}, do not wake up, but follow that role's instructions.",
+			SWE: "{ROLE_DOPPELGANGER}, om du såg någon av {Identity:instigator,plural,definite} förutom {ROLE_DREAMWOLF_DEFINITE}, vakna tillsammans med dem när de blir ombedda. Om du såg {ROLE_DREAMWOLF_DEFINITE}, vakna inte men följ den rollens instruktioner.",
+		},
+		PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_STANDARD: {
+			ENG: "{ROLE_DOPPELGANGER}, if you saw one of {Identity:instigator,plural,definite}, wake up together with them when they are called.",
+			SWE: "{ROLE_DOPPELGANGER}, om du såg någon av {Identity:instigator,plural,definite}, vakna tillsammans med dem när de blir ombedda.",
+		},
+		PROMPT_WITCH: {
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_WITCH_ACTION} {PROMPT_SLEEP_CALL}",
+		},
+		PROMPT_WITCH_ACTION: {
+			ENG: "You may choose to look at one of the center cards. If you do, you must give that card to yourself or to another player. {Pause:short}",
+			SWE: "Du kan välja att titta på ett av korten i mitten. Om du gör det måste du ge det kortet till dig själv eller en annan spelare. {Pause:short}",
+		},
+		ROLE_ALIEN: {
+			ENG: "Alien",
+			SWE: "Utomjording",
+		},
+		ROLE_ALIEN_DEFINITE: {
+			ENG: "the Alien",
+			SWE: "Utomjordingen",
+		},
+		ROLE_ALIEN_DEFINITE_GENITIVE: {
+			ENG: "the Alien's",
+			SWE: "Utomjordingens",
+		},
+		ROLE_ALIEN_GENITIVE: {
+			ENG: "Alien's",
+			SWE: "Utomjordings",
+		},
+		ROLE_ALIEN_PLURAL: {
+			ENG: "Aliens",
+			SWE: "Utomjordingar",
+		},
+		ROLE_ALIEN_PLURAL_DEFINITE: {
+			ENG: "the Aliens",
+			SWE: "Utomjordingarna",
+		},
+		ROLE_ALIEN_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Aliens'",
+			SWE: "Utomjordingarnas",
+		},
+		ROLE_ALIEN_PLURAL_GENITIVE: {
+			ENG: "Aliens'",
+			SWE: "Utomjordingars",
+		},
+		ROLE_ALPHAWOLF: {
+			ENG: "Alpha Wolf",
+			SWE: "Alfavarg",
+		},
+		ROLE_ALPHAWOLF_DEFINITE: {
+			ENG: "the Alpha Wolf",
+			SWE: "Alfavargen",
+		},
+		ROLE_ALPHAWOLF_DEFINITE_GENITIVE: {
+			ENG: "the Alpha Wolf's",
+			SWE: "Alfavargens",
+		},
+		ROLE_ALPHAWOLF_GENITIVE: {
+			ENG: "Alpha Wolf's",
+			SWE: "Alfavargs",
+		},
+		ROLE_ALPHAWOLF_PLURAL: {
+			ENG: "Alpha Wolves",
+			SWE: "Alfavargar",
+		},
+		ROLE_ALPHAWOLF_PLURAL_DEFINITE: {
+			ENG: "the Alpha Wolves",
+			SWE: "Alfavargarna",
+		},
+		ROLE_ALPHAWOLF_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Alpha Wolves'",
+			SWE: "Alfavargarnas",
+		},
+		ROLE_ALPHAWOLF_PLURAL_GENITIVE: {
+			ENG: "Alpha Wolves'",
+			SWE: "Alfavargars",
+		},
+		ROLE_APPRENTICEASSASSIN: {
+			ENG: "Apprentice Assassin",
+			SWE: "Lönnmördarnovis",
+		},
+		ROLE_APPRENTICEASSASSIN_DEFINITE: {
+			ENG: "the Apprentice Assassin",
+			SWE: "Lönnmördarnovisen",
+		},
+		ROLE_APPRENTICEASSASSIN_DEFINITE_GENITIVE: {
+			ENG: "the Apprentice Assassin's",
+			SWE: "Lönnmördarnovisens",
+		},
+		ROLE_APPRENTICEASSASSIN_GENITIVE: {
+			ENG: "Apprentice Assassin's",
+			SWE: "Lönnmördarnovis",
+		},
+		ROLE_APPRENTICEASSASSIN_PLURAL: {
+			ENG: "Apprentice Assassins",
+			SWE: "Lönnmördarnoviser",
+		},
+		ROLE_APPRENTICEASSASSIN_PLURAL_DEFINITE: {
+			ENG: "the Apprentice Assassins",
+			SWE: "Lönnmördarnoviserna",
+		},
+		ROLE_APPRENTICEASSASSIN_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Apprentice Assassins'",
+			SWE: "Lönnmördarnovisernas",
+		},
+		ROLE_APPRENTICEASSASSIN_PLURAL_GENITIVE: {
+			ENG: "Apprentice Assassins'",
+			SWE: "Lönnmördarnovisers",
+		},
+		ROLE_APPRENTICESEER: {
+			ENG: "Apprentice Seer",
+			SWE: "Siarlärling",
+		},
+		ROLE_APPRENTICESEER_DEFINITE: {
+			ENG: "the Apprentice Seer",
+			SWE: "Siarlärlingen",
+		},
+		ROLE_APPRENTICESEER_DEFINITE_GENITIVE: {
+			ENG: "the Apprentice Seer's",
+			SWE: "Siarlärlingens",
+		},
+		ROLE_APPRENTICESEER_GENITIVE: {
+			ENG: "Apprentice Seer's",
+			SWE: "Siarlärlings",
+		},
+		ROLE_APPRENTICESEER_PLURAL: {
+			ENG: "Apprentice Seers",
+			SWE: "Siarlärlingar",
+		},
+		ROLE_APPRENTICESEER_PLURAL_DEFINITE: {
+			ENG: "the Apprentice Seers",
+			SWE: "Siarlärlingarna",
+		},
+		ROLE_APPRENTICESEER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Apprentice Seers'",
+			SWE: "Siarlärlingarnas",
+		},
+		ROLE_APPRENTICESEER_PLURAL_GENITIVE: {
+			ENG: "Apprentice Seers'",
+			SWE: "Siarlärlingars",
+		},
+		ROLE_APPRENTICETANNER: {
+			ENG: "Apprentice Tanner",
+			SWE: "Garvargesäll",
+		},
+		ROLE_APPRENTICETANNER_DEFINITE: {
+			ENG: "the Apprentice Tanner",
+			SWE: "Garvargesällen",
+		},
+		ROLE_APPRENTICETANNER_DEFINITE_GENITIVE: {
+			ENG: "the Apprentice Tanner's",
+			SWE: "Garvargesällens",
+		},
+		ROLE_APPRENTICETANNER_GENITIVE: {
+			ENG: "Apprentice Tanner's",
+			SWE: "Garvargesälls",
+		},
+		ROLE_APPRENTICETANNER_PLURAL: {
+			ENG: "Apprentice Tanners",
+			SWE: "Garvargesäller",
+		},
+		ROLE_APPRENTICETANNER_PLURAL_DEFINITE: {
+			ENG: "the Apprentice Tanners",
+			SWE: "Garvargesällerna",
+		},
+		ROLE_APPRENTICETANNER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Apprentice Tanners'",
+			SWE: "Garvargesällernas",
+		},
+		ROLE_APPRENTICETANNER_PLURAL_GENITIVE: {
+			ENG: "Apprentice Tanners'",
+			SWE: "Garvargesällers",
+		},
+		ROLE_ASSASSIN: {
+			ENG: "Assassin",
+			SWE: "Lönnmördare",
+		},
+		ROLE_ASSASSIN_DEFINITE: {
+			ENG: "the Assassin",
+			SWE: "Lönnmördaren",
+		},
+		ROLE_ASSASSIN_DEFINITE_GENITIVE: {
+			ENG: "the Assassin's",
+			SWE: "Lönnmördarens",
+		},
+		ROLE_ASSASSIN_GENITIVE: {
+			ENG: "Assassin's",
+			SWE: "Lönnmördares",
+		},
+		ROLE_ASSASSIN_PLURAL: {
+			ENG: "Assassins",
+			SWE: "Lönnmördare",
+		},
+		ROLE_ASSASSIN_PLURAL_DEFINITE: {
+			ENG: "the Assassins",
+			SWE: "Lönnmördarna",
+		},
+		ROLE_ASSASSIN_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Assassins'",
+			SWE: "Lönnmördarnas",
+		},
+		ROLE_ASSASSIN_PLURAL_GENITIVE: {
+			ENG: "Assassins'",
+			SWE: "Lönnmördares",
+		},
+		ROLE_AURASEER: {
+			ENG: "Aura Seer",
+			SWE: "Auraläsare",
+		},
+		ROLE_AURASEER_DEFINITE: {
+			ENG: "the Aura Seer",
+			SWE: "Auraläsaren",
+		},
+		ROLE_AURASEER_DEFINITE_GENITIVE: {
+			ENG: "the Aura Seer's",
+			SWE: "Auraläsarens",
+		},
+		ROLE_AURASEER_GENITIVE: {
+			ENG: "Aura Seer's",
+			SWE: "Auraläsares",
+		},
+		ROLE_AURASEER_PLURAL: {
+			ENG: "Aura Seers",
+			SWE: "Auraläsare",
+		},
+		ROLE_AURASEER_PLURAL_DEFINITE: {
+			ENG: "the Aura Seers",
+			SWE: "Auraläsarna",
+		},
+		ROLE_AURASEER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Aura Seers'",
+			SWE: "Auraläsarnas",
+		},
+		ROLE_AURASEER_PLURAL_GENITIVE: {
+			ENG: "Aura Seers'",
+			SWE: "Auraläsares",
+		},
+		ROLE_BEHOLDER: {
+			ENG: "Beholder",
+			SWE: "Betraktare",
+		},
+		ROLE_BEHOLDER_DEFINITE: {
+			ENG: "the Beholder",
+			SWE: "Betraktaren",
+		},
+		ROLE_BEHOLDER_DEFINITE_GENITIVE: {
+			ENG: "the Beholder's",
+			SWE: "Betraktarens",
+		},
+		ROLE_BEHOLDER_GENITIVE: {
+			ENG: "Beholder's",
+			SWE: "Betraktares",
+		},
+		ROLE_BEHOLDER_PLURAL: {
+			ENG: "Beholders",
+			SWE: "Betraktare",
+		},
+		ROLE_BEHOLDER_PLURAL_DEFINITE: {
+			ENG: "the Beholders",
+			SWE: "Betraktarna",
+		},
+		ROLE_BEHOLDER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Beholders'",
+			SWE: "Betraktarnas",
+		},
+		ROLE_BEHOLDER_PLURAL_GENITIVE: {
+			ENG: "Beholders'",
+			SWE: "Betraktares",
+		},
+		ROLE_BLOB: {
+			ENG: "Blob",
+			SWE: "Blobb",
+		},
+		ROLE_BLOB_DEFINITE: {
+			ENG: "the Blob",
+			SWE: "Blobben",
+		},
+		ROLE_BLOB_DEFINITE_GENITIVE: {
+			ENG: "the Blob's",
+			SWE: "Blobbens",
+		},
+		ROLE_BLOB_GENITIVE: {
+			ENG: "Blob's",
+			SWE: "Blobbs",
+		},
+		ROLE_BLOB_PLURAL: {
+			ENG: "Blobs",
+			SWE: "Blobbar",
+		},
+		ROLE_BLOB_PLURAL_DEFINITE: {
+			ENG: "the Blobs",
+			SWE: "Blobbarna",
+		},
+		ROLE_BLOB_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Blobs'",
+			SWE: "Blobbarnas",
+		},
+		ROLE_BLOB_PLURAL_GENITIVE: {
+			ENG: "Blobs'",
+			SWE: "Blobbars",
+		},
+		ROLE_BODYGUARD: {
+			ENG: "Bodyguard",
+			SWE: "Livvakt",
+		},
+		ROLE_BODYGUARD_DEFINITE: {
+			ENG: "the Bodyguard",
+			SWE: "Livvakten",
+		},
+		ROLE_BODYGUARD_DEFINITE_GENITIVE: {
+			ENG: "the Bodyguard's",
+			SWE: "Livvaktens",
+		},
+		ROLE_BODYGUARD_GENITIVE: {
+			ENG: "Bodyguard's",
+			SWE: "Livvakts",
+		},
+		ROLE_BODYGUARD_PLURAL: {
+			ENG: "Bodyguards",
+			SWE: "Livvakter",
+		},
+		ROLE_BODYGUARD_PLURAL_DEFINITE: {
+			ENG: "the Bodyguards",
+			SWE: "Livvakterna",
+		},
+		ROLE_BODYGUARD_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Bodyguards'",
+			SWE: "Livvakternas",
+		},
+		ROLE_BODYGUARD_PLURAL_GENITIVE: {
+			ENG: "Bodyguards'",
+			SWE: "Livvakters",
+		},
+		ROLE_BODYSNATCHER: {
+			ENG: "Body Snatcher",
+			SWE: "Infiltratör",
+		},
+		ROLE_BODYSNATCHER_DEFINITE: {
+			ENG: "the Body Snatcher",
+			SWE: "Infiltratören",
+		},
+		ROLE_BODYSNATCHER_DEFINITE_GENITIVE: {
+			ENG: "the Body Snatcher's",
+			SWE: "Infiltratörens",
+		},
+		ROLE_BODYSNATCHER_GENITIVE: {
+			ENG: "Body Snatcher's",
+			SWE: "Infiltratörs",
+		},
+		ROLE_BODYSNATCHER_PLURAL: {
+			ENG: "Body Snatchers",
+			SWE: "Infiltratörer",
+		},
+		ROLE_BODYSNATCHER_PLURAL_DEFINITE: {
+			ENG: "the Body Snatchers",
+			SWE: "Infiltratörerna",
+		},
+		ROLE_BODYSNATCHER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Body Snatchers'",
+			SWE: "Infiltratörernas",
+		},
+		ROLE_BODYSNATCHER_PLURAL_GENITIVE: {
+			ENG: "Body Snatchers'",
+			SWE: "Infiltratörers",
+		},
+		ROLE_COPYCAT: {
+			ENG: "Copycat",
+			SWE: "Imitatör",
+		},
+		ROLE_COPYCAT_DEFINITE: {
+			ENG: "the Copycat",
+			SWE: "Imitatören",
+		},
+		ROLE_COPYCAT_DEFINITE_GENITIVE: {
+			ENG: "the Copycat's",
+			SWE: "Imitatörens",
+		},
+		ROLE_COPYCAT_GENITIVE: {
+			ENG: "Copycat's",
+			SWE: "Imitatörs",
+		},
+		ROLE_COPYCAT_PLURAL: {
+			ENG: "Copycats",
+			SWE: "Imitatörer",
+		},
+		ROLE_COPYCAT_PLURAL_DEFINITE: {
+			ENG: "the Copycats",
+			SWE: "Imitatörerna",
+		},
+		ROLE_COPYCAT_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Copycats'",
+			SWE: "Imitatörernas",
+		},
+		ROLE_COPYCAT_PLURAL_GENITIVE: {
+			ENG: "Copycats'",
+			SWE: "Imitatörers",
+		},
+		ROLE_COUNT: {
+			ENG: "Count",
+			SWE: "Greve",
+		},
+		ROLE_COUNT_DEFINITE: {
+			ENG: "the Count",
+			SWE: "Greven",
+		},
+		ROLE_COUNT_DEFINITE_GENITIVE: {
+			ENG: "the Count's",
+			SWE: "Grevens",
+		},
+		ROLE_COUNT_GENITIVE: {
+			ENG: "Count's",
+			SWE: "Greves",
+		},
+		ROLE_COUNT_PLURAL: {
+			ENG: "Counts",
+			SWE: "Grevar",
+		},
+		ROLE_COUNT_PLURAL_DEFINITE: {
+			ENG: "the Counts",
+			SWE: "Grevarna",
+		},
+		ROLE_COUNT_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Counts'",
+			SWE: "Grevarnas",
+		},
+		ROLE_COUNT_PLURAL_GENITIVE: {
+			ENG: "Counts'",
+			SWE: "Grevars",
+		},
+		ROLE_COW: {
+			ENG: "Cow",
+			SWE: "Ko",
+		},
+		ROLE_COW_DEFINITE: {
+			ENG: "the Cow",
+			SWE: "Kon",
+		},
+		ROLE_COW_DEFINITE_GENITIVE: {
+			ENG: "the Cow's",
+			SWE: "Kons",
+		},
+		ROLE_COW_GENITIVE: {
+			ENG: "Cow's",
+			SWE: "Kos",
+		},
+		ROLE_COW_PLURAL: {
+			ENG: "Cows",
+			SWE: "Kor",
+		},
+		ROLE_COW_PLURAL_DEFINITE: {
+			ENG: "the Cows",
+			SWE: "Korna",
+		},
+		ROLE_COW_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Cows'",
+			SWE: "Kornas",
+		},
+		ROLE_COW_PLURAL_GENITIVE: {
+			ENG: "Cows'",
+			SWE: "Kors",
+		},
+		ROLE_CUPID: {
+			ENG: "Cupid",
+			SWE: "Amor",
+		},
+		ROLE_CUPID_DEFINITE: {
+			ENG: "Cupid",
+			SWE: "Amor",
+		},
+		ROLE_CUPID_DEFINITE_GENITIVE: {
+			ENG: "Cupid's",
+			SWE: "Amors",
+		},
+		ROLE_CUPID_GENITIVE: {
+			ENG: "Cupid's",
+			SWE: "Amors",
+		},
+		ROLE_CUPID_PLURAL: {
+			ENG: "Cupids",
+			SWE: "Amorer",
+		},
+		ROLE_CUPID_PLURAL_DEFINITE: {
+			ENG: "the Cupids",
+			SWE: "Amorerna",
+		},
+		ROLE_CUPID_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Cupids'",
+			SWE: "Amorernas",
+		},
+		ROLE_CUPID_PLURAL_GENITIVE: {
+			ENG: "Cupids'",
+			SWE: "Amorers",
+		},
+		ROLE_CURATOR: {
+			ENG: "Curator",
+			SWE: "Kurator",
+		},
+		ROLE_CURATOR_DEFINITE: {
+			ENG: "the Curator",
+			SWE: "Kuratorn",
+		},
+		ROLE_CURATOR_DEFINITE_GENITIVE: {
+			ENG: "the Curator's",
+			SWE: "Kuratorns",
+		},
+		ROLE_CURATOR_GENITIVE: {
+			ENG: "Curator's",
+			SWE: "Kurators",
+		},
+		ROLE_CURATOR_PLURAL: {
+			ENG: "Curators",
+			SWE: "Kuratorer",
+		},
+		ROLE_CURATOR_PLURAL_DEFINITE: {
+			ENG: "the Curators",
+			SWE: "Kuratorerna",
+		},
+		ROLE_CURATOR_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Curators'",
+			SWE: "Kuratorernas",
+		},
+		ROLE_CURATOR_PLURAL_GENITIVE: {
+			ENG: "Curators'",
+			SWE: "Kuratorers",
+		},
+		ROLE_CURSED: {
+			ENG: "Cursed",
+			SWE: "Fördömd",
+		},
+		ROLE_CURSED_DEFINITE: {
+			ENG: "the Cursed",
+			SWE: "den Fördömda",
+		},
+		ROLE_CURSED_DEFINITE_GENITIVE: {
+			ENG: "the Cursed's",
+			SWE: "den Fördömdas",
+		},
+		ROLE_CURSED_GENITIVE: {
+			ENG: "Cursed's",
+			SWE: "Fördömds",
+		},
+		ROLE_CURSED_PLURAL: {
+			ENG: "Cursed",
+			SWE: "Fördömda",
+		},
+		ROLE_CURSED_PLURAL_DEFINITE: {
+			ENG: "the Cursed",
+			SWE: "de Fördömda",
+		},
+		ROLE_CURSED_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Cursed's",
+			SWE: "de Fördömdas",
+		},
+		ROLE_CURSED_PLURAL_GENITIVE: {
+			ENG: "Cursed's",
+			SWE: "Fördömdas",
+		},
+		ROLE_DISEASED: {
+			ENG: "Diseased",
+			SWE: "Smittad",
+		},
+		ROLE_DISEASED_DEFINITE: {
+			ENG: "the Diseased",
+			SWE: "den Smittade",
+		},
+		ROLE_DISEASED_DEFINITE_GENITIVE: {
+			ENG: "the Diseased's",
+			SWE: "den Smittades",
+		},
+		ROLE_DISEASED_GENITIVE: {
+			ENG: "Diseased's",
+			SWE: "Smittads",
+		},
+		ROLE_DISEASED_PLURAL: {
+			ENG: "Diseased",
+			SWE: "Smittade",
+		},
+		ROLE_DISEASED_PLURAL_DEFINITE: {
+			ENG: "the Diseased",
+			SWE: "de Smittade",
+		},
+		ROLE_DISEASED_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Diseased's",
+			SWE: "de Smittades",
+		},
+		ROLE_DISEASED_PLURAL_GENITIVE: {
+			ENG: "Diseased's",
+			SWE: "Smittades",
+		},
+		ROLE_DOPPELGANGER: {
+			ENG: "Doppelganger",
+			SWE: "Dubbelgångare",
+		},
+		ROLE_DOPPELGANGER_DEFINITE: {
+			ENG: "the Doppelganger",
+			SWE: "Dubbelgångaren",
+		},
+		ROLE_DOPPELGANGER_DEFINITE_GENITIVE: {
+			ENG: "the Doppelganger's",
+			SWE: "Dubbelgångarens",
+		},
+		ROLE_DOPPELGANGER_GENITIVE: {
+			ENG: "Doppelganger's",
+			SWE: "Dubbelgångares",
+		},
+		ROLE_DOPPELGANGER_PLURAL: {
+			ENG: "Doppelgangers",
+			SWE: "Dubbelgångare",
+		},
+		ROLE_DOPPELGANGER_PLURAL_DEFINITE: {
+			ENG: "the Doppelgangers",
+			SWE: "Dubbelgångarna",
+		},
+		ROLE_DOPPELGANGER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Doppelgangers'",
+			SWE: "Dubbelgångarnas",
+		},
+		ROLE_DOPPELGANGER_PLURAL_GENITIVE: {
+			ENG: "Doppelgangers'",
+			SWE: "Dubbelgångares",
+		},
+		ROLE_DREAMWOLF: {
+			ENG: "Dream Wolf",
+			SWE: "Drömvarg",
+		},
+		ROLE_DREAMWOLF_DEFINITE: {
+			ENG: "the Dream Wolf",
+			SWE: "Drömvargen",
+		},
+		ROLE_DREAMWOLF_DEFINITE_GENITIVE: {
+			ENG: "the Dream Wolf's",
+			SWE: "Drömvargens",
+		},
+		ROLE_DREAMWOLF_GENITIVE: {
+			ENG: "Dream Wolf's",
+			SWE: "Drömvargs",
+		},
+		ROLE_DREAMWOLF_PLURAL: {
+			ENG: "Dream Wolves",
+			SWE: "Drömvargar",
+		},
+		ROLE_DREAMWOLF_PLURAL_DEFINITE: {
+			ENG: "the Dream Wolves",
+			SWE: "Drömvargarna",
+		},
+		ROLE_DREAMWOLF_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Dream Wolves'",
+			SWE: "Drömvargarnas",
+		},
+		ROLE_DREAMWOLF_PLURAL_GENITIVE: {
+			ENG: "Dream Wolves'",
+			SWE: "Drömvargars",
+		},
+		ROLE_DRUNK: {
+			ENG: "Drunk",
+			SWE: "Berusad",
+		},
+		ROLE_DRUNK_DEFINITE: {
+			ENG: "the Drunk",
+			SWE: "den Berusade",
+		},
+		ROLE_DRUNK_DEFINITE_GENITIVE: {
+			ENG: "the Drunk's",
+			SWE: "den Berusades",
+		},
+		ROLE_DRUNK_GENITIVE: {
+			ENG: "Drunk's",
+			SWE: "Berusads",
+		},
+		ROLE_DRUNK_PLURAL: {
+			ENG: "Drunks",
+			SWE: "Berusade",
+		},
+		ROLE_DRUNK_PLURAL_DEFINITE: {
+			ENG: "the Drunks",
+			SWE: "de Berusade",
+		},
+		ROLE_DRUNK_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Drunks'",
+			SWE: "de Berusades",
+		},
+		ROLE_DRUNK_PLURAL_GENITIVE: {
+			ENG: "Drunks'",
+			SWE: "Berusades",
+		},
+		ROLE_EMPATH: {
+			ENG: "Empath",
+			SWE: "Empat",
+		},
+		ROLE_EMPATH_DEFINITE: {
+			ENG: "the Empath",
+			SWE: "Empaten",
+		},
+		ROLE_EMPATH_DEFINITE_GENITIVE: {
+			ENG: "the Empath's",
+			SWE: "Empatens",
+		},
+		ROLE_EMPATH_GENITIVE: {
+			ENG: "Empath's",
+			SWE: "Empats",
+		},
+		ROLE_EMPATH_PLURAL: {
+			ENG: "Empaths",
+			SWE: "Empater",
+		},
+		ROLE_EMPATH_PLURAL_DEFINITE: {
+			ENG: "the Empaths",
+			SWE: "Empaterna",
+		},
+		ROLE_EMPATH_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Empaths'",
+			SWE: "Empaternas",
+		},
+		ROLE_EMPATH_PLURAL_GENITIVE: {
+			ENG: "Empaths'",
+			SWE: "Empaters",
+		},
+		ROLE_EXPOSER: {
+			ENG: "Exposer",
+			SWE: "Angivare",
+		},
+		ROLE_EXPOSER_DEFINITE: {
+			ENG: "the Exposer",
+			SWE: "Angivaren",
+		},
+		ROLE_EXPOSER_DEFINITE_GENITIVE: {
+			ENG: "the Exposer's",
+			SWE: "Angivarens",
+		},
+		ROLE_EXPOSER_GENITIVE: {
+			ENG: "Exposer's",
+			SWE: "Angivares",
+		},
+		ROLE_EXPOSER_PLURAL: {
+			ENG: "Exposers",
+			SWE: "Angivare",
+		},
+		ROLE_EXPOSER_PLURAL_DEFINITE: {
+			ENG: "the Exposers",
+			SWE: "Angivarna",
+		},
+		ROLE_EXPOSER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Exposers'",
+			SWE: "Angivarnas",
+		},
+		ROLE_EXPOSER_PLURAL_GENITIVE: {
+			ENG: "Exposers'",
+			SWE: "Angivares",
+		},
+		ROLE_FEUDINGALIENS: {
+			ENG: "Groob and Zerb",
+			SWE: "Groob och Zerb",
+		},
+		ROLE_FEUDINGALIENS_DEFINITE: {
+			ENG: "Groob and Zerb",
+			SWE: "Groob och Zerb",
+		},
+		ROLE_FEUDINGALIENS_DEFINITE_GENITIVE: {
+			ENG: "Groob and Zerb's",
+			SWE: "Groobs och Zerbs",
+		},
+		ROLE_FEUDINGALIENS_GENITIVE: {
+			ENG: "Groob and Zerb's",
+			SWE: "Groobs och Zerbs",
+		},
+		ROLE_FEUDINGALIENS_PLURAL: {
+			ENG: "Groob and Zerb",
+			SWE: "Groob och Zerb",
+		},
+		ROLE_FEUDINGALIENS_PLURAL_DEFINITE: {
+			ENG: "Groob and Zerb",
+			SWE: "Groob och Zerb",
+		},
+		ROLE_FEUDINGALIENS_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "Groob and Zerb's",
+			SWE: "Groobs och Zerbs",
+		},
+		ROLE_FEUDINGALIENS_PLURAL_GENITIVE: {
+			ENG: "Groob and Zerb's",
+			SWE: "Groobs och Zerbs",
+		},
+		ROLE_GREMLIN: {
+			ENG: "Gremlin",
+			SWE: "Troll",
+		},
+		ROLE_GREMLIN_DEFINITE: {
+			ENG: "the Gremlin",
+			SWE: "Trollet",
+		},
+		ROLE_GREMLIN_DEFINITE_GENITIVE: {
+			ENG: "the Gremlin's",
+			SWE: "Trollets",
+		},
+		ROLE_GREMLIN_GENITIVE: {
+			ENG: "Gremlin's",
+			SWE: "Trolls",
+		},
+		ROLE_GREMLIN_PLURAL: {
+			ENG: "Gremlins",
+			SWE: "Troll",
+		},
+		ROLE_GREMLIN_PLURAL_DEFINITE: {
+			ENG: "the Gremlins",
+			SWE: "Trollen",
+		},
+		ROLE_GREMLIN_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Gremlins'",
+			SWE: "Trollens",
+		},
+		ROLE_GREMLIN_PLURAL_GENITIVE: {
+			ENG: "Gremlins'",
+			SWE: "Trolls",
+		},
+		ROLE_HUNTER: {
+			ENG: "Hunter",
+			SWE: "Jägare",
+		},
+		ROLE_HUNTER_DEFINITE: {
+			ENG: "the Hunter",
+			SWE: "Jägaren",
+		},
+		ROLE_HUNTER_DEFINITE_GENITIVE: {
+			ENG: "the Hunter's",
+			SWE: "Jägarens",
+		},
+		ROLE_HUNTER_GENITIVE: {
+			ENG: "Hunter's",
+			SWE: "Jägares",
+		},
+		ROLE_HUNTER_PLURAL: {
+			ENG: "Hunters",
+			SWE: "Jägare",
+		},
+		ROLE_HUNTER_PLURAL_DEFINITE: {
+			ENG: "the Hunters",
+			SWE: "Jägarna",
+		},
+		ROLE_HUNTER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Hunters'",
+			SWE: "Jägarnas",
+		},
+		ROLE_HUNTER_PLURAL_GENITIVE: {
+			ENG: "Hunters'",
+			SWE: "Jägares",
+		},
+		ROLE_INSOMNIAC: {
+			ENG: "Insomniac",
+			SWE: "Sömnlös",
+		},
+		ROLE_INSOMNIAC_DEFINITE: {
+			ENG: "the Insomniac",
+			SWE: "den Sömnlösa",
+		},
+		ROLE_INSOMNIAC_DEFINITE_GENITIVE: {
+			ENG: "the Insomniac's",
+			SWE: "den Sömnlösas",
+		},
+		ROLE_INSOMNIAC_GENITIVE: {
+			ENG: "Insomniac's",
+			SWE: "Sömnlöss",
+		},
+		ROLE_INSOMNIAC_PLURAL: {
+			ENG: "Insomniacs",
+			SWE: "Sömnlösa",
+		},
+		ROLE_INSOMNIAC_PLURAL_DEFINITE: {
+			ENG: "the Insomniacs",
+			SWE: "de Sömnlösa",
+		},
+		ROLE_INSOMNIAC_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Insomniacs'",
+			SWE: "de Sömnlösas",
+		},
+		ROLE_INSOMNIAC_PLURAL_GENITIVE: {
+			ENG: "Insomniacs'",
+			SWE: "Sömnlösas",
+		},
+		ROLE_INSTIGATOR: {
+			ENG: "Instigator",
+			SWE: "Anstiftare",
+		},
+		ROLE_INSTIGATOR_DEFINITE: {
+			ENG: "the Instigator",
+			SWE: "Anstiftaren",
+		},
+		ROLE_INSTIGATOR_DEFINITE_GENITIVE: {
+			ENG: "the Instigator's",
+			SWE: "Anstiftarens",
+		},
+		ROLE_INSTIGATOR_GENITIVE: {
+			ENG: "Instigator's",
+			SWE: "Anstiftares",
+		},
+		ROLE_INSTIGATOR_PLURAL: {
+			ENG: "Instigators",
+			SWE: "Anstiftare",
+		},
+		ROLE_INSTIGATOR_PLURAL_DEFINITE: {
+			ENG: "the Instigators",
+			SWE: "Anstiftarna",
+		},
+		ROLE_INSTIGATOR_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Instigators'",
+			SWE: "Anstiftarnas",
+		},
+		ROLE_INSTIGATOR_PLURAL_GENITIVE: {
+			ENG: "Instigators'",
+			SWE: "Anstiftares",
+		},
+		ROLE_LEADER: {
+			ENG: "Leader",
+			SWE: "Borgmästare",
+		},
+		ROLE_LEADER_DEFINITE: {
+			ENG: "the Leader",
+			SWE: "Borgmästaren",
+		},
+		ROLE_LEADER_DEFINITE_GENITIVE: {
+			ENG: "the Leader's",
+			SWE: "Borgmästarens",
+		},
+		ROLE_LEADER_GENITIVE: {
+			ENG: "Leader's",
+			SWE: "Borgmästares",
+		},
+		ROLE_LEADER_PLURAL: {
+			ENG: "Leaders",
+			SWE: "Borgmästare",
+		},
+		ROLE_LEADER_PLURAL_DEFINITE: {
+			ENG: "the Leaders",
+			SWE: "Borgmästarna",
+		},
+		ROLE_LEADER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Leaders'",
+			SWE: "Borgmästarnas",
+		},
+		ROLE_LEADER_PLURAL_GENITIVE: {
+			ENG: "Leaders'",
+			SWE: "Borgmästares",
+		},
+		ROLE_MARKSMAN: {
+			ENG: "Marksman",
+			SWE: "Spejare",
+		},
+		ROLE_MARKSMAN_DEFINITE: {
+			ENG: "the Marksman",
+			SWE: "Spejaren",
+		},
+		ROLE_MARKSMAN_DEFINITE_GENITIVE: {
+			ENG: "the Marksman's",
+			SWE: "Spejarens",
+		},
+		ROLE_MARKSMAN_GENITIVE: {
+			ENG: "Marksman's",
+			SWE: "Spejares",
+		},
+		ROLE_MARKSMAN_PLURAL: {
+			ENG: "Marksmen",
+			SWE: "Spejare",
+		},
+		ROLE_MARKSMAN_PLURAL_DEFINITE: {
+			ENG: "the Marksmen",
+			SWE: "Spejarna",
+		},
+		ROLE_MARKSMAN_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Marksmen's",
+			SWE: "Spejarnas",
+		},
+		ROLE_MARKSMAN_PLURAL_GENITIVE: {
+			ENG: "Marksmen's",
+			SWE: "Spejares",
+		},
+		ROLE_MASON: {
+			ENG: "Mason",
+			SWE: "Frimurare",
+		},
+		ROLE_MASON_DEFINITE: {
+			ENG: "the Mason",
+			SWE: "Frimuraren",
+		},
+		ROLE_MASON_DEFINITE_GENITIVE: {
+			ENG: "the Mason's",
+			SWE: "Frimurarens",
+		},
+		ROLE_MASON_GENITIVE: {
+			ENG: "Mason's",
+			SWE: "Frimurares",
+		},
+		ROLE_MASON_PLURAL: {
+			ENG: "Masons",
+			SWE: "Frimurare",
+		},
+		ROLE_MASON_PLURAL_DEFINITE: {
+			ENG: "the Masons",
+			SWE: "Frimurarna",
+		},
+		ROLE_MASON_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Masons'",
+			SWE: "Frimurarnas",
+		},
+		ROLE_MASON_PLURAL_GENITIVE: {
+			ENG: "Masons'",
+			SWE: "Frimurares",
+		},
+		ROLE_MASTER: {
+			ENG: "Master",
+			SWE: "Mästare",
+		},
+		ROLE_MASTER_DEFINITE: {
+			ENG: "the Master",
+			SWE: "Mästaren",
+		},
+		ROLE_MASTER_DEFINITE_GENITIVE: {
+			ENG: "the Master's",
+			SWE: "Mästarens",
+		},
+		ROLE_MASTER_GENITIVE: {
+			ENG: "Master's",
+			SWE: "Mästares",
+		},
+		ROLE_MASTER_PLURAL: {
+			ENG: "Masters",
+			SWE: "Mästare",
+		},
+		ROLE_MASTER_PLURAL_DEFINITE: {
+			ENG: "the Masters",
+			SWE: "Mästarna",
+		},
+		ROLE_MASTER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Masters'",
+			SWE: "Mästarnas",
+		},
+		ROLE_MASTER_PLURAL_GENITIVE: {
+			ENG: "Masters'",
+			SWE: "Mästares",
+		},
+		ROLE_MINION: {
+			ENG: "Minion",
+			SWE: "Underhuggare",
+		},
+		ROLE_MINION_DEFINITE: {
+			ENG: "the Minion",
+			SWE: "Underhuggaren",
+		},
+		ROLE_MINION_DEFINITE_GENITIVE: {
+			ENG: "the Minion's",
+			SWE: "Underhuggarens",
+		},
+		ROLE_MINION_GENITIVE: {
+			ENG: "Minion's",
+			SWE: "Underhuggares",
+		},
+		ROLE_MINION_PLURAL: {
+			ENG: "Minions",
+			SWE: "Underhuggare",
+		},
+		ROLE_MINION_PLURAL_DEFINITE: {
+			ENG: "the Minions",
+			SWE: "Underhuggarna",
+		},
+		ROLE_MINION_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Minions'",
+			SWE: "Underhuggarnas",
+		},
+		ROLE_MINION_PLURAL_GENITIVE: {
+			ENG: "Minions'",
+			SWE: "Underhuggares",
+		},
+		ROLE_MORTICIAN: {
+			ENG: "Mortician",
+			SWE: "Obducent",
+		},
+		ROLE_MORTICIAN_DEFINITE: {
+			ENG: "the Mortician",
+			SWE: "Obducenten",
+		},
+		ROLE_MORTICIAN_DEFINITE_GENITIVE: {
+			ENG: "the Mortician's",
+			SWE: "Obducentens",
+		},
+		ROLE_MORTICIAN_GENITIVE: {
+			ENG: "Mortician's",
+			SWE: "Obducents",
+		},
+		ROLE_MORTICIAN_PLURAL: {
+			ENG: "Morticians",
+			SWE: "Obducenter",
+		},
+		ROLE_MORTICIAN_PLURAL_DEFINITE: {
+			ENG: "the Morticians",
+			SWE: "Obducenterna",
+		},
+		ROLE_MORTICIAN_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Morticians'",
+			SWE: "Obducenternas",
+		},
+		ROLE_MORTICIAN_PLURAL_GENITIVE: {
+			ENG: "Morticians'",
+			SWE: "Obducenters",
+		},
+		ROLE_MYSTICWOLF: {
+			ENG: "Mystic Wolf",
+			SWE: "Siarvarg",
+		},
+		ROLE_MYSTICWOLF_DEFINITE: {
+			ENG: "the Mystic Wolf",
+			SWE: "Siarvargen",
+		},
+		ROLE_MYSTICWOLF_DEFINITE_GENITIVE: {
+			ENG: "the Mystic Wolf's",
+			SWE: "Siarvargens",
+		},
+		ROLE_MYSTICWOLF_GENITIVE: {
+			ENG: "Mystic Wolf's",
+			SWE: "Siarvargs",
+		},
+		ROLE_MYSTICWOLF_PLURAL: {
+			ENG: "Mystic Wolves",
+			SWE: "Siarvargar",
+		},
+		ROLE_MYSTICWOLF_PLURAL_DEFINITE: {
+			ENG: "the Mystic Wolves",
+			SWE: "Siarvargarna",
+		},
+		ROLE_MYSTICWOLF_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Mystic Wolves'",
+			SWE: "Siarvargarnas",
+		},
+		ROLE_MYSTICWOLF_PLURAL_GENITIVE: {
+			ENG: "Mystic Wolves'",
+			SWE: "Siarvargars",
+		},
+		ROLE_NOSTRADAMUS: {
+			ENG: "Nostradamus",
+			SWE: "Profet",
+		},
+		ROLE_NOSTRADAMUS_DEFINITE: {
+			ENG: "Nostradamus",
+			SWE: "Profeten",
+		},
+		ROLE_NOSTRADAMUS_DEFINITE_GENITIVE: {
+			ENG: "Nostradamus'",
+			SWE: "Profetens",
+		},
+		ROLE_NOSTRADAMUS_GENITIVE: {
+			ENG: "Nostradamus'",
+			SWE: "Profets",
+		},
+		ROLE_NOSTRADAMUS_PLURAL: {
+			ENG: "Nostradamuses",
+			SWE: "Profeter",
+		},
+		ROLE_NOSTRADAMUS_PLURAL_DEFINITE: {
+			ENG: "the Nostradamuses",
+			SWE: "Profeterna",
+		},
+		ROLE_NOSTRADAMUS_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Nostradamuses'",
+			SWE: "Profeternas",
+		},
+		ROLE_NOSTRADAMUS_PLURAL_GENITIVE: {
+			ENG: "Nostradamuses'",
+			SWE: "Profeters",
+		},
+		ROLE_ORACLE: {
+			ENG: "Oracle",
+			SWE: "Orakel",
+		},
+		ROLE_ORACLE_DEFINITE: {
+			ENG: "the Oracle",
+			SWE: "Oraklet",
+		},
+		ROLE_ORACLE_DEFINITE_GENITIVE: {
+			ENG: "the Oracle's",
+			SWE: "Oraklets",
+		},
+		ROLE_ORACLE_GENITIVE: {
+			ENG: "Oracle's",
+			SWE: "Orakels",
+		},
+		ROLE_ORACLE_PLURAL: {
+			ENG: "Oracles",
+			SWE: "Orakel",
+		},
+		ROLE_ORACLE_PLURAL_DEFINITE: {
+			ENG: "the Oracles",
+			SWE: "Oraklen",
+		},
+		ROLE_ORACLE_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Oracles'",
+			SWE: "Oraklens",
+		},
+		ROLE_ORACLE_PLURAL_GENITIVE: {
+			ENG: "Oracles'",
+			SWE: "Orakels",
+		},
+		ROLE_PARANORMALINVESTIGATOR: {
+			ENG: "Paranormal Investigator",
+			SWE: "Spökjägare",
+		},
+		ROLE_PARANORMALINVESTIGATOR_DEFINITE: {
+			ENG: "the Paranormal Investigator",
+			SWE: "Spökjägaren",
+		},
+		ROLE_PARANORMALINVESTIGATOR_DEFINITE_GENITIVE: {
+			ENG: "the Paranormal Investigator's",
+			SWE: "Spökjägarens",
+		},
+		ROLE_PARANORMALINVESTIGATOR_GENITIVE: {
+			ENG: "Paranormal Investigator's",
+			SWE: "Spökjägares",
+		},
+		ROLE_PARANORMALINVESTIGATOR_PLURAL: {
+			ENG: "Paranormal Investigators",
+			SWE: "Spökjägare",
+		},
+		ROLE_PARANORMALINVESTIGATOR_PLURAL_DEFINITE: {
+			ENG: "the Paranormal Investigators",
+			SWE: "Spökjägarna",
+		},
+		ROLE_PARANORMALINVESTIGATOR_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Paranormal Investigators'",
+			SWE: "Spökjägarnas",
+		},
+		ROLE_PARANORMALINVESTIGATOR_PLURAL_GENITIVE: {
+			ENG: "Paranormal Investigators'",
+			SWE: "Spökjägares",
+		},
+		ROLE_PICKPOCKET: {
+			ENG: "Pickpocket",
+			SWE: "Ficktjuv",
+		},
+		ROLE_PICKPOCKET_DEFINITE: {
+			ENG: "the Pickpocket",
+			SWE: "Ficktjuven",
+		},
+		ROLE_PICKPOCKET_DEFINITE_GENITIVE: {
+			ENG: "the Pickpocket's",
+			SWE: "Ficktjuvens",
+		},
+		ROLE_PICKPOCKET_GENITIVE: {
+			ENG: "Pickpocket's",
+			SWE: "Ficktjuvs",
+		},
+		ROLE_PICKPOCKET_PLURAL: {
+			ENG: "Pickpockets",
+			SWE: "Ficktjuvar",
+		},
+		ROLE_PICKPOCKET_PLURAL_DEFINITE: {
+			ENG: "the Pickpockets",
+			SWE: "Ficktjuvarna",
+		},
+		ROLE_PICKPOCKET_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Pickpockets'",
+			SWE: "Ficktjuvarnas",
+		},
+		ROLE_PICKPOCKET_PLURAL_GENITIVE: {
+			ENG: "Pickpockets'",
+			SWE: "Ficktjuvars",
+		},
+		ROLE_PRIEST: {
+			ENG: "Priest",
+			SWE: "Präst",
+		},
+		ROLE_PRIEST_DEFINITE: {
+			ENG: "the Priest",
+			SWE: "Prästen",
+		},
+		ROLE_PRIEST_DEFINITE_GENITIVE: {
+			ENG: "the Priest's",
+			SWE: "Prästens",
+		},
+		ROLE_PRIEST_GENITIVE: {
+			ENG: "Priest's",
+			SWE: "Prästs",
+		},
+		ROLE_PRIEST_PLURAL: {
+			ENG: "Priests",
+			SWE: "Präster",
+		},
+		ROLE_PRIEST_PLURAL_DEFINITE: {
+			ENG: "the Priests",
+			SWE: "Prästerna",
+		},
+		ROLE_PRIEST_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Priests'",
+			SWE: "Prästernas",
+		},
+		ROLE_PRIEST_PLURAL_GENITIVE: {
+			ENG: "Priests'",
+			SWE: "Prästers",
+		},
+		ROLE_PRINCE: {
+			ENG: "Prince",
+			SWE: "Prins",
+		},
+		ROLE_PRINCE_DEFINITE: {
+			ENG: "the Prince",
+			SWE: "Prinsen",
+		},
+		ROLE_PRINCE_DEFINITE_GENITIVE: {
+			ENG: "the Prince's",
+			SWE: "Prinsens",
+		},
+		ROLE_PRINCE_GENITIVE: {
+			ENG: "Prince's",
+			SWE: "Prinsens",
+		},
+		ROLE_PRINCE_PLURAL: {
+			ENG: "Princes",
+			SWE: "Prinsar",
+		},
+		ROLE_PRINCE_PLURAL_DEFINITE: {
+			ENG: "the Princes",
+			SWE: "Prinsarna",
+		},
+		ROLE_PRINCE_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Princes'",
+			SWE: "Prinsarnas",
+		},
+		ROLE_PRINCE_PLURAL_GENITIVE: {
+			ENG: "Princes'",
+			SWE: "Prinsars",
+		},
+		ROLE_PSYCHIC: {
+			ENG: "Psychic",
+			SWE: "Synsk",
+		},
+		ROLE_PSYCHIC_DEFINITE: {
+			ENG: "the Psychic",
+			SWE: "den Synska",
+		},
+		ROLE_PSYCHIC_DEFINITE_GENITIVE: {
+			ENG: "the Psychic's",
+			SWE: "den Synskas",
+		},
+		ROLE_PSYCHIC_GENITIVE: {
+			ENG: "Psychic's",
+			SWE: "Synsks",
+		},
+		ROLE_PSYCHIC_PLURAL: {
+			ENG: "Psychics",
+			SWE: "Synska",
+		},
+		ROLE_PSYCHIC_PLURAL_DEFINITE: {
+			ENG: "the Psychics",
+			SWE: "de Synska",
+		},
+		ROLE_PSYCHIC_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Psychics'",
+			SWE: "de Synskas",
+		},
+		ROLE_PSYCHIC_PLURAL_GENITIVE: {
+			ENG: "Psychics'",
+			SWE: "Synskas",
+		},
+		ROLE_RASCAL: {
+			ENG: "Rascal",
+			SWE: "Fifflare",
+		},
+		ROLE_RASCAL_DEFINITE: {
+			ENG: "the Rascal",
+			SWE: "Fifflaren",
+		},
+		ROLE_RASCAL_DEFINITE_GENITIVE: {
+			ENG: "the Rascal's",
+			SWE: "Fifflarens",
+		},
+		ROLE_RASCAL_GENITIVE: {
+			ENG: "Rascal's",
+			SWE: "Fifflares",
+		},
+		ROLE_RASCAL_PLURAL: {
+			ENG: "Rascals",
+			SWE: "Fifflare",
+		},
+		ROLE_RASCAL_PLURAL_DEFINITE: {
+			ENG: "the Rascals",
+			SWE: "Fifflarna",
+		},
+		ROLE_RASCAL_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Rascals'",
+			SWE: "Fifflarnas",
+		},
+		ROLE_RASCAL_PLURAL_GENITIVE: {
+			ENG: "Rascals'",
+			SWE: "Fifflares",
+		},
+		ROLE_RENFIELD: {
+			ENG: "Renfield",
+			SWE: "Renfield",
+		},
+		ROLE_RENFIELD_DEFINITE: {
+			ENG: "Renfield",
+			SWE: "Renfield",
+		},
+		ROLE_RENFIELD_DEFINITE_GENITIVE: {
+			ENG: "Renfield's",
+			SWE: "Renfields",
+		},
+		ROLE_RENFIELD_GENITIVE: {
+			ENG: "Renfield's",
+			SWE: "Renfields",
+		},
+		ROLE_RENFIELD_PLURAL: {
+			ENG: "Renfields",
+			SWE: "Renfields",
+		},
+		ROLE_RENFIELD_PLURAL_DEFINITE: {
+			ENG: "the Renfields",
+			SWE: "Renfields",
+		},
+		ROLE_RENFIELD_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Renfields'",
+			SWE: "Renfields",
+		},
+		ROLE_RENFIELD_PLURAL_GENITIVE: {
+			ENG: "Renfields'",
+			SWE: "Renfields",
+		},
+		ROLE_REVEALER: {
+			ENG: "Revealer",
+			SWE: "Astrolog",
+		},
+		ROLE_REVEALER_DEFINITE: {
+			ENG: "the Revealer",
+			SWE: "Astrologen",
+		},
+		ROLE_REVEALER_DEFINITE_GENITIVE: {
+			ENG: "the Revealer's",
+			SWE: "Astrologens",
+		},
+		ROLE_REVEALER_GENITIVE: {
+			ENG: "Revealer's",
+			SWE: "Astrologs",
+		},
+		ROLE_REVEALER_PLURAL: {
+			ENG: "Revealers",
+			SWE: "Astrologer",
+		},
+		ROLE_REVEALER_PLURAL_DEFINITE: {
+			ENG: "the Revealers",
+			SWE: "Astrologerna",
+		},
+		ROLE_REVEALER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Revealers'",
+			SWE: "Astrologernas",
+		},
+		ROLE_REVEALER_PLURAL_GENITIVE: {
+			ENG: "Revealers'",
+			SWE: "Astrologers",
+		},
+		ROLE_ROBBER: {
+			ENG: "Robber",
+			SWE: "Tjuv",
+		},
+		ROLE_ROBBER_DEFINITE: {
+			ENG: "the Robber",
+			SWE: "Tjuven",
+		},
+		ROLE_ROBBER_DEFINITE_GENITIVE: {
+			ENG: "the Robber's",
+			SWE: "Tjuvens",
+		},
+		ROLE_ROBBER_GENITIVE: {
+			ENG: "Robber's",
+			SWE: "Tjuvs",
+		},
+		ROLE_ROBBER_PLURAL: {
+			ENG: "Robbers",
+			SWE: "Tjuvar",
+		},
+		ROLE_ROBBER_PLURAL_DEFINITE: {
+			ENG: "the Robbers",
+			SWE: "Tjuvarna",
+		},
+		ROLE_ROBBER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Robbers'",
+			SWE: "Tjuvarnas",
+		},
+		ROLE_ROBBER_PLURAL_GENITIVE: {
+			ENG: "Robbers'",
+			SWE: "Tjuvars",
+		},
+		ROLE_SEER: {
+			ENG: "Seer",
+			SWE: "Siare",
+		},
+		ROLE_SEER_DEFINITE: {
+			ENG: "the Seer",
+			SWE: "Siaren",
+		},
+		ROLE_SEER_DEFINITE_GENITIVE: {
+			ENG: "the Seer's",
+			SWE: "Siarens",
+		},
+		ROLE_SEER_GENITIVE: {
+			ENG: "Seer's",
+			SWE: "Siares",
+		},
+		ROLE_SEER_PLURAL: {
+			ENG: "Seers",
+			SWE: "Siare",
+		},
+		ROLE_SEER_PLURAL_DEFINITE: {
+			ENG: "the Seers",
+			SWE: "Siarna",
+		},
+		ROLE_SEER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Seers'",
+			SWE: "Siarnas",
+		},
+		ROLE_SEER_PLURAL_GENITIVE: {
+			ENG: "Seers'",
+			SWE: "Siares",
+		},
+		ROLE_SENTINEL: {
+			ENG: "Sentinel",
+			SWE: "Väktare",
+		},
+		ROLE_SENTINEL_DEFINITE: {
+			ENG: "the Sentinel",
+			SWE: "Väktaren",
+		},
+		ROLE_SENTINEL_DEFINITE_GENITIVE: {
+			ENG: "the Sentinel's",
+			SWE: "Väktarens",
+		},
+		ROLE_SENTINEL_GENITIVE: {
+			ENG: "Sentinel's",
+			SWE: "Väktares",
+		},
+		ROLE_SENTINEL_PLURAL: {
+			ENG: "Sentinels",
+			SWE: "Väktare",
+		},
+		ROLE_SENTINEL_PLURAL_DEFINITE: {
+			ENG: "the Sentinels",
+			SWE: "Väktarna",
+		},
+		ROLE_SENTINEL_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Sentinels'",
+			SWE: "Väktarnas",
+		},
+		ROLE_SENTINEL_PLURAL_GENITIVE: {
+			ENG: "Sentinels'",
+			SWE: "Väktares",
+		},
+		ROLE_SQUIRE: {
+			ENG: "Squire",
+			SWE: "Lakej",
+		},
+		ROLE_SQUIRE_DEFINITE: {
+			ENG: "the Squire",
+			SWE: "Lakejen",
+		},
+		ROLE_SQUIRE_DEFINITE_GENITIVE: {
+			ENG: "the Squire's",
+			SWE: "Lakejens",
+		},
+		ROLE_SQUIRE_GENITIVE: {
+			ENG: "Squire's",
+			SWE: "Lakejs",
+		},
+		ROLE_SQUIRE_PLURAL: {
+			ENG: "Squires",
+			SWE: "Lakejer",
+		},
+		ROLE_SQUIRE_PLURAL_DEFINITE: {
+			ENG: "the Squires",
+			SWE: "Lakejerna",
+		},
+		ROLE_SQUIRE_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Squires'",
+			SWE: "Lakejernas",
+		},
+		ROLE_SQUIRE_PLURAL_GENITIVE: {
+			ENG: "Squires'",
+			SWE: "Lakejers",
+		},
+		ROLE_SYNTHETICALIEN: {
+			ENG: "Synthetic Alien",
+			SWE: "Syntet",
+		},
+		ROLE_SYNTHETICALIEN_DEFINITE: {
+			ENG: "the Synthetic Alien",
+			SWE: "Synteten",
+		},
+		ROLE_SYNTHETICALIEN_DEFINITE_GENITIVE: {
+			ENG: "the Synthetic Alien's",
+			SWE: "Syntetens",
+		},
+		ROLE_SYNTHETICALIEN_GENITIVE: {
+			ENG: "Synthetic Alien's",
+			SWE: "Syntets",
+		},
+		ROLE_SYNTHETICALIEN_PLURAL: {
+			ENG: "Synthetic Aliens",
+			SWE: "Synteter",
+		},
+		ROLE_SYNTHETICALIEN_PLURAL_DEFINITE: {
+			ENG: "the Synthetic Aliens",
+			SWE: "Synteterna",
+		},
+		ROLE_SYNTHETICALIEN_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Synthetic Aliens'",
+			SWE: "Synteternas",
+		},
+		ROLE_SYNTHETICALIEN_PLURAL_GENITIVE: {
+			ENG: "Synthetic Aliens'",
+			SWE: "Synteters",
+		},
+		ROLE_TANNER: {
+			ENG: "Tanner",
+			SWE: "Garvare",
+		},
+		ROLE_TANNER_DEFINITE: {
+			ENG: "the Tanner",
+			SWE: "Garvaren",
+		},
+		ROLE_TANNER_DEFINITE_GENITIVE: {
+			ENG: "the Tanner's",
+			SWE: "Garvarens",
+		},
+		ROLE_TANNER_GENITIVE: {
+			ENG: "Tanner's",
+			SWE: "Garvares",
+		},
+		ROLE_TANNER_PLURAL: {
+			ENG: "Tanners",
+			SWE: "Garvare",
+		},
+		ROLE_TANNER_PLURAL_DEFINITE: {
+			ENG: "the Tanners",
+			SWE: "Garvarna",
+		},
+		ROLE_TANNER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Tanners'",
+			SWE: "Garvarnas",
+		},
+		ROLE_TANNER_PLURAL_GENITIVE: {
+			ENG: "Tanners'",
+			SWE: "Garvares",
+		},
+		ROLE_THING: {
+			ENG: "Thing",
+			SWE: "Varelsen",
+		},
+		ROLE_THING_DEFINITE: {
+			ENG: "the Thing",
+			SWE: "Varelsen",
+		},
+		ROLE_THING_DEFINITE_GENITIVE: {
+			ENG: "the Thing's",
+			SWE: "Varelsens",
+		},
+		ROLE_THING_GENITIVE: {
+			ENG: "Thing's",
+			SWE: "Varelsens",
+		},
+		ROLE_THING_PLURAL: {
+			ENG: "Things",
+			SWE: "Varelser",
+		},
+		ROLE_THING_PLURAL_DEFINITE: {
+			ENG: "the Things",
+			SWE: "Varelserna",
+		},
+		ROLE_THING_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Things'",
+			SWE: "Varelsernas",
+		},
+		ROLE_THING_PLURAL_GENITIVE: {
+			ENG: "Things'",
+			SWE: "Varelsers",
+		},
+		ROLE_TROUBLEMAKER: {
+			ENG: "Troublemaker",
+			SWE: "Bråkmakare",
+		},
+		ROLE_TROUBLEMAKER_DEFINITE: {
+			ENG: "the Troublemaker",
+			SWE: "Bråkmakaren",
+		},
+		ROLE_TROUBLEMAKER_DEFINITE_GENITIVE: {
+			ENG: "the Troublemaker's",
+			SWE: "Bråkmakarens",
+		},
+		ROLE_TROUBLEMAKER_GENITIVE: {
+			ENG: "Troublemaker's",
+			SWE: "Bråkmakares",
+		},
+		ROLE_TROUBLEMAKER_PLURAL: {
+			ENG: "Troublemakers",
+			SWE: "Bråkmakare",
+		},
+		ROLE_TROUBLEMAKER_PLURAL_DEFINITE: {
+			ENG: "the Troublemakers",
+			SWE: "Bråkmakarna",
+		},
+		ROLE_TROUBLEMAKER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Troublemakers'",
+			SWE: "Bråkmakarnas",
+		},
+		ROLE_TROUBLEMAKER_PLURAL_GENITIVE: {
+			ENG: "Troublemakers'",
+			SWE: "Bråkmakares",
+		},
+		ROLE_VAMPIRE: {
+			ENG: "Vampire",
+			SWE: "Vampyr",
+		},
+		ROLE_VAMPIRE_DEFINITE: {
+			ENG: "the Vampire",
+			SWE: "Vampyren",
+		},
+		ROLE_VAMPIRE_DEFINITE_GENITIVE: {
+			ENG: "the Vampire's",
+			SWE: "Vampyrens",
+		},
+		ROLE_VAMPIRE_GENITIVE: {
+			ENG: "Vampire's",
+			SWE: "Vampyrs",
+		},
+		ROLE_VAMPIRE_PLURAL: {
+			ENG: "Vampires",
+			SWE: "Vampyrer",
+		},
+		ROLE_VAMPIRE_PLURAL_DEFINITE: {
+			ENG: "the Vampires",
+			SWE: "Vampyrerna",
+		},
+		ROLE_VAMPIRE_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Vampires'",
+			SWE: "Vampyrernas",
+		},
+		ROLE_VAMPIRE_PLURAL_GENITIVE: {
+			ENG: "Vampires'",
+			SWE: "Vampyrers",
+		},
+		ROLE_VILLAGEIDIOT: {
+			ENG: "Village Idiot",
+			SWE: "Byfåne",
+		},
+		ROLE_VILLAGEIDIOT_DEFINITE: {
+			ENG: "the Village Idiot",
+			SWE: "Byfånen",
+		},
+		ROLE_VILLAGEIDIOT_DEFINITE_GENITIVE: {
+			ENG: "the Village Idiot's",
+			SWE: "Byfånens",
+		},
+		ROLE_VILLAGEIDIOT_GENITIVE: {
+			ENG: "Village Idiot's",
+			SWE: "Byfånes",
+		},
+		ROLE_VILLAGEIDIOT_PLURAL: {
+			ENG: "Village Idiots",
+			SWE: "Byfånar",
+		},
+		ROLE_VILLAGEIDIOT_PLURAL_DEFINITE: {
+			ENG: "the Village Idiots",
+			SWE: "Byfånarna",
+		},
+		ROLE_VILLAGEIDIOT_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Village Idiots'",
+			SWE: "Byfånarnas",
+		},
+		ROLE_VILLAGEIDIOT_PLURAL_GENITIVE: {
+			ENG: "Village Idiots'",
+			SWE: "Byfånars",
+		},
+		ROLE_VILLAGER: {
+			ENG: "Villager",
+			SWE: "Bybo",
+		},
+		ROLE_VILLAGER_DEFINITE: {
+			ENG: "the Villager",
+			SWE: "Bybon",
+		},
+		ROLE_VILLAGER_DEFINITE_GENITIVE: {
+			ENG: "the Villager's",
+			SWE: "Bybons",
+		},
+		ROLE_VILLAGER_GENITIVE: {
+			ENG: "Villager's",
+			SWE: "Bybos",
+		},
+		ROLE_VILLAGER_PLURAL: {
+			ENG: "Villagers",
+			SWE: "Bybor",
+		},
+		ROLE_VILLAGER_PLURAL_DEFINITE: {
+			ENG: "the Villagers",
+			SWE: "Byborna",
+		},
+		ROLE_VILLAGER_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Villagers'",
+			SWE: "Bybornas",
+		},
+		ROLE_VILLAGER_PLURAL_GENITIVE: {
+			ENG: "Villagers'",
+			SWE: "Bybors",
+		},
+		ROLE_WEREWOLF: {
+			ENG: "Werewolf",
+			SWE: "Varulv",
+		},
+		ROLE_WEREWOLF_DEFINITE: {
+			ENG: "the Werewolf",
+			SWE: "Varulven",
+		},
+		ROLE_WEREWOLF_DEFINITE_GENITIVE: {
+			ENG: "the Werewolf's",
+			SWE: "Varulvens",
+		},
+		ROLE_WEREWOLF_GENITIVE: {
+			ENG: "Werewolf's",
+			SWE: "Varulvs",
+		},
+		ROLE_WEREWOLF_PLURAL: {
+			ENG: "Werewolves",
+			SWE: "Varulvar",
+		},
+		ROLE_WEREWOLF_PLURAL_DEFINITE: {
+			ENG: "the Werewolves",
+			SWE: "Varulvarna",
+		},
+		ROLE_WEREWOLF_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Werewolves'",
+			SWE: "Varulvarnas",
+		},
+		ROLE_WEREWOLF_PLURAL_GENITIVE: {
+			ENG: "Werewolves'",
+			SWE: "Varulvars",
+		},
+		ROLE_WITCH: {
+			ENG: "Witch",
+			SWE: "Häxa",
+		},
+		ROLE_WITCH_DEFINITE: {
+			ENG: "the Witch",
+			SWE: "Häxan",
+		},
+		ROLE_WITCH_DEFINITE_GENITIVE: {
+			ENG: "the Witch's",
+			SWE: "Häxans",
+		},
+		ROLE_WITCH_GENITIVE: {
+			ENG: "Witch's",
+			SWE: "Häxas",
+		},
+		ROLE_WITCH_PLURAL: {
+			ENG: "Witches",
+			SWE: "Häxor",
+		},
+		ROLE_WITCH_PLURAL_DEFINITE: {
+			ENG: "the Witches",
+			SWE: "Häxorna",
+		},
+		ROLE_WITCH_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Witches'",
+			SWE: "Häxornas",
+		},
+		ROLE_WITCH_PLURAL_GENITIVE: {
+			ENG: "Witches'",
+			SWE: "Häxors",
+		},
+		SPECIAL_ALL: {
+			ENG: "All players",
+			SWE: "Alla spelare",
+		},
+		SPECIAL_ALL_DEFINITE: {
+			ENG: "All players",
+			SWE: "Alla spelare",
+		},
+		SPECIAL_ALL_DEFINITE_GENITIVE: {
+			ENG: "All players'",
+			SWE: "Alla spelares",
+		},
+		SPECIAL_ALL_GENITIVE: {
+			ENG: "All players'",
+			SWE: "Alla spelares",
+		},
+		SPECIAL_ALL_PLURAL: {
+			ENG: "All players",
+			SWE: "Alla spelare",
+		},
+		SPECIAL_ALL_PLURAL_DEFINITE: {
+			ENG: "All players",
+			SWE: "Alla spelare",
+		},
+		SPECIAL_ALL_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "All players'",
+			SWE: "Alla spelares",
+		},
+		SPECIAL_ALL_PLURAL_GENITIVE: {
+			ENG: "All players'",
+			SWE: "Alla spelares",
+		},
+		SPECIAL_LOVERS: {
+			ENG: "Lovers",
+			SWE: "Förälskade",
+		},
+		SPECIAL_LOVERS_DEFINITE: {
+			ENG: "the Lovers",
+			SWE: "de Förälskade",
+		},
+		SPECIAL_LOVERS_DEFINITE_GENITIVE: {
+			ENG: "the Lovers'",
+			SWE: "de Förälskades",
+		},
+		SPECIAL_LOVERS_GENITIVE: {
+			ENG: "Lovers'",
+			SWE: "Förälskades",
+		},
+		SPECIAL_LOVERS_PLURAL: {
+			ENG: "Lovers",
+			SWE: "Förälskade",
+		},
+		SPECIAL_LOVERS_PLURAL_DEFINITE: {
+			ENG: "the Lovers",
+			SWE: "de Förälskade",
+		},
+		SPECIAL_LOVERS_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Lovers'",
+			SWE: "de Förälskades",
+		},
+		SPECIAL_LOVERS_PLURAL_GENITIVE: {
+			ENG: "Lovers'",
+			SWE: "Förälskades",
+		},
+		TEAM_ALIEN: {
+			ENG: "Alien",
+			SWE: "Utomjording",
+		},
+		TEAM_ALIEN_DEFINITE: {
+			ENG: "the Aliens",
+			SWE: "Utomjordingarna",
+		},
+		TEAM_ALIEN_DEFINITE_GENITIVE: {
+			ENG: "the Aliens'",
+			SWE: "Utomjordingarnas",
+		},
+		TEAM_ALIEN_GENITIVE: {
+			ENG: "Alien's",
+			SWE: "Utomjordings",
+		},
+		TEAM_ALIEN_PLURAL: {
+			ENG: "Aliens",
+			SWE: "Utomjordingar",
+		},
+		TEAM_ALIEN_PLURAL_DEFINITE: {
+			ENG: "the Aliens",
+			SWE: "Utomjordingarna",
+		},
+		TEAM_ALIEN_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Aliens'",
+			SWE: "Utomjordingarnas",
+		},
+		TEAM_ALIEN_PLURAL_GENITIVE: {
+			ENG: "Aliens'",
+			SWE: "Utomjordingars",
+		},
+		TEAM_MINORITY: {
+			ENG: "Other",
+			SWE: "Övrig",
+		},
+		TEAM_MINORITY_DEFINITE: {
+			ENG: "the Others",
+			SWE: "De övriga",
+		},
+		TEAM_MINORITY_DEFINITE_GENITIVE: {
+			ENG: "the Others'",
+			SWE: "De övrigas",
+		},
+		TEAM_MINORITY_GENITIVE: {
+			ENG: "Other's",
+			SWE: "Övrigs",
+		},
+		TEAM_MINORITY_PLURAL: {
+			ENG: "Others",
+			SWE: "Övriga",
+		},
+		TEAM_MINORITY_PLURAL_DEFINITE: {
+			ENG: "the Others",
+			SWE: "De övriga",
+		},
+		TEAM_MINORITY_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Others'",
+			SWE: "De övrigas",
+		},
+		TEAM_MINORITY_PLURAL_GENITIVE: {
+			ENG: "Others'",
+			SWE: "Övrigas",
+		},
+		TEAM_PREFIX: {
+			ENG: "Team",
+			SWE: "Lag",
+		},
+		TEAM_VAMPIRE: {
+			ENG: "Vampire",
+			SWE: "Vampyr",
+		},
+		TEAM_VAMPIRE_DEFINITE: {
+			ENG: "the Vampires",
+			SWE: "Vampyrerna",
+		},
+		TEAM_VAMPIRE_DEFINITE_GENITIVE: {
+			ENG: "the Vampires'",
+			SWE: "Vampyrernas",
+		},
+		TEAM_VAMPIRE_GENITIVE: {
+			ENG: "Vampire's",
+			SWE: "Vampyrs",
+		},
+		TEAM_VAMPIRE_PLURAL: {
+			ENG: "Vampires",
+			SWE: "Vampyrer",
+		},
+		TEAM_VAMPIRE_PLURAL_DEFINITE: {
+			ENG: "the Vampires",
+			SWE: "Vampyrerna",
+		},
+		TEAM_VAMPIRE_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Vampires'",
+			SWE: "Vampyrernas",
+		},
+		TEAM_VAMPIRE_PLURAL_GENITIVE: {
+			ENG: "Vampires'",
+			SWE: "Vampyrers",
+		},
+		TEAM_VARIABLE_SUFFIX: {
+			ENG: " (variable)",
+			SWE: " (variabel)",
+		},
+		TEAM_VILLAGE: {
+			ENG: "Villager",
+			SWE: "Bybo",
+		},
+		TEAM_VILLAGE_DEFINITE: {
+			ENG: "the Villagers",
+			SWE: "Byborna",
+		},
+		TEAM_VILLAGE_DEFINITE_GENITIVE: {
+			ENG: "the Villagers'",
+			SWE: "Bybornas",
+		},
+		TEAM_VILLAGE_GENITIVE: {
+			ENG: "Villager's",
+			SWE: "Bybos",
+		},
+		TEAM_VILLAGE_PLURAL: {
+			ENG: "Villagers",
+			SWE: "Bybor",
+		},
+		TEAM_VILLAGE_PLURAL_DEFINITE: {
+			ENG: "the Villagers",
+			SWE: "Byborna",
+		},
+		TEAM_VILLAGE_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Villagers'",
+			SWE: "Bybornas",
+		},
+		TEAM_VILLAGE_PLURAL_GENITIVE: {
+			ENG: "Villagers'",
+			SWE: "Bybors",
+		},
+		TEAM_WEREWOLF: {
+			ENG: "Werewolf",
+			SWE: "Varulv",
+		},
+		TEAM_WEREWOLF_DEFINITE: {
+			ENG: "the Werewolves",
+			SWE: "Varulvarna",
+		},
+		TEAM_WEREWOLF_DEFINITE_GENITIVE: {
+			ENG: "the Werewolves'",
+			SWE: "Varulvarnas",
+		},
+		TEAM_WEREWOLF_GENITIVE: {
+			ENG: "Werewolf's",
+			SWE: "Varulvs",
+		},
+		TEAM_WEREWOLF_PLURAL: {
+			ENG: "Werewolves",
+			SWE: "Varulvar",
+		},
+		TEAM_WEREWOLF_PLURAL_DEFINITE: {
+			ENG: "the Werewolves",
+			SWE: "Varulvarna",
+		},
+		TEAM_WEREWOLF_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "the Werewolves'",
+			SWE: "Varulvarnas",
+		},
+		TEAM_WEREWOLF_PLURAL_GENITIVE: {
+			ENG: "Werewolves'",
+			SWE: "Varulvars",
+		},
+		TOKEN_ARTIFACT_ALIEN: {
+			ENG: "{TEAM_ALIEN} artifact",
+			SWE: "{TEAM_ALIEN_GENITIVE}artefakt",
+		},
+		TOKEN_ARTIFACT_BODYGUARD: {
+			ENG: "Sword of the {ROLE_BODYGUARD}",
+			SWE: "{ROLE_BODYGUARD_DEFINITE_GENITIVE} artefakt",
+		},
+		TOKEN_ARTIFACT_CLOAK: {
+			ENG: "Cloak of Shame",
+			SWE: "Pariaartefakt",
+		},
+		TOKEN_ARTIFACT_HUNTER: {
+			ENG: "Rifle of the {ROLE_HUNTER}",
+			SWE: "{ROLE_HUNTER_DEFINITE_GENITIVE} artefakt",
+		},
+		TOKEN_ARTIFACT_MUTED: {
+			ENG: "Mask of Muting",
+			SWE: "Tystadsartefakt",
+		},
+		TOKEN_ARTIFACT_PRINCE: {
+			ENG: "Crown of the {ROLE_PRINCE}",
+			SWE: "{ROLE_PRINCE_DEFINITE_GENITIVE} artefakt",
+		},
+		TOKEN_ARTIFACT_TANNER: {
+			ENG: "Rack of the {ROLE_TANNER}",
+			SWE: "{ROLE_TANNER_DEFINITE_GENITIVE} artefakt",
+		},
+		TOKEN_ARTIFACT_TRAITOR: {
+			ENG: "Dagger of the Traitor",
+			SWE: "Förrädarartefakt",
+		},
+		TOKEN_ARTIFACT_VAMPIRE: {
+			ENG: "Bite of the {TEAM_VAMPIRE}",
+			SWE: "{TEAM_VAMPIRE_GENITIVE}artefakt",
+		},
+		TOKEN_ARTIFACT_VILLAGER: {
+			ENG: "Pitchfork of the Villager",
+			SWE: "{ROLE_VILLAGER_DEFINITE_GENITIVE} artefakt",
+		},
+		TOKEN_ARTIFACT_VOID: {
+			ENG: "Void",
+			SWE: "Nullartefakt",
+		},
+		TOKEN_ARTIFACT_WEREWOLF: {
+			ENG: "Claw of the {TEAM_WEREWOLF}",
+			SWE: "{TEAM_WEREWOLF_GENITIVE}artefakt",
+		},
+		TOKEN_MARK_ASSASSIN: {
+			ENG: "Mark of the {ROLE_ASSASSIN}",
+			SWE: "{ROLE_ASSASSIN_DEFINITE_GENITIVE} märke",
+		},
+		TOKEN_MARK_CLARITY: {
+			ENG: "Mark of Clarity",
+			SWE: "Rent märke",
+		},
+		TOKEN_MARK_COUNT: {
+			ENG: "Mark of Fear",
+			SWE: "{ROLE_COUNT_DEFINITE_GENITIVE} märke",
+		},
+		TOKEN_MARK_CUPID: {
+			ENG: "Mark of Love",
+			SWE: "{ROLE_CUPID_DEFINITE_GENITIVE} märke",
+		},
+		TOKEN_MARK_DISEASED: {
+			ENG: "Mark of {ROLE_DISEASED_DEFINITE}",
+			SWE: "{ROLE_DISEASED_DEFINITE_GENITIVE} märke",
+		},
+		TOKEN_MARK_INSTIGATOR: {
+			ENG: "Dagger of the Traitor",
+			SWE: "{ROLE_INSTIGATOR_DEFINITE_GENITIVE} märke",
+		},
+		TOKEN_MARK_RENFIELD: {
+			ENG: "Mark of {ROLE_RENFIELD}",
+			SWE: "{ROLE_RENFIELD_DEFINITE_GENITIVE} märke",
+		},
+		TOKEN_MARK_VAMPIRE: {
+			ENG: "Bite of the {TEAM_VAMPIRE}",
+			SWE: "{TEAM_VAMPIRE_PLURAL_DEFINITE_GENITIVE} märke",
+		},
+		TOKEN_SHIELD: {
+			ENG: "Shield token",
+			SWE: "Sköldbricka",
+		},
+		UI_ABILITY_ALIEN: {
+			ENG: "Wakes up with all {TEAM_ALIEN_PLURAL} and identifies the other {TEAM_ALIEN_PLURAL}. May also collectively view one or more cards at random.",
+			SWE: "Vaknar tillsammans med alla {TEAM_ALIEN_PLURAL} och identifierar andra {TEAM_ALIEN_PLURAL}. Kan också kollektivt få titta på ett eller fler kort slumpmässigt.",
+		},
+		UI_ABILITY_ALPHAWOLF: {
+			ENG: "Wakes up first with all {TEAM_WEREWOLF_PLURAL}. Then wakes up alone and swaps a non-{TEAM_WEREWOLF_PLURAL} player's card with the unused {TEAM_WEREWOLF} card in the center. If {ROLE_ALPHAWOLF_DEFINITE} is used, an additional {TEAM_WEREWOLF} card is placed in the center, rotated 90 degrees.",
+			SWE: "Vaknar först tillsammans med alla {TEAM_WEREWOLF_PLURAL}. Vaknar sedan ensam och byter en icke-{TEAM_WEREWOLF_GENITIVE}spelares kort med det oanvända {TEAM_WEREWOLF_GENITIVE}kortet i mitten. Om {ROLE_ALPHAWOLF_DEFINITE} används placeras ytterligare ett {TEAM_WEREWOLF_GENITIVE}kort i mitten, roterat 90 grader.",
+		},
+		UI_ABILITY_APPRENTICEASSASSIN: {
+			ENG: "Wakes up at the same time as {ROLE_ASSASSIN_DEFINITE} after the {TOKEN_MARK_ASSASSIN} has been placed so they can identify each other. If no {ROLE_ASSASSIN} is in play, {ROLE_APPRENTICEASSASSIN_DEFINITE} performs that action instead.",
+			SWE: "Vaknar samtidigt som {ROLE_ASSASSIN_DEFINITE} efter att {TOKEN_MARK_ASSASSIN} placerats ut så att de kan identifiera varandra. Om ingen {ROLE_ASSASSIN} är i spel så utför {ROLE_APPRENTICEASSASSIN_DEFINITE} den handlingen istället.",
+		},
+		UI_ABILITY_APPRENTICESEER: {
+			ENG: "Wakes up and may look at one of the center cards.",
+			SWE: "Vaknar och får se på ett av mittenkorten.",
+		},
+		UI_ABILITY_APPRENTICETANNER: {
+			ENG: "Wakes up and sees who {ROLE_TANNER_DEFINITE} is.",
+			SWE: "Vaknar och får se vem {ROLE_TANNER_DEFINITE} är.",
+		},
+		UI_ABILITY_ARTIFACT_ALIEN: {
+			ENG: "The player is now an {TEAM_ALIEN}, regardless of previous role.",
+			SWE: "Spelaren är nu en {TEAM_ALIEN}, oberoende av tidigare roll.",
+		},
+		UI_ABILITY_ARTIFACT_BODYGUARD: {
+			ENG: "The player is now a {ROLE_BODYGUARD}, regardless of previous role.",
+			SWE: "Spelaren är nu en {ROLE_BODYGUARD}, oberoende av tidigare roll.",
+		},
+		UI_ABILITY_ARTIFACT_CLOAK: {
+			ENG: "The player must turn away from all other players.",
+			SWE: "Spelaren måste vända sig bort.",
+		},
+		UI_ABILITY_ARTIFACT_HUNTER: {
+			ENG: "The player is now a {ROLE_HUNTER}, regardless of previous role.",
+			SWE: "Spelaren är nu en {ROLE_HUNTER}, oberoende av tidigare roll.",
+		},
+		UI_ABILITY_ARTIFACT_MUTED: {
+			ENG: "The player may not speak during the day.",
+			SWE: "Spelaren får inte prata under dagen.",
+		},
+		UI_ABILITY_ARTIFACT_PRINCE: {
+			ENG: "The player is now a {ROLE_PRINCE}, regardless of previous role.",
+			SWE: "Spelaren är nu en {ROLE_PRINCE}, oberoende av tidigare roll.",
+		},
+		UI_ABILITY_ARTIFACT_TANNER: {
+			ENG: "The player is now a {ROLE_TANNER}, regardless of previous role.",
+			SWE: "Spelaren är nu en {ROLE_TANNER}, oberoende av tidigare roll.",
+		},
+		UI_ABILITY_ARTIFACT_TRAITOR: {
+			ENG: "The player is now a traitor and will only win if their team loses.",
+			SWE: "Spelaren är nu en förrädare och vinner endast om deras lag förlorar.",
+		},
+		UI_ABILITY_ARTIFACT_VAMPIRE: {
+			ENG: "The player is now a {TEAM_VAMPIRE}, regardless of previous role.",
+			SWE: "Spelaren är nu en {TEAM_VAMPIRE}, oberoende av tidigare roll.",
+		},
+		UI_ABILITY_ARTIFACT_VILLAGER: {
+			ENG: "The player is now a {ROLE_VILLAGER}, regardless of previous role.",
+			SWE: "Spelaren är nu en {ROLE_VILLAGER}, oberoende av tidigare roll.",
+		},
+		UI_ABILITY_ARTIFACT_VOID: {
+			ENG: "No effect is imparted on the player.",
+			SWE: "Artefakten har ingen effekt.",
+		},
+		UI_ABILITY_ARTIFACT_WEREWOLF: {
+			ENG: "The player is now a {TEAM_WEREWOLF}, regardless of previous role.",
+			SWE: "Spelaren är nu en {TEAM_WEREWOLF}, oberoende av tidigare roll.",
+		},
+		UI_ABILITY_ASSASSIN: {
+			ENG: "Wakes up and selects a target by placing the {TOKEN_MARK_ASSASSIN} in front of a player.",
+			SWE: "Vaknar och väljer en måltavla genom att placera {TOKEN_MARK_ASSASSIN} framför spelaren.",
+		},
+		UI_ABILITY_AURASEER: {
+			ENG: "Wakes up and sees which players have looked at or moved a card during the night.",
+			SWE: "Vaknar och får se vilka spelare som har tittat på eller flyttat ett kort under natten.",
+		},
+		UI_ABILITY_BEHOLDER: {
+			ENG: "Wakes up and sees who {ROLE_SEER_DEFINITE} and {ROLE_APPRENTICESEER_DEFINITE} are. May then check their cards to see if they were moved during the night.",
+			SWE: "Vaknar och får se vem {ROLE_SEER_DEFINITE} och {ROLE_APPRENTICESEER_DEFINITE} är. Kan sedan kontrollera deras kort för att se om korten har flyttats under natten.",
+		},
+		UI_ABILITY_BLOB: {
+			ENG: "Does not wake up. At the start of the day, it is announced which nearby players (0–4) {ROLE_BLOB_DEFINITE} must protect.",
+			SWE: "Vaknar inte. I början av dagen annonseras vilka av de närmaste grannarna (0–4 st) som {ROLE_BLOB_DEFINITE} måste skydda.",
+		},
+		UI_ABILITY_BODYGUARD: {
+			ENG: "The player voted for by {ROLE_BODYGUARD_DEFINITE} cannot be eliminated. The player with the second-highest votes is eliminated instead.",
+			SWE: "Spelaren som {ROLE_BODYGUARD_DEFINITE} röstar på kan inte röstas ut. Spelaren med näst högst antal röster blir istället utröstad.",
+		},
+		UI_ABILITY_BODYSNATCHER: {
+			ENG: "Wakes up and may choose to swap another player's card with their own, then look at their new card. Both {ROLE_BODYSNATCHER_DEFINITE} and the other card become a member of {TEAM_ALIEN_PLURAL_DEFINITE}.",
+			SWE: "Vaknar och kan välja att byta en annan spelares kort mot sitt eget och sedan titta på sitt nya kort. Både {ROLE_BODYSNATCHER_DEFINITE} och det andra kortet är en {TEAM_ALIEN}.",
+		},
+		UI_ABILITY_COPYCAT: {
+			ENG: "Wakes up and looks at one of the center cards. {ROLE_COPYCAT_DEFINITE} copies that role and team. The copied role and team follows the card if it is moved during the night. {ROLE_COPYCAT_DEFINITE} later wakes and performs that role's action.",
+			SWE: "Vaknar och tittar på ett av korten i mitten. {ROLE_COPYCAT_DEFINITE} kopierar den rollen och lagtillhörigheten. Roll/lag följer med kortet om det flyttas till en annan spelare under natten. {ROLE_COPYCAT_DEFINITE} vaknar senare under natten och utför den kopierade rollens aktivitet när den rollen ropas upp.",
+		},
+		UI_ABILITY_COUNT: {
+			ENG: "Wakes up with all {TEAM_VAMPIRE_PLURAL}. Then wakes alone and places the {TOKEN_MARK_COUNT} on a non-{TEAM_VAMPIRE} player. That player may not wake or perform any action during the night.",
+			SWE: "Vaknar tillsammans med alla {TEAM_VAMPIRE_PLURAL}. Vaknar sedan ensam och placerar {TOKEN_MARK_COUNT} framför en annan icke-{TEAM_VAMPIRE} spelare. Spelaren med märket får inte vakna eller utföra sin handling under natten.",
+		},
+		UI_ABILITY_COW: {
+			ENG: "Holds out a hand without waking. If one or more {TEAM_ALIEN_PLURAL} are adjacent to {ROLE_COW_DEFINITE}, they must touch {ROLE_COW_DEFINITE}'s hand.",
+			SWE: "Sträcker ut en hand utan att vakna. Om en eller flera {TEAM_ALIEN_PLURAL} sitter bredvid {ROLE_COW_DEFINITE} måste de röra vid {ROLE_COW_DEFINITE_GENITIVE} hand.",
+		},
+		UI_ABILITY_CUPID: {
+			ENG: "Wakes up and places the {TOKEN_MARK_CUPID} on two players. Those players wake together and identify each other. If one is eliminated, the other is also eliminated.",
+			SWE: "Vaknar och placerar {TOKEN_MARK_CUPID} framför två spelare. Spelarna med märket vaknar tillsammans och identifierar varandra. Om en av dem röstas ut så röstas även den andra ut.",
+		},
+		UI_ABILITY_CURATOR: {
+			ENG: "Wakes up and places a random artifact token in front of a player, including {ROLE_CURATOR_DEFINITE}. At the start of the day, that player may look at it. If it causes a role change, it overrides the player's card for ability and team.",
+			SWE: "Vaknar och placerar en slumpmässig artefakt framför en valfri spelare, inklusive {ROLE_CURATOR_DEFINITE} själv. I början av dagen får spelaren titta på artefakten för att se vilken effekt den har. Om artefakten innebär ett rollbyte så tar den prioritet över spelarens kort vad gäller förmåga och lagtillhörighet.",
+		},
+		UI_ABILITY_CURSED: {
+			ENG: "If at least one {TEAM_WEREWOLF}, {TEAM_VAMPIRE}, or {TEAM_ALIEN} votes for {ROLE_CURSED_DEFINITE}, it changes to that team.",
+			SWE: "Om minst en {TEAM_WEREWOLF}, {TEAM_VAMPIRE} eller {TEAM_ALIEN} röstar på {ROLE_CURSED_DEFINITE} så byter den lagtillhörighet till laget i fråga.",
+		},
+		UI_ABILITY_DISEASED: {
+			ENG: "Wakes up and places the {TOKEN_MARK_DISEASED} on a neighbor. Any player who votes for {ROLE_DISEASED_DEFINITE} or a marked player automatically loses, even if their team wins.",
+			SWE: "Vaknar och placerar {TOKEN_MARK_DISEASED} framför en av sina grannar. En spelare som röstar på {ROLE_DISEASED_DEFINITE} eller på en spelare med märket förlorar automatiskt även om deras lag vinner.",
+		},
+		UI_ABILITY_DOPPELGANGER: {
+			ENG: "Wakes up and looks at another player's card. {ROLE_DOPPELGANGER_DEFINITE} copies that role and team. The copied role and team follows the card if it is moved during the night. {ROLE_DOPPELGANGER_DEFINITE} later wakes and performs that role's action.",
+			SWE: "Vaknar och tittar på en annan spelares kort. {ROLE_DOPPELGANGER_DEFINITE} kopierar den rollen och lagtillhörigheten. Roll/lag följer med kortet om det flyttas till en annan spelare under natten. {ROLE_DOPPELGANGER_DEFINITE} blir sedan ombedd att vakna senare under natten och utför den kopierade rollens aktivitet.",
+		},
+		UI_ABILITY_DREAMWOLF: {
+			ENG: "Shows a thumb instead of waking with {TEAM_WEREWOLF_PLURAL} so they can identify {ROLE_DREAMWOLF_DEFINITE}.",
+			SWE: "Sticker ut tummen istället för att vakna tillsammans med {TEAM_WEREWOLF_PLURAL} så att de kan se vem {ROLE_DREAMWOLF_DEFINITE} är.",
+		},
+		UI_ABILITY_DRUNK: {
+			ENG: "Wakes up and swaps their card with a center card without looking at it.",
+			SWE: "Vaknar och byter sitt eget kort mot ett av de oanvända korten i mitten utan att titta på det nya kortet.",
+		},
+		UI_ABILITY_EMPATH: {
+			ENG: "Wakes up and observes players perform a random action without waking them.",
+			SWE: "Vaknar och får iaktta spelare utföra en slumpmässig handling utan att själv vakna.",
+		},
+		UI_ABILITY_EXPOSER: {
+			ENG: "Wakes up and may flip 1–3 center cards face up, chosen randomly.",
+			SWE: "Vaknar och får vända 1-3 av mittenkorten ansiktet upp, antal bestäms slumpmässigt.",
+		},
+		UI_ABILITY_FEUDINGALIENS: {
+			ENG: "Wakes up with all {TEAM_ALIEN_PLURAL}, then wakes together and identifies each other.",
+			SWE: "Vaknar tillsammans med alla {TEAM_ALIEN_PLURAL}. Vaknar sedan tillsammans och identifierar varandra.",
+		},
+		UI_ABILITY_GREMLIN: {
+			ENG: "Wakes up and swaps either two players' marks or two players' cards, but not both.",
+			SWE: "Vaknar och byter antingen plats på två andra spelares markörer eller kort, inte båda.",
+		},
+		UI_ABILITY_HUNTER: {
+			ENG: "If {ROLE_HUNTER_DEFINITE} is eliminated, the player they voted for is also eliminated.",
+			SWE: "Om {ROLE_HUNTER_DEFINITE} blir utröstad kommer även spelaren som {ROLE_HUNTER_DEFINITE} röstade på att bli utröstad.",
+		},
+		UI_ABILITY_INSOMNIAC: {
+			ENG: "Wakes last and looks at their own card.",
+			SWE: "Vaknar sist och tittar på sitt eget kort.",
+		},
+		UI_ABILITY_INSTIGATOR: {
+			ENG: "Wakes up and gives a {TOKEN_MARK_INSTIGATOR} to a player. That player wins only if someone on their own team is eliminated.",
+			SWE: "Vaknar och ger en {TOKEN_MARK_INSTIGATOR} till en spelare. Spelaren med markören vinner endast om en spelare i dennes egna lag röstas ut.",
+		},
+		UI_ABILITY_LEADER: {
+			ENG: "Wakes up and sees which players are {TEAM_ALIEN_PLURAL}. Also sees which of them are {ROLE_FEUDINGALIENS_DEFINITE}. If all {TEAM_ALIEN_DEFINITE} point at {ROLE_LEADER_DEFINITE}, they win regardless of outcome.",
+			SWE: "Vaknar och får veta vilka spelare som är {TEAM_ALIEN_PLURAL}. Får även veta vilka av {TEAM_ALIEN_DEFINITE} som är {ROLE_FEUDINGALIENS_DEFINITE}. Om alla {TEAM_ALIEN_DEFINITE} pekar på {ROLE_LEADER_DEFINITE} så vinner de oavsett vad som händer i övrigt.",
+		},
+		UI_ABILITY_MARKSMAN: {
+			ENG: "Wakes up and looks at one player's card and another player's mark. They must be different players.",
+			SWE: "Vaknar och får se på en annan spelares kort, och på en annan spelares markör. Det får inte vara samma spelare för båda.",
+		},
+		UI_ABILITY_MARK_ASSASSIN: {
+			ENG: "The player is the target of {ROLE_ASSASSIN_DEFINITE}, who will only win if the player is eliminated.",
+			SWE: "Spelaren är målet för {ROLE_ASSASSIN_DEFINITE}, som endast vinner om märkets ägare röstas ut.",
+		},
+		UI_ABILITY_MARK_CLARITY: {
+			ENG: "The {TOKEN_MARK_CLARITY} has no effect, and is given to each player at the start of the game.",
+			SWE: "Märket har ingen effekt, och delas ut till samtliga spelare vid spelets början.",
+		},
+		UI_ABILITY_MARK_COUNT: {
+			ENG: "The player may not wake up during the night to perform their action.",
+			SWE: "Spelaren får inte vakna under natten för att utföra sin handling.",
+		},
+		UI_ABILITY_MARK_CUPID: {
+			ENG: "The players who receive the mark are linked to each other. If one is eliminated, all are eliminated. The players will wake to identify each other.",
+			SWE: "Spelarna som mottar märket är bundna till varandra. Röstas en ut så röstas även de andra ut. Spelarna vaknar för att identifiera varandra.",
+		},
+		UI_ABILITY_MARK_DISEASED: {
+			ENG: "Any player who votes for the recipient of the {TOKEN_MARK_DISEASED} will be unable to win, regardless of their win condition.",
+			SWE: "Spelare som röstar på märkets mottagare kan inte vinna, oavsett deras vinstvillkor.",
+		},
+		UI_ABILITY_MARK_INSTIGATOR: {
+			ENG: "The player is now a traitor and will only win if their team loses.",
+			SWE: "Spelaren är nu en förrädare och vinner endast om deras lag förlorar.",
+		},
+		UI_ABILITY_MARK_RENFIELD: {
+			ENG: "The mark has no effect and is used only by {ROLE_RENFIELD} to reset any mark given.",
+			SWE: "Märket har ingen effekt och används endast av {ROLE_RENFIELD} för att ersätta andra märken.",
+		},
+		UI_ABILITY_MARK_VAMPIRE: {
+			ENG: "The player is now a {TEAM_VAMPIRE}, regardless of previous role.",
+			SWE: "Spelaren är nu en {TEAM_VAMPIRE}, oberoende av tidigare roll.",
+		},
+		UI_ABILITY_MASON: {
+			ENG: "Wakes up with the other {ROLE_MASON_DEFINITE} and identifies each other.",
+			SWE: "Vaknar tillsammans med den andra {ROLE_MASON_DEFINITE} och identifierar varandra.",
+		},
+		UI_ABILITY_MASTER: {
+			ENG: "Wakes up with all {TEAM_VAMPIRE_PLURAL}. Becomes immune to elimination if at least one other {TEAM_VAMPIRE} votes for {ROLE_MASTER_DEFINITE}.",
+			SWE: "Vaknar tillsammans med alla {TEAM_VAMPIRE_PLURAL}. Om minst en annan {TEAM_VAMPIRE} röstar på {ROLE_MASTER_DEFINITE} så blir han immun mot att röstas ut.",
+		},
+		UI_ABILITY_MINION: {
+			ENG: "Wakes up and sees which players are {TEAM_WEREWOLF}.",
+			SWE: "Vaknar och får se vilka spelare som är en {TEAM_WEREWOLF}.",
+		},
+		UI_ABILITY_MORTICIAN: {
+			ENG: "Wakes up and looks at one or both neighbors' cards or their own, chosen randomly.",
+			SWE: "Vaknar och får se på en eller båda sina grannars, eller sitt eget, kort. Bestäms slumpmässigt.",
+		},
+		UI_ABILITY_MYSTICWOLF: {
+			ENG: "Wakes with all {TEAM_WEREWOLF_PLURAL}, then wakes alone to view another player's card.",
+			SWE: "Vaknar först tillsammans med alla {TEAM_WEREWOLF_PLURAL}. Vaknar sedan ensam och tittar på en annan spelares kort.",
+		},
+		UI_ABILITY_NOSTRADAMUS: {
+			ENG: "Wakes up and may look at up to three players' cards. If any are not {TEAM_VILLAGE_DEFINITE}, no more cards may be viewed and {ROLE_NOSTRADAMUS_DEFINITE} adopts that team. This follows the card if moved. The new team is announced.",
+			SWE: "Vaknar och väljer att titta på upp till tre spelares kort. Om ett av korten inte tillhör {TEAM_VILLAGE_DEFINITE} får inga fler kort inspekteras, och {ROLE_NOSTRADAMUS_DEFINITE_GENITIVE} kort kopierar den lagtillhörigheten. Lagtillhörighet följer med kortet om det flyttas till en annan spelare under natten. Den nya lagtillhörigheten läses upp för alla.",
+		},
+		UI_ABILITY_ORACLE: {
+			ENG: "Wakes up and performs a random predefined action that is read aloud.",
+			SWE: "Vaknar och utför en slumpmässigt bestämd handling som läses upp.",
+		},
+		UI_ABILITY_PARANORMALINVESTIGATOR: {
+			ENG: "Wakes up and may look at up to two players' cards. If any are not {TEAM_VILLAGE_DEFINITE}, no more cards may be viewed and {ROLE_PARANORMALINVESTIGATOR_DEFINITE} adopts that team.",
+			SWE: "Vaknar och väljer att titta på upp till två spelares kort. Om ett av korten inte tillhör {TEAM_VILLAGE_DEFINITE} får inga fler kort inspekteras, och {ROLE_PARANORMALINVESTIGATOR_DEFINITE_GENITIVE} kort kopierar den lagtillhörigheten. Lagtillhörighet följer med kortet om det flyttas till en annan spelare under natten.",
+		},
+		UI_ABILITY_PICKPOCKET: {
+			ENG: "Wakes up and may swap a player's mark with their own, then view their new mark.",
+			SWE: "Vaknar och kan välja att byta en annan spelares markör mot sitt egna och sedan titta på sin nya markör.",
+		},
+		UI_ABILITY_PREFIX: {
+			ENG: "Ability/Action",
+			SWE: "Förmåga/aktivitet",
+		},
+		UI_ABILITY_PRIEST: {
+			ENG: "Wakes up and replaces their own and optionally another player's marks with the {TOKEN_MARK_CLARITY}.",
+			SWE: "Vaknar och byter ut sin egen och, om så önskas, en annan spelares markörer mot ett {TOKEN_MARK_CLARITY}.",
+		},
+		UI_ABILITY_PRINCE: {
+			ENG: "Cannot be eliminated. The player with the second-highest votes is eliminated instead.",
+			SWE: "Kan inte röstas ut. Spelaren med näst högst antal röster blir istället utröstad.",
+		},
+		UI_ABILITY_PSYCHIC: {
+			ENG: "Wakes up and may look at another player's card with random restrictions.",
+			SWE: "Vaknar och får se på en annan spelares kort med slumpmässiga restriktioner.",
+		},
+		UI_ABILITY_RASCAL: {
+			ENG: "Wakes up and performs a random action from {ROLE_TROUBLEMAKER_DEFINITE}, {ROLE_ROBBER_DEFINITE}, {ROLE_WITCH_DEFINITE}, {ROLE_VILLAGEIDIOT_DEFINITE}, or {ROLE_DRUNK_DEFINITE}.",
+			SWE: "Vaknar och utför slumpmässigt samma handling som {ROLE_TROUBLEMAKER_DEFINITE}, {ROLE_ROBBER_DEFINITE}, {ROLE_WITCH_DEFINITE}, {ROLE_VILLAGEIDIOT_DEFINITE} eller {ROLE_DRUNK_DEFINITE}.",
+		},
+		UI_ABILITY_RENFIELD: {
+			ENG: "Wakes up and replaces their mark with {TOKEN_MARK_RENFIELD}. Sees all {TEAM_VAMPIRE_PLURAL} and which player received a {TOKEN_MARK_VAMPIRE}.",
+			SWE: "Vaknar och ersätter sin egen markör med {TOKEN_MARK_RENFIELD}. Får se vilka spelare som är {TEAM_VAMPIRE}, samt vilken spelare de har gett en {TOKEN_MARK_VAMPIRE} till.",
+		},
+		UI_ABILITY_REVEALER: {
+			ENG: "Wakes up and turns another player's card face up. If not {TEAM_VILLAGE_DEFINITE}, it is turned back down.",
+			SWE: "Vaknar och vänder en annan spelares kort ansiktet upp. Om kortet inte tillhör {TEAM_VILLAGE_DEFINITE} så vänds kortet tillbaka med ansiktet ner.",
+		},
+		UI_ABILITY_ROBBER: {
+			ENG: "Wakes up and may swap cards with another player, then look at the new card. Does not wake again.",
+			SWE: "Vaknar och kan välja att byta en annan spelares kort mot sitt eget och sedan titta på sitt nya kort. Vaknar inte fler gånger under natten.",
+		},
+		UI_ABILITY_SEER: {
+			ENG: "Wakes up and may look at another player's card or two center cards.",
+			SWE: "Vaknar och får välja att se på en annan spelares kort, eller två av de oanvända korten i mitten.",
+		},
+		UI_ABILITY_SENTINEL: {
+			ENG: "Wakes up and places a {TOKEN_SHIELD} on another player's card. That card cannot be moved or viewed.",
+			SWE: "Vaknar och placerar en {TOKEN_SHIELD} på en annan spelares kort. Kortet får inte flyttas eller tittas på av andra spelare under natten.",
+		},
+		UI_ABILITY_SHIELD: {
+			ENG: "A {TOKEN_SHIELD} placed on a player card forbids any player from interacting with the card, including the owner of the card.",
+			SWE: "En {TOKEN_SHIELD} placerad på ett kort förbjuder samtliga spelare, även kortets ägare, från att flytta eller titta på kortet.",
+		},
+		UI_ABILITY_SQUIRE: {
+			ENG: "Wakes up and sees which players are {TEAM_WEREWOLF}. Also checks if their cards were moved.",
+			SWE: "Vaknar och får se vilka spelare som är en {TEAM_WEREWOLF}. Får även se på de spelarnas kort för att se om de har flyttats under natten. ",
+		},
+		UI_ABILITY_SYNTHETICALIEN: {
+			ENG: "Wakes with all {TEAM_ALIEN_PLURAL} and identifies them. May also collectively view random cards.",
+			SWE: "Vaknar tillsammans med alla {TEAM_ALIEN_PLURAL} och identifierar andra {TEAM_ALIEN_PLURAL}. Kan också kollektivt få se på ett eller fler kort slumpmässigt.",
+		},
+		UI_ABILITY_TANNER: {
+			ENG: "If {ROLE_TANNER_DEFINITE} is eliminated, {TEAM_WEREWOLF_DEFINITE}, {TEAM_VAMPIRE_DEFINITE}, and {TEAM_ALIEN_DEFINITE} lose.",
+			SWE: "Om {ROLE_TANNER_DEFINITE} blir utröstad förlorar {TEAM_WEREWOLF_DEFINITE}, {TEAM_VAMPIRE_DEFINITE} och {TEAM_ALIEN_DEFINITE}.",
+		},
+		UI_ABILITY_THING: {
+			ENG: "Wakes up and touches one of their adjacent players.",
+			SWE: "Vaknar och rör vid en av sina direkta grannar.",
+		},
+		UI_ABILITY_TROUBLEMAKER: {
+			ENG: "Wakes up and swaps two other players' cards without looking.",
+			SWE: "Vaknar och byter plats på två andra spelares kort utan att titta på korten.",
+		},
+		UI_ABILITY_VAMPIRE: {
+			ENG: "Wakes with all {TEAM_VAMPIRE_PLURAL} and identifies them. Collectively choose a player to give the {TOKEN_MARK_VAMPIRE}.",
+			SWE: "Vaknar tillsammans med alla {TEAM_VAMPIRE_PLURAL} och identifierar andra {TEAM_VAMPIRE_PLURAL}. Väljer kollektivt att placera {TOKEN_MARK_VAMPIRE} framför en annan spelare, vilket gör spelaren till en vampyr.",
+		},
+		UI_ABILITY_VILLAGEIDIOT: {
+			ENG: "Wakes up and may shift all other players' cards left, right, or not at all.",
+			SWE: "Vaknar och väljer att skifta alla andra spelares kort ett steg till höger, vänster, eller inte alls.",
+		},
+		UI_ABILITY_VILLAGER: {
+			ENG: "None.",
+			SWE: "Ingen.",
+		},
+		UI_ABILITY_WEREWOLF: {
+			ENG: "Wakes up with all {TEAM_WEREWOLF_PLURAL} and identifies them. If alone, may view one center card.",
+			SWE: "Vaknar tillsammans med alla {TEAM_WEREWOLF_PLURAL} och identifierar andra {TEAM_WEREWOLF_PLURAL}. Får titta på ett av de oanvända korten i mitten om ensam {TEAM_WEREWOLF}.",
+		},
+		UI_ABILITY_WITCH: {
+			ENG: "Wakes up and may look at a center card. If they do, they must give it to themselves or another player.",
+			SWE: "Vaknar och väljer om de vill titta på ett av de oanvända korten i mitten. Om ett kort inspekteras måste kortet bytas mot sitt eget eller någon annan spelares kort.",
+		},
+		UI_DAYTIMER_PAUSE: {
+			ENG: "Pause",
+			SWE: "Pausa",
+		},
+		UI_DAYTIMER_START: {
+			ENG: "Start",
+			SWE: "Start",
+		},
+		UI_DAYTIMER_STOP: {
+			ENG: "Stop",
+			SWE: "Stopp",
+		},
+		UI_EVEN: {
+			ENG: "even",
+			SWE: "jämnt"
+		},
+		UI_FILTER_COMPLEXITY: {
+			ENG: "Difficulty",
+			SWE: "Svårighet",
+		},
+		UI_FILTER_COMPLEXITY_EASY: {
+			ENG: "Easy",
+			SWE: "Enkel",
+		},
+		UI_FILTER_COMPLEXITY_HARD: {
+			ENG: "Hard",
+			SWE: "Svår",
+		},
+		UI_FILTER_COMPLEXITY_MEDIUM: {
+			ENG: "Medium",
+			SWE: "Medel",
+		},
+		UI_FILTER_RULESET: {
+			ENG: "Ruleset",
+			SWE: "Regelverk",
+		},
+		UI_FILTER_RULESET_ADVANCED: {
+			ENG: "Advanced",
+			SWE: "Utökad",
+		},
+		UI_FILTER_RULESET_ALIEN: {
+			ENG: "Aliens",
+			SWE: "Utomjordingar",
+		},
+		UI_FILTER_RULESET_BASIC: {
+			ENG: "Basic",
+			SWE: "Grund",
+		},
+		UI_FILTER_RULESET_VAMPIRE: {
+			ENG: "Vampires",
+			SWE: "Vampyrer",
+		},
+		UI_GAMERULES: {
+			ENG: "Game Rules",
+			SWE: "Spelregler",
+		},
+		UI_GENERATED_PROMPT: {
+			ENG: "Game Prompt",
+			SWE: "Spelprompt",
+		},
+		UI_NO: {
+			ENG: "No",
+			SWE: "Nej",
+		},
+		UI_NUM_10: {
+			COMMON: "10",
+		},
+		UI_NUM_1: {
+			COMMON: "1",
+		},
+		UI_NUM_2: {
+			COMMON: "2",
+		},
+		UI_NUM_3: {
+			COMMON: "3",
+		},
+		UI_NUM_4: {
+			COMMON: "4",
+		},
+		UI_NUM_5: {
+			COMMON: "5",
+		},
+		UI_NUM_6: {
+			COMMON: "6",
+		},
+		UI_NUM_7: {
+			COMMON: "7",
+		},
+		UI_NUM_8: {
+			COMMON: "8",
+		},
+		UI_NUM_9: {
+			COMMON: "9",
+		},
+		UI_ODD: {
+			ENG: "odd",
+			SWE: "udda"
+		},
+		UI_PLAYER_COUNT: {
+			ENG: "Number of players:",
+			SWE: "Antal spelare:",
+		},
+		UI_PRINT: {
+			ENG: "Print",
+			SWE: "Skriv ut",
+		},
+		UI_PROMPT_ERROR_INSUFFICIENT_PLAYERS: {
+			ENG: "Prompt cannot be generated: too few roles selected.",
+			SWE: "Prompt kan inte skapas: för få roller är valda.",
+		},
+		UI_PROMPT_ERROR_INVALID_SETTINGS: {
+			ENG: "Prompt cannot be generated: check settings.",
+			SWE: "Prompt kan inte skapas: kontrollera inställningar.",
+		},
+		UI_PROMPT_SINGLETURN: {
+			ENG: "Split",
+			SWE: "Dela",
+		},
+		UI_RERANDOMIZE: {
+			ENG: "Rerandomize",
+			SWE: "Slumpa om",
+		},
+		UI_RESET: {
+			ENG: "Reset",
+			SWE: "Nollställ",
+		},
+		UI_ROLEDESCRIPTIONS: {
+			ENG: "Role Descriptions",
+			SWE: "Rollbeskrivningar",
+		},
+		UI_ROLESELECTION: {
+			ENG: "Select Roles",
+			SWE: "Välj roller",
+		},
+		UI_SEARCH: {
+			ENG: "Search",
+			SWE: "Sök",
+		},
+		UI_SEARCH_PLACEHOLDER: {
+			ENG: "Filter roles...",
+			SWE: "Filtrera roll...",
+		},
+		UI_SETTING: {
+			ENG: "Settings",
+			SWE: "Inställningar",
+		},
+		UI_SETTING_ALIENS_MAKE_ALIEN: {
+			ENG: "Turn another player into a {TEAM_ALIEN}",
+			SWE: "Gör en annan spelare till en {TEAM_ALIEN}",
+		},
+		UI_SETTING_ALIENS_MAKE_MINION: {
+			ENG: "Turn another player into a minion",
+			SWE: "Gör en annan spelare till en medhjälpare",
+		},
+		UI_SETTING_ALIENS_NOTHING: {
+			ENG: "No action",
+			SWE: "Ingen handling",
+		},
+		UI_SETTING_ALIENS_SHOW_CARDS: {
+			ENG: "Show their cards to other {TEAM_ALIEN_DEFINITE}",
+			SWE: "Visa sina kort för andra {TEAM_ALIEN_DEFINITE}",
+		},
+		UI_SETTING_ALIENS_TRADE_CARDS: {
+			ENG: "Swap cards with other {TEAM_ALIEN_DEFINITE}",
+			SWE: "Byt kort med andra {TEAM_ALIEN_DEFINITE}",
+		},
+		UI_SETTING_ALIENS_VIEW_CARD_COLLECTIVE: {
+			ENG: "View cards collectively",
+			SWE: "Titta på kort gemensamt",
+		},
+		UI_SETTING_ALIENS_VIEW_CARD_INDIVIDUAL: {
+			ENG: "View cards individually",
+			SWE: "Titta på kort individuellt",
+		},
+		UI_SETTING_BODYSNATCHER_FAKE_ACTION: {
+			ENG: "Chance to only pretend to perform the action.",
+			SWE: "Sannolikhet att enbart få låtsas utföra handlingen.",
+		},
+		UI_SETTING_ERROR_WEIGHTGROUP_ORACLE_RIPPLE: {
+			ENG: "The total weight of the group must be greater than 0. At least one {TEAM_ALIEN} must be selected for the force ripple weight to count.",
+			SWE: "Viktgruppens sammanlagda vikt måste vara större än 0. Minst en {TEAM_ALIEN} måste vara närvarande för att vikten för att tvinga en krusning ska räknas",
+		},
+		UI_SETTING_ERROR_WEIGHTGROUP_ORACLE_TEAM: {
+			ENG: "The total weight of the group must be greater than 0. At least one {TEAM_WEREWOLF}, {TEAM_ALIEN} or {TEAM_VAMPIRE} must be selected for the switch team weight to count.",
+			SWE: "Viktgruppens sammanlagda vikt måste vara större än 0. Minst en {TEAM_WEREWOLF}, {TEAM_ALIEN} eller {TEAM_VAMPIRE} måste vara närvarande för att vikten för byte av lag ska räknas",
+		},
+		UI_SETTING_ERROR_WEIGHTGROUP_SUM_ZERO: {
+			ENG: "The total weight of the group must be greater than 0",
+			SWE: "Viktgruppens sammanlagda vikt måste vara större än 0",
+		},
+		UI_SETTING_ERROR_WEIGHTGROUP_SUM_ZERO_CONTEXT: {
+			ENG: "The total weight of the group must be greater than 0, and satisfy the conditions for the currently selected roles.",
+			SWE: "Viktgruppens sammanlagda vikt måste vara större än 0, och uppfylla krav för valda roller",
+		},
+		UI_SETTING_EXPOSER_FLIP_ONE: {
+			ENG: "Flip one center card",
+			SWE: "Vänd ett mittenkort",
+		},
+		UI_SETTING_EXPOSER_FLIP_THREE: {
+			ENG: "Flip three center cards",
+			SWE: "Vänd tre mittenkort",
+		},
+		UI_SETTING_EXPOSER_FLIP_TWO: {
+			ENG: "Flip two center cards",
+			SWE: "Vänd två mittenkort",
+		},
+		UI_SETTING_LABEL_RASCAL: {
+			ENG: "Perform one of the following actions",
+			SWE: "Utför en av följande handlingar",
+		},
+		UI_SETTING_LABEL_VIEW_CARD: {
+			ENG: "View player cards",
+			SWE: "Titta på spelarkort",
+		},
+		UI_SETTING_NARRATION: {
+			ENG: "Narration",
+			SWE: "Uppläsning",
+		},
+		UI_SETTING_NARRATION_PAUSE_LONG: {
+			ENG: "Long Pause (s)",
+			SWE: "Lång pauslängd (s)",
+		},
+		UI_SETTING_NARRATION_PAUSE_MEDIUM: {
+			ENG: "Medium pause (s)",
+			SWE: "Medium pauslängd (s)",
+		},
+		UI_SETTING_NARRATION_PAUSE_SCALE: {
+			ENG: "Pause duration scale",
+			SWE: "Skala för pauslängd",
+		},
+		UI_SETTING_NARRATION_PAUSE_SHORT: {
+			ENG: "Short pause (s)",
+			SWE: "Kort pauslängd (s)",
+		},
+		UI_SETTING_ORACLE_BLOCK_ACTION: {
+			ENG: "Prevent another player from waking",
+			SWE: "Hindra en annan spelare från att vakna",
+		},
+		UI_SETTING_ORACLE_DRUNK: {
+			ENG: "Swap your card with a center card",
+			SWE: "Byter sitt kort mot ett mittenkort",
+		},
+		UI_SETTING_ORACLE_EVEN_ODD: {
+			ENG: "Announce whether {ROLE_ORACLE_DEFINITE} has an even or odd player number",
+			SWE: "Annonsera om {ROLE_ORACLE_DEFINITE} har ett jämnt eller udda spelarnummer",
+		},
+		UI_SETTING_ORACLE_FORCE_RIPPLE: {
+			ENG: "Force ripple",
+			SWE: "Tvinga krusning",
+		},
+		UI_SETTING_ORACLE_HUNT: {
+			ENG: "Oracle Hunt",
+			SWE: "Orakeljakt",
+		},
+		UI_SETTING_ORACLE_HUNT_ALLOW_BAD_TEAMS: {
+			ENG: "Allow waking for evil roles",
+			SWE: "Tillåt att vakna för onda roller",
+		},
+		UI_SETTING_ORACLE_HUNT_CHANCE: {
+			ENG: "Probability",
+			SWE: "Sannolikhet",
+		},
+		UI_SETTING_ORACLE_SWITCH_TEAM: {
+			ENG: "Switch team",
+			SWE: "Byt lag",
+		},
+		UI_SETTING_ORACLE_SWITCH_TEAM_FULL: {
+			ENG: "Switch role",
+			SWE: "Byt roll",
+		},
+		UI_SETTING_ORACLE_SWITCH_TEAM_MODE: {
+			ENG: "Probability of switching role as well",
+			SWE: "Chans att byta även roll",
+		},
+		UI_SETTING_ORACLE_SWITCH_TEAM_PARTIAL: {
+			ENG: "Switch team only",
+			SWE: "Byt endast lag",
+		},
+		UI_SETTING_ORACLE_VIEW_CENTER: {
+			ENG: "View center cards",
+			SWE: "Titta på mittenkort",
+		},
+		UI_SETTING_ORACLE_VIEW_PLAYER: {
+			ENG: "View player cards",
+			SWE: "Titta på spelarkort",
+		},
+		UI_SETTING_PSYCHIC_VIEW_TWO_CARDS: {
+			ENG: "Chance to view two cards",
+			SWE: "Sannolikhet att få titta på två kort",
+		},
+		UI_SETTING_RIPPLE: {
+			ENG: "Space-time ripple",
+			SWE: "Krusning i rum-tid",
+		},
+		UI_SETTING_RIPPLE_DOUBLE_VOTE: {
+			ENG: "Some players may cast two votes",
+			SWE: "Vissa spelare får lägga två röster",
+		},
+		UI_SETTING_RIPPLE_DRUNK: {
+			ENG: "A player swaps their card with a center card",
+			SWE: "En spelare byter sitt kort mot ett av mittenkorten",
+		},
+		UI_SETTING_RIPPLE_DUAL_VIEW_PLAYER: {
+			ENG: "Two players may view another player's card",
+			SWE: "Två spelare får se på en annan spelares kort",
+		},
+		UI_SETTING_RIPPLE_INSOMNIAC: {
+			ENG: "Some players view their cards after the night",
+			SWE: "Vissa spelare tittar på sina kort efter natten",
+		},
+		UI_SETTING_RIPPLE_MUTED: {
+			ENG: "Some players may not speak",
+			SWE: "Vissa spelare får inte prata",
+		},
+		UI_SETTING_RIPPLE_NONE: {
+			ENG: "Nothing happens",
+			SWE: "Ingenting händer",
+		},
+		UI_SETTING_RIPPLE_ONE_MINUTE: {
+			ENG: "Game time reduced to 1 minute",
+			SWE: "Speltid reducerad till 1 minut",
+		},
+		UI_SETTING_RIPPLE_REBUKED: {
+			ENG: "Some players must turn away",
+			SWE: "Vissa spelare måste vända sig bort",
+		},
+		UI_SETTING_RIPPLE_REVEALER: {
+			ENG: "A player may reveal another player's card",
+			SWE: "En spelare får vända på en spelares kort",
+		},
+		UI_SETTING_RIPPLE_ROBBER: {
+			ENG: "A player may steal another player's card",
+			SWE: "En spelare får stjäla en annan spelares kort",
+		},
+		UI_SETTING_RIPPLE_TROUBLEMAKER: {
+			ENG: "A player swaps two other players",
+			SWE: "En spelare byter plats på två andra spelare",
+		},
+		UI_SETTING_RIPPLE_VIEW_PLAYER: {
+			ENG: "A player may view another player's card",
+			SWE: "En spelare får se på en annan spelares kort",
+		},
+		UI_SETTING_RIPPLE_WITCH: {
+			ENG: "A player may view a center card and give it to a player",
+			SWE: "En spelare får se på ett mittenkort och ge kortet till någon spelare",
+		},
+		UI_SETTING_VALIDATION_ERROR: {
+			ENG: "Error in settings",
+			SWE: "Fel i inställningar",
+		},
+		UI_SETTING_VIEW_CARD_CENTER_FOUR: {
+			ENG: "Four center cards",
+			SWE: "Fyra mittenkort",
+		},
+		UI_SETTING_VIEW_CARD_CENTER_ONE: {
+			ENG: "One center card",
+			SWE: "Ett mittenkort",
+		},
+		UI_SETTING_VIEW_CARD_CENTER_THREE: {
+			ENG: "Three center cards",
+			SWE: "Tre mittenkort",
+		},
+		UI_SETTING_VIEW_CARD_CENTER_TWO: {
+			ENG: "Two center cards",
+			SWE: "Två mittenkort",
+		},
+		UI_SETTING_VIEW_CARD_PLAYER_ANY: {
+			ENG: "Any player",
+			SWE: "Valfri spelare",
+		},
+		UI_SETTING_VIEW_CARD_PLAYER_EVEN: {
+			ENG: "Even-numbered player",
+			SWE: "Jämn spelare",
+		},
+		UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR: {
+			ENG: "Neighbor",
+			SWE: "Granne",
+		},
+		UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR_BOTH: {
+			ENG: "Both neighbors",
+			SWE: "Båda grannar",
+		},
+		UI_SETTING_VIEW_CARD_PLAYER_ODD: {
+			ENG: "Odd-numbered player",
+			SWE: "Udda spelare",
+		},
+		UI_SETTING_VIEW_CARD_PLAYER_SELF: {
+			ENG: "Your own",
+			SWE: "Sitt eget",
+		},
+		UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC: {
+			ENG: "Specific player",
+			SWE: "Specifik spelare",
+		},
+		UI_SPEECH_INPUT: {
+			ENG: "Waiting for user input",
+			SWE: "Väntar på inmatning",
+		},
+		UI_SPEECH_PAUSED: {
+			ENG: "Narration paused",
+			SWE: "Uppläsning pausad",
+		},
+		UI_SPEECH_SPEAKING: {
+			ENG: "Narrating",
+			SWE: "Läser upp",
+		},
+		UI_SPEECH_WAITING: {
+			ENG: "Waiting",
+			SWE: "Väntar",
+		},
+		UI_TITLE: {
+			ENG: "One Night Ultimate Werewolf – Prompt Builder",
+			SWE: "One Night Ultimate Werewolf – Promptbyggare",
+		},
+		UI_TOKENDESCRIPTIONS: {
+			ENG: "Tokens",
+			SWE: "Brickor/märken",
+		},
+		UI_TOKENS_PLACES: {
+			ENG: "Places",
+			SWE: "Placerar:",
+		},
+		UI_USEDBY_PREFIX: {
+			ENG: "Roles",
+			SWE: "Roller",
+		},
+		UI_WINCONDITION_APPRENTICEASSASSIN: {
+			ENG: "Wins if {ROLE_ASSASSIN_DEFINITE} is eliminated, or if the chosen target is eliminated when no {ROLE_ASSASSIN} is in play.",
+			SWE: "Vinner om {ROLE_ASSASSIN_DEFINITE} röstas ut, eller om den utvalda måltavlan röstas ut om ingen {ROLE_ASSASSIN} är i spel.",
+		},
+		UI_WINCONDITION_APPRENTICETANNER: {
+			ENG: "Wins if {ROLE_TANNER_DEFINITE} is eliminated, or if {ROLE_APPRENTICETANNER_DEFINITE} is eliminated when no {ROLE_TANNER} is in play.",
+			SWE: "Vinner om {ROLE_TANNER_DEFINITE} röstas ut, eller om {ROLE_APPRENTICETANNER_DEFINITE} röstas ut om ingen {ROLE_TANNER} är i spel.",
+		},
+		UI_WINCONDITION_ASSASSIN: {
+			ENG: "Wins if the chosen target is eliminated.",
+			SWE: "Vinner om den utvalda måltavlan röstas ut.",
+		},
+		UI_WINCONDITION_BLOB: {
+			ENG: "Wins if neither {ROLE_BLOB_DEFINITE} nor any players they must protect are eliminated.",
+			SWE: "Vinner om varken {ROLE_BLOB_DEFINITE} själv eller någon av spelarna den måste skydda röstas ut.",
+		},
+		UI_WINCONDITION_COPYCAT: {
+			ENG: "{ROLE_COPYCAT_DEFINITE} also copies the win condition of whatever role was copied during the night.",
+			SWE: "{ROLE_COPYCAT_DEFINITE} kopierar även vinstvillkor från den rollen som kopierades under natten.",
+		},
+		UI_WINCONDITION_CURSED: {
+			ENG: "{UI_WINCONDITION_TEAM_VILLAGE} If team alignment changes during the vote, so does the win condition.",
+			SWE: "{UI_WINCONDITION_TEAM_VILLAGE} Om lagtillhörigheten ändras under omröstningen ändras även vinstvillkoren.",
+		},
+		UI_WINCONDITION_DOPPELGANGER: {
+			ENG: "{UI_WINCONDITION_TEAM_VILLAGE} If {ROLE_DOPPELGANGER_DEFINITE} copies another role, it instead uses that role's win condition.",
+			SWE: "{ROLE_DOPPELGANGER_DEFINITE} kopierar även vinstvillkor från den rollen som kopierades under natten.",
+		},
+		UI_WINCONDITION_FEUDINGALIENS: {
+			ENG: "If only one is in play, they win with {TEAM_ALIEN}. If both are in play, one wins if the other is eliminated.",
+			SWE: "Om endast en av dem är i spel vinner de tillsammans med {TEAM_ALIEN}. Om båda är i spel vinner den ena om den andra röstas ut.",
+		},
+		UI_WINCONDITION_LEADER: {
+			ENG: "If both {ROLE_FEUDINGALIENS_DEFINITE} are in play, {ROLE_LEADER_DEFINITE} wins if both survive. Otherwise, {ROLE_LEADER_DEFINITE} wins with {TEAM_VILLAGE_DEFINITE}.",
+			SWE: "Om både {ROLE_FEUDINGALIENS_DEFINITE} är i spel så vinner {ROLE_LEADER_DEFINITE} om {ROLE_FEUDINGALIENS_DEFINITE} båda överlever. Annars vinner {ROLE_LEADER_DEFINITE} tillsammans med {TEAM_VILLAGE_DEFINITE}.",
+		},
+		UI_WINCONDITION_MINION: {
+			ENG: "If at least one {TEAM_WEREWOLF} is in play, {ROLE_MINION_DEFINITE} wins if no {TEAM_WEREWOLF} is eliminated, even if {ROLE_MINION_DEFINITE} is eliminated. If no {TEAM_WEREWOLF} is in play, {ROLE_MINION_DEFINITE} wins if at least one other player is eliminated.",
+			SWE: "Om minst en {TEAM_WEREWOLF} är i spel vinner {ROLE_MINION_DEFINITE} om ingen {TEAM_WEREWOLF} röstas ut, även om {ROLE_MINION_DEFINITE} själv blir utröstad. Om ingen {TEAM_WEREWOLF} är i spel vinner {ROLE_MINION_DEFINITE} om minst en annan spelare röstas ut.",
+		},
+		UI_WINCONDITION_MORTICIAN: {
+			ENG: "Wins if one of {ROLE_MORTICIAN_DEFINITE}'s neighbors is eliminated.",
+			SWE: "Vinner om en av {ROLE_MORTICIAN_DEFINITE} grannar röstas ut.",
+		},
+		UI_WINCONDITION_NOSTRADAMUS: {
+			ENG: "{UI_WINCONDITION_TEAM_VILLAGE} If {ROLE_NOSTRADAMUS_DEFINITE} sees a non-{TEAM_VILLAGE} role during the night, they adopt that role's win condition.",
+			SWE: "{UI_WINCONDITION_TEAM_VILLAGE} Om {ROLE_NOSTRADAMUS_DEFINITE} under natten ser en roll som inte tillhör {TEAM_VILLAGE_DEFINITE} så vinner {ROLE_NOSTRADAMUS_DEFINITE} tillsammans med det laget förutsatt att {ROLE_NOSTRADAMUS_DEFINITE} inte blir utröstad.",
+		},
+		UI_WINCONDITION_ORACLE: {
+			ENG: "{UI_WINCONDITION_TEAM_VILLAGE} {ROLE_ORACLE_DEFINITE_GENITIVE} win condition may change during the night.",
+			SWE: "{UI_WINCONDITION_TEAM_VILLAGE} {ROLE_ORACLE_DEFINITE_GENITIVE} vinstvillkor kan ändras om så väljs under natten.",
+		},
+		UI_WINCONDITION_PARANORMALINVESTIGATOR: {
+			ENG: "{UI_WINCONDITION_TEAM_VILLAGE} If {ROLE_PARANORMALINVESTIGATOR_DEFINITE} sees a non-{TEAM_VILLAGE} role during the night, they adopt that role's win condition.",
+			SWE: "{UI_WINCONDITION_TEAM_VILLAGE} Om {ROLE_PARANORMALINVESTIGATOR_DEFINITE} under natten ser en roll som inte tillhör {TEAM_VILLAGE_DEFINITE} så gäller den rollens vinstvillkor även för {ROLE_PARANORMALINVESTIGATOR_DEFINITE}.",
+		},
+		UI_WINCONDITION_PREFIX: {
+			ENG: "Win condition",
+			SWE: "Vinstvillkor",
+		},
+		UI_WINCONDITION_RENFIELD: {
+			ENG: "If at least one {TEAM_VAMPIRE} is in play, {ROLE_RENFIELD_DEFINITE} wins if no {TEAM_VAMPIRE} is eliminated, even if {ROLE_RENFIELD_DEFINITE} is eliminated. If no {TEAM_VAMPIRE} is in play, {ROLE_RENFIELD_DEFINITE} wins with {TEAM_VILLAGE_DEFINITE}.",
+			SWE: "Om minst en {TEAM_VAMPIRE} är i spel vinner {ROLE_RENFIELD_DEFINITE} om ingen {TEAM_VAMPIRE} röstas ut, även om {ROLE_RENFIELD_DEFINITE} själv blir utröstad. Om ingen {TEAM_VAMPIRE} är i spel vinner {ROLE_RENFIELD_DEFINITE} tillsammans med {TEAM_VILLAGE_DEFINITE}.",
+		},
+		UI_WINCONDITION_SQUIRE: {
+			ENG: "If at least one {TEAM_WEREWOLF} is in play, {ROLE_SQUIRE_DEFINITE} wins if no {TEAM_WEREWOLF} is eliminated, even if {ROLE_SQUIRE_DEFINITE} is eliminated. If no {TEAM_WEREWOLF} is in play, {ROLE_SQUIRE_DEFINITE} wins if at least one other player is eliminated.",
+			SWE: "Om minst en {TEAM_WEREWOLF} är i spel vinner {ROLE_SQUIRE_DEFINITE} om ingen {TEAM_WEREWOLF} röstas ut, även om {ROLE_SQUIRE_DEFINITE} själv blir utröstad. Om ingen {TEAM_WEREWOLF} är i spel vinner {ROLE_SQUIRE_DEFINITE} om minst en annan spelare röstas ut.",
+		},
+		UI_WINCONDITION_SYNTHETICALIEN: {
+			ENG: "Wins if {ROLE_SYNTHETICALIEN_DEFINITE} is eliminated.",
+			SWE: "Vinner om {ROLE_SYNTHETICALIEN_DEFINITE} röstas ut.",
+		},
+		UI_WINCONDITION_TANNER: {
+			ENG: "Wins if {ROLE_TANNER_DEFINITE} is eliminated.",
+			SWE: "Vinner om {ROLE_TANNER_DEFINITE} röstas ut.",
+		},
+		UI_WINCONDITION_TEAM_ALIEN: {
+			ENG: "Wins if no {TEAM_ALIEN} is eliminated.",
+			SWE: "Vinner om ingen {TEAM_ALIEN} röstas ut.",
+		},
+		UI_WINCONDITION_TEAM_VAMPIRE: {
+			ENG: "Wins if no {TEAM_VAMPIRE} is eliminated.",
+			SWE: "Vinner om ingen {TEAM_VAMPIRE} röstas ut.",
+		},
+		UI_WINCONDITION_TEAM_VILLAGE: {
+			ENG: "Wins if at least one {TEAM_WEREWOLF}, {TEAM_VAMPIRE}, or {TEAM_ALIEN} is eliminated.",
+			SWE: "Vinner om minst en {TEAM_WEREWOLF}, {TEAM_VAMPIRE} eller {TEAM_ALIEN} röstas ut.",
+		},
+		UI_WINCONDITION_TEAM_WEREWOLF: {
+			ENG: "Wins if no {TEAM_WEREWOLF} is eliminated.",
+			SWE: "Vinner om ingen {TEAM_WEREWOLF} röstas ut.",
+		},
+		UI_WINCONDITION_VARIABLE_NOTE: {
+			ENG: "This card's win condition may change, such as when copying another role.",
+			SWE: "Kortets vinstvillkor kan förändras, som vid kopiering av en annan roll.",
+		},
+		UI_YES: {
+			ENG: "Yes",
+			SWE: "Ja",
+		},
+		UI_RULES_FULL: {
+			ENG: `<h2>Game Rules – One Night Ultimate Werewolf</h2>
 
 				<p>
 					<strong>One Night Ultimate Werewolf</strong> is a fast-paced social deduction game consisting of two phases (three if roles from <strong>One Night Ultimate Vampire</strong> are used, as a dusk phase occurs first): the night phase where all actions take place, followed by the day phase where players discuss and attempt to decide who should be voted out once the day phase ends.
@@ -1140,1028 +4358,11 @@ const Localization = (() => {
 					<li>A player may change teams without realizing it.</li>
 					<li>All information from the night is private, and players decide for themselves what they wish to share – there is no guarantee that anyone is telling the truth.</li>
 					<li>Bluffing is a tool both for protecting yourself and for gathering information from others.</li>
-				</ul>
-				`
-		},
-		SWE: {
-			//Meta/grammar
-			LIST_AND: "och",
-			LIST_OR: "eller",
-			TEAM_PREFIX: "Lag",
-			TEAM_VARIABLE_SUFFIX: " (variabel)",
-			PHASE_DAY_ROLE: "dagroll",
-			PHASE_DUSK_ROLE: "skymmningsroll",
-			PHASE_NIGHT_ROLE: "nattroll",
-			PHASE_DAY: "dag",
-			PHASE_DUSK: "skymmning",
-			PHASE_NIGHT: "natt",
-			
-			//Roles, tokens and teams
-			ROLE_ALIEN: "Utomjording",
-			ROLE_ALIEN_DEFINITE: "Utomjordingen",
-			ROLE_ALIEN_DEFINITE_GENITIVE: "Utomjordingens",
-			ROLE_ALIEN_GENITIVE: "Utomjordings",
-			ROLE_ALIEN_PLURAL: "Utomjordingar",
-			ROLE_ALIEN_PLURAL_DEFINITE: "Utomjordingarna",
-			ROLE_ALIEN_PLURAL_DEFINITE_GENITIVE: "Utomjordingarnas",
-			ROLE_ALIEN_PLURAL_GENITIVE: "Utomjordingars",
-			ROLE_ALPHAWOLF: "Alfavarg",
-			ROLE_ALPHAWOLF_DEFINITE: "Alfavargen",
-			ROLE_ALPHAWOLF_DEFINITE_GENITIVE: "Alfavargens",
-			ROLE_ALPHAWOLF_GENITIVE: "Alfavargs",
-			ROLE_ALPHAWOLF_PLURAL: "Alfavargar",
-			ROLE_ALPHAWOLF_PLURAL_DEFINITE: "Alfavargarna",
-			ROLE_ALPHAWOLF_PLURAL_DEFINITE_GENITIVE: "Alfavargarnas",
-			ROLE_ALPHAWOLF_PLURAL_GENITIVE: "Alfavargars",
-			ROLE_APPRENTICEASSASSIN: "Lönnmördarnovis",
-			ROLE_APPRENTICEASSASSIN_DEFINITE: "Lönnmördarnovisen",
-			ROLE_APPRENTICEASSASSIN_DEFINITE_GENITIVE: "Lönnmördarnovisens",
-			ROLE_APPRENTICEASSASSIN_GENITIVE: "Lönnmördarnovis",
-			ROLE_APPRENTICEASSASSIN_PLURAL: "Lönnmördarnoviser",
-			ROLE_APPRENTICEASSASSIN_PLURAL_DEFINITE: "Lönnmördarnoviserna",
-			ROLE_APPRENTICEASSASSIN_PLURAL_DEFINITE_GENITIVE: "Lönnmördarnovisernas",
-			ROLE_APPRENTICEASSASSIN_PLURAL_GENITIVE: "Lönnmördarnovisers",
-			ROLE_APPRENTICESEER: "Siarlärling",
-			ROLE_APPRENTICESEER_DEFINITE: "Siarlärlingen",
-			ROLE_APPRENTICESEER_DEFINITE_GENITIVE: "Siarlärlingens",
-			ROLE_APPRENTICESEER_GENITIVE: "Siarlärlings",
-			ROLE_APPRENTICESEER_PLURAL: "Siarlärlingar",
-			ROLE_APPRENTICESEER_PLURAL_DEFINITE: "Siarlärlingarna",
-			ROLE_APPRENTICESEER_PLURAL_DEFINITE_GENITIVE: "Siarlärlingarnas",
-			ROLE_APPRENTICESEER_PLURAL_GENITIVE: "Siarlärlingars",
-			ROLE_APPRENTICETANNER: "Garvargesäll",
-			ROLE_APPRENTICETANNER_DEFINITE: "Garvargesällen",
-			ROLE_APPRENTICETANNER_DEFINITE_GENITIVE: "Garvargesällens",
-			ROLE_APPRENTICETANNER_GENITIVE: "Garvargesälls",
-			ROLE_APPRENTICETANNER_PLURAL: "Garvargesäller",
-			ROLE_APPRENTICETANNER_PLURAL_DEFINITE: "Garvargesällerna",
-			ROLE_APPRENTICETANNER_PLURAL_DEFINITE_GENITIVE: "Garvargesällernas",
-			ROLE_APPRENTICETANNER_PLURAL_GENITIVE: "Garvargesällers",
-			ROLE_ASSASSIN: "Lönnmördare",
-			ROLE_ASSASSIN_DEFINITE: "Lönnmördaren",
-			ROLE_ASSASSIN_DEFINITE_GENITIVE: "Lönnmördarens",
-			ROLE_ASSASSIN_GENITIVE: "Lönnmördares",
-			ROLE_ASSASSIN_PLURAL: "Lönnmördare",
-			ROLE_ASSASSIN_PLURAL_DEFINITE: "Lönnmördarna",
-			ROLE_ASSASSIN_PLURAL_DEFINITE_GENITIVE: "Lönnmördarnas",
-			ROLE_ASSASSIN_PLURAL_GENITIVE: "Lönnmördares",
-			ROLE_AURASEER: "Auraläsare",
-			ROLE_AURASEER_DEFINITE: "Auraläsaren",
-			ROLE_AURASEER_DEFINITE_GENITIVE: "Auraläsarens",
-			ROLE_AURASEER_GENITIVE: "Auraläsares",
-			ROLE_AURASEER_PLURAL: "Auraläsare",
-			ROLE_AURASEER_PLURAL_DEFINITE: "Auraläsarna",
-			ROLE_AURASEER_PLURAL_DEFINITE_GENITIVE: "Auraläsarnas",
-			ROLE_AURASEER_PLURAL_GENITIVE: "Auraläsares",
-			ROLE_BEHOLDER: "Betraktare",
-			ROLE_BEHOLDER_DEFINITE: "Betraktaren",
-			ROLE_BEHOLDER_DEFINITE_GENITIVE: "Betraktarens",
-			ROLE_BEHOLDER_GENITIVE: "Betraktares",
-			ROLE_BEHOLDER_PLURAL: "Betraktare",
-			ROLE_BEHOLDER_PLURAL_DEFINITE: "Betraktarna",
-			ROLE_BEHOLDER_PLURAL_DEFINITE_GENITIVE: "Betraktarnas",
-			ROLE_BEHOLDER_PLURAL_GENITIVE: "Betraktares",
-			ROLE_BLOB: "Blobb",
-			ROLE_BLOB_DEFINITE: "Blobben",
-			ROLE_BLOB_DEFINITE_GENITIVE: "Blobbens",
-			ROLE_BLOB_GENITIVE: "Blobbs",
-			ROLE_BLOB_PLURAL: "Blobbar",
-			ROLE_BLOB_PLURAL_DEFINITE: "Blobbarna",
-			ROLE_BLOB_PLURAL_DEFINITE_GENITIVE: "Blobbarnas",
-			ROLE_BLOB_PLURAL_GENITIVE: "Blobbars",
-			ROLE_BODYGUARD: "Livvakt",
-			ROLE_BODYGUARD_DEFINITE: "Livvakten",
-			ROLE_BODYGUARD_DEFINITE_GENITIVE: "Livvaktens",
-			ROLE_BODYGUARD_GENITIVE: "Livvakts",
-			ROLE_BODYGUARD_PLURAL: "Livvakter",
-			ROLE_BODYGUARD_PLURAL_DEFINITE: "Livvakterna",
-			ROLE_BODYGUARD_PLURAL_DEFINITE_GENITIVE: "Livvakternas",
-			ROLE_BODYGUARD_PLURAL_GENITIVE: "Livvakters",
-			ROLE_BODYSNATCHER: "Infiltratör",
-			ROLE_BODYSNATCHER_DEFINITE: "Infiltratören",
-			ROLE_BODYSNATCHER_DEFINITE_GENITIVE: "Infiltratörens",
-			ROLE_BODYSNATCHER_GENITIVE: "Infiltratörs",
-			ROLE_BODYSNATCHER_PLURAL: "Infiltratörer",
-			ROLE_BODYSNATCHER_PLURAL_DEFINITE: "Infiltratörerna",
-			ROLE_BODYSNATCHER_PLURAL_DEFINITE_GENITIVE: "Infiltratörernas",
-			ROLE_BODYSNATCHER_PLURAL_GENITIVE: "Infiltratörers",
-			ROLE_COPYCAT: "Imitatör",
-			ROLE_COPYCAT_DEFINITE: "Imitatören",
-			ROLE_COPYCAT_DEFINITE_GENITIVE: "Imitatörens",
-			ROLE_COPYCAT_GENITIVE: "Imitatörs",
-			ROLE_COPYCAT_PLURAL: "Imitatörer",
-			ROLE_COPYCAT_PLURAL_DEFINITE: "Imitatörerna",
-			ROLE_COPYCAT_PLURAL_DEFINITE_GENITIVE: "Imitatörernas",
-			ROLE_COPYCAT_PLURAL_GENITIVE: "Imitatörers",
-			ROLE_COUNT: "Greve",
-			ROLE_COUNT_DEFINITE: "Greven",
-			ROLE_COUNT_DEFINITE_GENITIVE: "Grevens",
-			ROLE_COUNT_GENITIVE: "Greves",
-			ROLE_COUNT_PLURAL: "Grevar",
-			ROLE_COUNT_PLURAL_DEFINITE: "Grevarna",
-			ROLE_COUNT_PLURAL_DEFINITE_GENITIVE: "Grevarnas",
-			ROLE_COUNT_PLURAL_GENITIVE: "Grevars",
-			ROLE_COW: "Ko",
-			ROLE_COW_DEFINITE: "Kon",
-			ROLE_COW_DEFINITE_GENITIVE: "Kons",
-			ROLE_COW_GENITIVE: "Kos",
-			ROLE_COW_PLURAL: "Kor",
-			ROLE_COW_PLURAL_DEFINITE: "Korna",
-			ROLE_COW_PLURAL_DEFINITE_GENITIVE: "Kornas",
-			ROLE_COW_PLURAL_GENITIVE: "Kors",
-			ROLE_CUPID: "Amor",
-			ROLE_CUPID_DEFINITE: "Amor",
-			ROLE_CUPID_DEFINITE_GENITIVE: "Amors",
-			ROLE_CUPID_GENITIVE: "Amors",
-			ROLE_CUPID_PLURAL: "Amorer",
-			ROLE_CUPID_PLURAL_DEFINITE: "Amorerna",
-			ROLE_CUPID_PLURAL_DEFINITE_GENITIVE: "Amorernas",
-			ROLE_CUPID_PLURAL_GENITIVE: "Amorers",
-			ROLE_CURATOR: "Kurator",
-			ROLE_CURATOR_DEFINITE: "Kuratorn",
-			ROLE_CURATOR_DEFINITE_GENITIVE: "Kuratorns",
-			ROLE_CURATOR_GENITIVE: "Kurators",
-			ROLE_CURATOR_PLURAL: "Kuratorer",
-			ROLE_CURATOR_PLURAL_DEFINITE: "Kuratorerna",
-			ROLE_CURATOR_PLURAL_DEFINITE_GENITIVE: "Kuratorernas",
-			ROLE_CURATOR_PLURAL_GENITIVE: "Kuratorers",
-			ROLE_CURSED: "Fördömd",
-			ROLE_CURSED_DEFINITE: "den Fördömda",
-			ROLE_CURSED_DEFINITE_GENITIVE: "den Fördömdas",
-			ROLE_CURSED_GENITIVE: "Fördömds",
-			ROLE_CURSED_PLURAL: "Fördömda",
-			ROLE_CURSED_PLURAL_DEFINITE: "de Fördömda",
-			ROLE_CURSED_PLURAL_DEFINITE_GENITIVE: "de Fördömdas",
-			ROLE_CURSED_PLURAL_GENITIVE: "Fördömdas",
-			ROLE_DISEASED: "Smittad",
-			ROLE_DISEASED_DEFINITE: "den Smittade",
-			ROLE_DISEASED_DEFINITE_GENITIVE: "den Smittades",
-			ROLE_DISEASED_GENITIVE: "Smittads",
-			ROLE_DISEASED_PLURAL: "Smittade",
-			ROLE_DISEASED_PLURAL_DEFINITE: "de Smittade",
-			ROLE_DISEASED_PLURAL_DEFINITE_GENITIVE: "de Smittades",
-			ROLE_DISEASED_PLURAL_GENITIVE: "Smittades",
-			ROLE_DOPPELGANGER: "Dubbelgångare",
-			ROLE_DOPPELGANGER_DEFINITE: "Dubbelgångaren",
-			ROLE_DOPPELGANGER_DEFINITE_GENITIVE: "Dubbelgångarens",
-			ROLE_DOPPELGANGER_GENITIVE: "Dubbelgångares",
-			ROLE_DOPPELGANGER_PLURAL: "Dubbelgångare",
-			ROLE_DOPPELGANGER_PLURAL_DEFINITE: "Dubbelgångarna",
-			ROLE_DOPPELGANGER_PLURAL_DEFINITE_GENITIVE: "Dubbelgångarnas",
-			ROLE_DOPPELGANGER_PLURAL_GENITIVE: "Dubbelgångares",
-			ROLE_DREAMWOLF: "Drömvarg",
-			ROLE_DREAMWOLF_DEFINITE: "Drömvargen",
-			ROLE_DREAMWOLF_DEFINITE_GENITIVE: "Drömvargens",
-			ROLE_DREAMWOLF_GENITIVE: "Drömvargs",
-			ROLE_DREAMWOLF_PLURAL: "Drömvargar",
-			ROLE_DREAMWOLF_PLURAL_DEFINITE: "Drömvargarna",
-			ROLE_DREAMWOLF_PLURAL_DEFINITE_GENITIVE: "Drömvargarnas",
-			ROLE_DREAMWOLF_PLURAL_GENITIVE: "Drömvargars",
-			ROLE_DRUNK: "Berusad",
-			ROLE_DRUNK_DEFINITE: "den Berusade",
-			ROLE_DRUNK_DEFINITE_GENITIVE: "den Berusades",
-			ROLE_DRUNK_GENITIVE: "Berusads",
-			ROLE_DRUNK_PLURAL: "Berusade",
-			ROLE_DRUNK_PLURAL_DEFINITE: "de Berusade",
-			ROLE_DRUNK_PLURAL_DEFINITE_GENITIVE: "de Berusades",
-			ROLE_DRUNK_PLURAL_GENITIVE: "Berusades",
-			ROLE_EMPATH: "Empat",
-			ROLE_EMPATH_DEFINITE: "Empaten",
-			ROLE_EMPATH_DEFINITE_GENITIVE: "Empatens",
-			ROLE_EMPATH_GENITIVE: "Empats",
-			ROLE_EMPATH_PLURAL: "Empater",
-			ROLE_EMPATH_PLURAL_DEFINITE: "Empaterna",
-			ROLE_EMPATH_PLURAL_DEFINITE_GENITIVE: "Empaternas",
-			ROLE_EMPATH_PLURAL_GENITIVE: "Empaters",
-			ROLE_EXPOSER: "Angivare",
-			ROLE_EXPOSER_DEFINITE: "Angivaren",
-			ROLE_EXPOSER_DEFINITE_GENITIVE: "Angivarens",
-			ROLE_EXPOSER_GENITIVE: "Angivares",
-			ROLE_EXPOSER_PLURAL: "Angivare",
-			ROLE_EXPOSER_PLURAL_DEFINITE: "Angivarna",
-			ROLE_EXPOSER_PLURAL_DEFINITE_GENITIVE: "Angivarnas",
-			ROLE_EXPOSER_PLURAL_GENITIVE: "Angivares",
-			ROLE_FEUDINGALIENS: "Groob och Zerb",
-			ROLE_FEUDINGALIENS_DEFINITE: "Groob och Zerb",
-			ROLE_FEUDINGALIENS_DEFINITE_GENITIVE: "Groobs och Zerbs",
-			ROLE_FEUDINGALIENS_GENITIVE: "Groobs och Zerbs",
-			ROLE_FEUDINGALIENS_PLURAL: "Groob och Zerb",
-			ROLE_FEUDINGALIENS_PLURAL_DEFINITE: "Groob och Zerb",
-			ROLE_FEUDINGALIENS_PLURAL_DEFINITE_GENITIVE: "Groobs och Zerbs",
-			ROLE_FEUDINGALIENS_PLURAL_GENITIVE: "Groobs och Zerbs",
-			ROLE_GREMLIN: "Troll",
-			ROLE_GREMLIN_DEFINITE: "Trollet",
-			ROLE_GREMLIN_DEFINITE_GENITIVE: "Trollets",
-			ROLE_GREMLIN_GENITIVE: "Trolls",
-			ROLE_GREMLIN_PLURAL: "Troll",
-			ROLE_GREMLIN_PLURAL_DEFINITE: "Trollen",
-			ROLE_GREMLIN_PLURAL_DEFINITE_GENITIVE: "Trollens",
-			ROLE_GREMLIN_PLURAL_GENITIVE: "Trolls",
-			ROLE_HUNTER: "Jägare",
-			ROLE_HUNTER_DEFINITE: "Jägaren",
-			ROLE_HUNTER_DEFINITE_GENITIVE: "Jägarens",
-			ROLE_HUNTER_GENITIVE: "Jägares",
-			ROLE_HUNTER_PLURAL: "Jägare",
-			ROLE_HUNTER_PLURAL_DEFINITE: "Jägarna",
-			ROLE_HUNTER_PLURAL_DEFINITE_GENITIVE: "Jägarnas",
-			ROLE_HUNTER_PLURAL_GENITIVE: "Jägares",
-			ROLE_INSOMNIAC: "Sömnlös",
-			ROLE_INSOMNIAC_DEFINITE: "den Sömnlösa",
-			ROLE_INSOMNIAC_DEFINITE_GENITIVE: "den Sömnlösas",
-			ROLE_INSOMNIAC_GENITIVE: "Sömnlöss",
-			ROLE_INSOMNIAC_PLURAL: "Sömnlösa",
-			ROLE_INSOMNIAC_PLURAL_DEFINITE: "de Sömnlösa",
-			ROLE_INSOMNIAC_PLURAL_DEFINITE_GENITIVE: "de Sömnlösas",
-			ROLE_INSOMNIAC_PLURAL_GENITIVE: "Sömnlösas",
-			ROLE_INSTIGATOR: "Anstiftare",
-			ROLE_INSTIGATOR_DEFINITE: "Anstiftaren",
-			ROLE_INSTIGATOR_DEFINITE_GENITIVE: "Anstiftarens",
-			ROLE_INSTIGATOR_GENITIVE: "Anstiftares",
-			ROLE_INSTIGATOR_PLURAL: "Anstiftare",
-			ROLE_INSTIGATOR_PLURAL_DEFINITE: "Anstiftarna",
-			ROLE_INSTIGATOR_PLURAL_DEFINITE_GENITIVE: "Anstiftarnas",
-			ROLE_INSTIGATOR_PLURAL_GENITIVE: "Anstiftares",
-			ROLE_LEADER: "Borgmästare",
-			ROLE_LEADER_DEFINITE: "Borgmästaren",
-			ROLE_LEADER_DEFINITE_GENITIVE: "Borgmästarens",
-			ROLE_LEADER_GENITIVE: "Borgmästares",
-			ROLE_LEADER_PLURAL: "Borgmästare",
-			ROLE_LEADER_PLURAL_DEFINITE: "Borgmästarna",
-			ROLE_LEADER_PLURAL_DEFINITE_GENITIVE: "Borgmästarnas",
-			ROLE_LEADER_PLURAL_GENITIVE: "Borgmästares",
-			ROLE_MARKSMAN: "Spejare",
-			ROLE_MARKSMAN_DEFINITE: "Spejaren",
-			ROLE_MARKSMAN_DEFINITE_GENITIVE: "Spejarens",
-			ROLE_MARKSMAN_GENITIVE: "Spejares",
-			ROLE_MARKSMAN_PLURAL: "Spejare",
-			ROLE_MARKSMAN_PLURAL_DEFINITE: "Spejarna",
-			ROLE_MARKSMAN_PLURAL_DEFINITE_GENITIVE: "Spejarnas",
-			ROLE_MARKSMAN_PLURAL_GENITIVE: "Spejares",
-			ROLE_MASON: "Frimurare",
-			ROLE_MASON_DEFINITE: "Frimuraren",
-			ROLE_MASON_DEFINITE_GENITIVE: "Frimurarens",
-			ROLE_MASON_GENITIVE: "Frimurares",
-			ROLE_MASON_PLURAL: "Frimurare",
-			ROLE_MASON_PLURAL_DEFINITE: "Frimurarna",
-			ROLE_MASON_PLURAL_DEFINITE_GENITIVE: "Frimurarnas",
-			ROLE_MASON_PLURAL_GENITIVE: "Frimurares",
-			ROLE_MASTER: "Mästare",
-			ROLE_MASTER_DEFINITE: "Mästaren",
-			ROLE_MASTER_DEFINITE_GENITIVE: "Mästarens",
-			ROLE_MASTER_GENITIVE: "Mästares",
-			ROLE_MASTER_PLURAL: "Mästare",
-			ROLE_MASTER_PLURAL_DEFINITE: "Mästarna",
-			ROLE_MASTER_PLURAL_DEFINITE_GENITIVE: "Mästarnas",
-			ROLE_MASTER_PLURAL_GENITIVE: "Mästares",
-			ROLE_MINION: "Underhuggare",
-			ROLE_MINION_DEFINITE: "Underhuggaren",
-			ROLE_MINION_DEFINITE_GENITIVE: "Underhuggarens",
-			ROLE_MINION_GENITIVE: "Underhuggares",
-			ROLE_MINION_PLURAL: "Underhuggare",
-			ROLE_MINION_PLURAL_DEFINITE: "Underhuggarna",
-			ROLE_MINION_PLURAL_DEFINITE_GENITIVE: "Underhuggarnas",
-			ROLE_MINION_PLURAL_GENITIVE: "Underhuggares",
-			ROLE_MORTICIAN: "Obducent",
-			ROLE_MORTICIAN_DEFINITE: "Obducenten",
-			ROLE_MORTICIAN_DEFINITE_GENITIVE: "Obducentens",
-			ROLE_MORTICIAN_GENITIVE: "Obducents",
-			ROLE_MORTICIAN_PLURAL: "Obducenter",
-			ROLE_MORTICIAN_PLURAL_DEFINITE: "Obducenterna",
-			ROLE_MORTICIAN_PLURAL_DEFINITE_GENITIVE: "Obducenternas",
-			ROLE_MORTICIAN_PLURAL_GENITIVE: "Obducenters",
-			ROLE_MYSTICWOLF: "Siarvarg",
-			ROLE_MYSTICWOLF_DEFINITE: "Siarvargen",
-			ROLE_MYSTICWOLF_DEFINITE_GENITIVE: "Siarvargens",
-			ROLE_MYSTICWOLF_GENITIVE: "Siarvargs",
-			ROLE_MYSTICWOLF_PLURAL: "Siarvargar",
-			ROLE_MYSTICWOLF_PLURAL_DEFINITE: "Siarvargarna",
-			ROLE_MYSTICWOLF_PLURAL_DEFINITE_GENITIVE: "Siarvargarnas",
-			ROLE_MYSTICWOLF_PLURAL_GENITIVE: "Siarvargars",
-			ROLE_NOSTRADAMUS: "Profet",
-			ROLE_NOSTRADAMUS_DEFINITE: "Profeten",
-			ROLE_NOSTRADAMUS_DEFINITE_GENITIVE: "Profetens",
-			ROLE_NOSTRADAMUS_GENITIVE: "Profets",
-			ROLE_NOSTRADAMUS_PLURAL: "Profeter",
-			ROLE_NOSTRADAMUS_PLURAL_DEFINITE: "Profeterna",
-			ROLE_NOSTRADAMUS_PLURAL_DEFINITE_GENITIVE: "Profeternas",
-			ROLE_NOSTRADAMUS_PLURAL_GENITIVE: "Profeters",
-			ROLE_ORACLE: "Orakel",
-			ROLE_ORACLE_DEFINITE: "Oraklet",
-			ROLE_ORACLE_DEFINITE_GENITIVE: "Oraklets",
-			ROLE_ORACLE_GENITIVE: "Orakels",
-			ROLE_ORACLE_PLURAL: "Orakel",
-			ROLE_ORACLE_PLURAL_DEFINITE: "Oraklen",
-			ROLE_ORACLE_PLURAL_DEFINITE_GENITIVE: "Oraklens",
-			ROLE_ORACLE_PLURAL_GENITIVE: "Orakels",
-			ROLE_PARANORMALINVESTIGATOR: "Spökjägare",
-			ROLE_PARANORMALINVESTIGATOR_DEFINITE: "Spökjägaren",
-			ROLE_PARANORMALINVESTIGATOR_DEFINITE_GENITIVE: "Spökjägarens",
-			ROLE_PARANORMALINVESTIGATOR_GENITIVE: "Spökjägares",
-			ROLE_PARANORMALINVESTIGATOR_PLURAL: "Spökjägare",
-			ROLE_PARANORMALINVESTIGATOR_PLURAL_DEFINITE: "Spökjägarna",
-			ROLE_PARANORMALINVESTIGATOR_PLURAL_DEFINITE_GENITIVE: "Spökjägarnas",
-			ROLE_PARANORMALINVESTIGATOR_PLURAL_GENITIVE: "Spökjägares",
-			ROLE_PICKPOCKET: "Ficktjuv",
-			ROLE_PICKPOCKET_DEFINITE: "Ficktjuven",
-			ROLE_PICKPOCKET_DEFINITE_GENITIVE: "Ficktjuvens",
-			ROLE_PICKPOCKET_GENITIVE: "Ficktjuvs",
-			ROLE_PICKPOCKET_PLURAL: "Ficktjuvar",
-			ROLE_PICKPOCKET_PLURAL_DEFINITE: "Ficktjuvarna",
-			ROLE_PICKPOCKET_PLURAL_DEFINITE_GENITIVE: "Ficktjuvarnas",
-			ROLE_PICKPOCKET_PLURAL_GENITIVE: "Ficktjuvars",
-			ROLE_PRIEST: "Präst",
-			ROLE_PRIEST_DEFINITE: "Prästen",
-			ROLE_PRIEST_DEFINITE_GENITIVE: "Prästens",
-			ROLE_PRIEST_GENITIVE: "Prästs",
-			ROLE_PRIEST_PLURAL: "Präster",
-			ROLE_PRIEST_PLURAL_DEFINITE: "Prästerna",
-			ROLE_PRIEST_PLURAL_DEFINITE_GENITIVE: "Prästernas",
-			ROLE_PRIEST_PLURAL_GENITIVE: "Prästers",
-			ROLE_PRINCE: "Prins",
-			ROLE_PRINCE_DEFINITE: "Prinsen",
-			ROLE_PRINCE_DEFINITE_GENITIVE: "Prinsens",
-			ROLE_PRINCE_GENITIVE: "Prinsens",
-			ROLE_PRINCE_PLURAL: "Prinsar",
-			ROLE_PRINCE_PLURAL_DEFINITE: "Prinsarna",
-			ROLE_PRINCE_PLURAL_DEFINITE_GENITIVE: "Prinsarnas",
-			ROLE_PRINCE_PLURAL_GENITIVE: "Prinsars",
-			ROLE_PSYCHIC: "Synsk",
-			ROLE_PSYCHIC_DEFINITE: "den Synska",
-			ROLE_PSYCHIC_DEFINITE_GENITIVE: "den Synskas",
-			ROLE_PSYCHIC_GENITIVE: "Synsks",
-			ROLE_PSYCHIC_PLURAL: "Synska",
-			ROLE_PSYCHIC_PLURAL_DEFINITE: "de Synska",
-			ROLE_PSYCHIC_PLURAL_DEFINITE_GENITIVE: "de Synskas",
-			ROLE_PSYCHIC_PLURAL_GENITIVE: "Synskas",
-			ROLE_RASCAL: "Fifflare",
-			ROLE_RASCAL_DEFINITE: "Fifflaren",
-			ROLE_RASCAL_DEFINITE_GENITIVE: "Fifflarens",
-			ROLE_RASCAL_GENITIVE: "Fifflares",
-			ROLE_RASCAL_PLURAL: "Fifflare",
-			ROLE_RASCAL_PLURAL_DEFINITE: "Fifflarna",
-			ROLE_RASCAL_PLURAL_DEFINITE_GENITIVE: "Fifflarnas",
-			ROLE_RASCAL_PLURAL_GENITIVE: "Fifflares",
-			ROLE_RENFIELD: "Renfield",
-			ROLE_RENFIELD_DEFINITE: "Renfield",
-			ROLE_RENFIELD_DEFINITE_GENITIVE: "Renfields",
-			ROLE_RENFIELD_GENITIVE: "Renfields",
-			ROLE_RENFIELD_PLURAL: "Renfields",
-			ROLE_RENFIELD_PLURAL_DEFINITE: "Renfields",
-			ROLE_RENFIELD_PLURAL_DEFINITE_GENITIVE: "Renfields",
-			ROLE_RENFIELD_PLURAL_GENITIVE: "Renfields",
-			ROLE_REVEALER: "Astrolog",
-			ROLE_REVEALER_DEFINITE: "Astrologen",
-			ROLE_REVEALER_DEFINITE_GENITIVE: "Astrologens",
-			ROLE_REVEALER_GENITIVE: "Astrologs",
-			ROLE_REVEALER_PLURAL: "Astrologer",
-			ROLE_REVEALER_PLURAL_DEFINITE: "Astrologerna",
-			ROLE_REVEALER_PLURAL_DEFINITE_GENITIVE: "Astrologernas",
-			ROLE_REVEALER_PLURAL_GENITIVE: "Astrologers",
-			ROLE_ROBBER: "Tjuv",
-			ROLE_ROBBER_DEFINITE: "Tjuven",
-			ROLE_ROBBER_DEFINITE_GENITIVE: "Tjuvens",
-			ROLE_ROBBER_GENITIVE: "Tjuvs",
-			ROLE_ROBBER_PLURAL: "Tjuvar",
-			ROLE_ROBBER_PLURAL_DEFINITE: "Tjuvarna",
-			ROLE_ROBBER_PLURAL_DEFINITE_GENITIVE: "Tjuvarnas",
-			ROLE_ROBBER_PLURAL_GENITIVE: "Tjuvars",
-			ROLE_SEER: "Siare",
-			ROLE_SEER_DEFINITE: "Siaren",
-			ROLE_SEER_DEFINITE_GENITIVE: "Siarens",
-			ROLE_SEER_GENITIVE: "Siares",
-			ROLE_SEER_PLURAL: "Siare",
-			ROLE_SEER_PLURAL_DEFINITE: "Siarna",
-			ROLE_SEER_PLURAL_DEFINITE_GENITIVE: "Siarnas",
-			ROLE_SEER_PLURAL_GENITIVE: "Siares",
-			ROLE_SENTINEL: "Väktare",
-			ROLE_SENTINEL_DEFINITE: "Väktaren",
-			ROLE_SENTINEL_DEFINITE_GENITIVE: "Väktarens",
-			ROLE_SENTINEL_GENITIVE: "Väktares",
-			ROLE_SENTINEL_PLURAL: "Väktare",
-			ROLE_SENTINEL_PLURAL_DEFINITE: "Väktarna",
-			ROLE_SENTINEL_PLURAL_DEFINITE_GENITIVE: "Väktarnas",
-			ROLE_SENTINEL_PLURAL_GENITIVE: "Väktares",
-			ROLE_SQUIRE: "Lakej",
-			ROLE_SQUIRE_DEFINITE: "Lakejen",
-			ROLE_SQUIRE_DEFINITE_GENITIVE: "Lakejens",
-			ROLE_SQUIRE_GENITIVE: "Lakejs",
-			ROLE_SQUIRE_PLURAL: "Lakejer",
-			ROLE_SQUIRE_PLURAL_DEFINITE: "Lakejerna",
-			ROLE_SQUIRE_PLURAL_DEFINITE_GENITIVE: "Lakejernas",
-			ROLE_SQUIRE_PLURAL_GENITIVE: "Lakejers",
-			ROLE_SYNTHETICALIEN: "Syntet",
-			ROLE_SYNTHETICALIEN_DEFINITE: "Synteten",
-			ROLE_SYNTHETICALIEN_DEFINITE_GENITIVE: "Syntetens",
-			ROLE_SYNTHETICALIEN_GENITIVE: "Syntets",
-			ROLE_SYNTHETICALIEN_PLURAL: "Synteter",
-			ROLE_SYNTHETICALIEN_PLURAL_DEFINITE: "Synteterna",
-			ROLE_SYNTHETICALIEN_PLURAL_DEFINITE_GENITIVE: "Synteternas",
-			ROLE_SYNTHETICALIEN_PLURAL_GENITIVE: "Synteters",
-			ROLE_TANNER: "Garvare",
-			ROLE_TANNER_DEFINITE: "Garvaren",
-			ROLE_TANNER_DEFINITE_GENITIVE: "Garvarens",
-			ROLE_TANNER_GENITIVE: "Garvares",
-			ROLE_TANNER_PLURAL: "Garvare",
-			ROLE_TANNER_PLURAL_DEFINITE: "Garvarna",
-			ROLE_TANNER_PLURAL_DEFINITE_GENITIVE: "Garvarnas",
-			ROLE_TANNER_PLURAL_GENITIVE: "Garvares",
-			ROLE_THING: "Varelsen",
-			ROLE_THING_DEFINITE: "Varelsen",
-			ROLE_THING_DEFINITE_GENITIVE: "Varelsens",
-			ROLE_THING_GENITIVE: "Varelsens",
-			ROLE_THING_PLURAL: "Varelser",
-			ROLE_THING_PLURAL_DEFINITE: "Varelserna",
-			ROLE_THING_PLURAL_DEFINITE_GENITIVE: "Varelsernas",
-			ROLE_THING_PLURAL_GENITIVE: "Varelsers",
-			ROLE_TROUBLEMAKER: "Bråkmakare",
-			ROLE_TROUBLEMAKER_DEFINITE: "Bråkmakaren",
-			ROLE_TROUBLEMAKER_DEFINITE_GENITIVE: "Bråkmakarens",
-			ROLE_TROUBLEMAKER_GENITIVE: "Bråkmakares",
-			ROLE_TROUBLEMAKER_PLURAL: "Bråkmakare",
-			ROLE_TROUBLEMAKER_PLURAL_DEFINITE: "Bråkmakarna",
-			ROLE_TROUBLEMAKER_PLURAL_DEFINITE_GENITIVE: "Bråkmakarnas",
-			ROLE_TROUBLEMAKER_PLURAL_GENITIVE: "Bråkmakares",
-			ROLE_VAMPIRE: "Vampyr",
-			ROLE_VAMPIRE_DEFINITE: "Vampyren",
-			ROLE_VAMPIRE_DEFINITE_GENITIVE: "Vampyrens",
-			ROLE_VAMPIRE_GENITIVE: "Vampyrs",
-			ROLE_VAMPIRE_PLURAL: "Vampyrer",
-			ROLE_VAMPIRE_PLURAL_DEFINITE: "Vampyrerna",
-			ROLE_VAMPIRE_PLURAL_DEFINITE_GENITIVE: "Vampyrernas",
-			ROLE_VAMPIRE_PLURAL_GENITIVE: "Vampyrers",
-			ROLE_VILLAGEIDIOT: "Byfåne",
-			ROLE_VILLAGEIDIOT_DEFINITE: "Byfånen",
-			ROLE_VILLAGEIDIOT_DEFINITE_GENITIVE: "Byfånens",
-			ROLE_VILLAGEIDIOT_GENITIVE: "Byfånes",
-			ROLE_VILLAGEIDIOT_PLURAL: "Byfånar",
-			ROLE_VILLAGEIDIOT_PLURAL_DEFINITE: "Byfånarna",
-			ROLE_VILLAGEIDIOT_PLURAL_DEFINITE_GENITIVE: "Byfånarnas",
-			ROLE_VILLAGEIDIOT_PLURAL_GENITIVE: "Byfånars",
-			ROLE_VILLAGER: "Bybo",
-			ROLE_VILLAGER_DEFINITE: "Bybon",
-			ROLE_VILLAGER_DEFINITE_GENITIVE: "Bybons",
-			ROLE_VILLAGER_GENITIVE: "Bybos",
-			ROLE_VILLAGER_PLURAL: "Bybor",
-			ROLE_VILLAGER_PLURAL_DEFINITE: "Byborna",
-			ROLE_VILLAGER_PLURAL_DEFINITE_GENITIVE: "Bybornas",
-			ROLE_VILLAGER_PLURAL_GENITIVE: "Bybors",
-			ROLE_WEREWOLF: "Varulv",
-			ROLE_WEREWOLF_DEFINITE: "Varulven",
-			ROLE_WEREWOLF_DEFINITE_GENITIVE: "Varulvens",
-			ROLE_WEREWOLF_GENITIVE: "Varulvs",
-			ROLE_WEREWOLF_PLURAL: "Varulvar",
-			ROLE_WEREWOLF_PLURAL_DEFINITE: "Varulvarna",
-			ROLE_WEREWOLF_PLURAL_DEFINITE_GENITIVE: "Varulvarnas",
-			ROLE_WEREWOLF_PLURAL_GENITIVE: "Varulvars",
-			ROLE_WITCH: "Häxa",
-			ROLE_WITCH_DEFINITE: "Häxan",
-			ROLE_WITCH_DEFINITE_GENITIVE: "Häxans",
-			ROLE_WITCH_GENITIVE: "Häxas",
-			ROLE_WITCH_PLURAL: "Häxor",
-			ROLE_WITCH_PLURAL_DEFINITE: "Häxorna",
-			ROLE_WITCH_PLURAL_DEFINITE_GENITIVE: "Häxornas",
-			ROLE_WITCH_PLURAL_GENITIVE: "Häxors",
-			SPECIAL_ALL: "Alla spelare",
-			SPECIAL_ALL_DEFINITE: "Alla spelare",
-			SPECIAL_ALL_DEFINITE_GENITIVE: "Alla spelares",
-			SPECIAL_ALL_GENITIVE: "Alla spelares",
-			SPECIAL_ALL_PLURAL: "Alla spelare",
-			SPECIAL_ALL_PLURAL_DEFINITE: "Alla spelare",
-			SPECIAL_ALL_PLURAL_DEFINITE_GENITIVE: "Alla spelares",
-			SPECIAL_ALL_PLURAL_GENITIVE: "Alla spelares",
-			SPECIAL_LOVERS: "Förälskade",
-			SPECIAL_LOVERS_DEFINITE: "de Förälskade",
-			SPECIAL_LOVERS_DEFINITE_GENITIVE: "de Förälskades",
-			SPECIAL_LOVERS_GENITIVE: "Förälskades",
-			SPECIAL_LOVERS_PLURAL: "Förälskade",
-			SPECIAL_LOVERS_PLURAL_DEFINITE: "de Förälskade",
-			SPECIAL_LOVERS_PLURAL_DEFINITE_GENITIVE: "de Förälskades",
-			SPECIAL_LOVERS_PLURAL_GENITIVE: "Förälskades",
-			TEAM_ALIEN: "Utomjording",
-			TEAM_ALIEN_DEFINITE: "Utomjordingarna",
-			TEAM_ALIEN_DEFINITE_GENITIVE: "Utomjordingarnas",
-			TEAM_ALIEN_GENITIVE: "Utomjordings",
-			TEAM_ALIEN_PLURAL: "Utomjordingar",
-			TEAM_ALIEN_PLURAL_DEFINITE: "Utomjordingarna",
-			TEAM_ALIEN_PLURAL_DEFINITE_GENITIVE: "Utomjordingarnas",
-			TEAM_ALIEN_PLURAL_GENITIVE: "Utomjordingars",
-			TEAM_MINORITY: "Övrig",
-			TEAM_MINORITY_DEFINITE: "De övriga",
-			TEAM_MINORITY_DEFINITE_GENITIVE: "De övrigas",
-			TEAM_MINORITY_GENITIVE: "Övrigs",
-			TEAM_MINORITY_PLURAL: "Övriga",
-			TEAM_MINORITY_PLURAL_DEFINITE: "De övriga",
-			TEAM_MINORITY_PLURAL_DEFINITE_GENITIVE: "De övrigas",
-			TEAM_MINORITY_PLURAL_GENITIVE: "Övrigas",
-			TEAM_VAMPIRE: "Vampyr",
-			TEAM_VAMPIRE_DEFINITE: "Vampyrerna",
-			TEAM_VAMPIRE_DEFINITE_GENITIVE: "Vampyrernas",
-			TEAM_VAMPIRE_GENITIVE: "Vampyrs",
-			TEAM_VAMPIRE_PLURAL: "Vampyrer",
-			TEAM_VAMPIRE_PLURAL_DEFINITE: "Vampyrerna",
-			TEAM_VAMPIRE_PLURAL_DEFINITE_GENITIVE: "Vampyrernas",
-			TEAM_VAMPIRE_PLURAL_GENITIVE: "Vampyrers",
-			TEAM_VILLAGE: "Bybo",
-			TEAM_VILLAGE_DEFINITE: "Byborna",
-			TEAM_VILLAGE_DEFINITE_GENITIVE: "Bybornas",
-			TEAM_VILLAGE_GENITIVE: "Bybos",
-			TEAM_VILLAGE_PLURAL: "Bybor",
-			TEAM_VILLAGE_PLURAL_DEFINITE: "Byborna",
-			TEAM_VILLAGE_PLURAL_DEFINITE_GENITIVE: "Bybornas",
-			TEAM_VILLAGE_PLURAL_GENITIVE: "Bybors",
-			TEAM_WEREWOLF: "Varulv",
-			TEAM_WEREWOLF_DEFINITE: "Varulvarna",
-			TEAM_WEREWOLF_DEFINITE_GENITIVE: "Varulvarnas",
-			TEAM_WEREWOLF_GENITIVE: "Varulvs",
-			TEAM_WEREWOLF_PLURAL: "Varulvar",
-			TEAM_WEREWOLF_PLURAL_DEFINITE: "Varulvarna",
-			TEAM_WEREWOLF_PLURAL_DEFINITE_GENITIVE: "Varulvarnas",
-			TEAM_WEREWOLF_PLURAL_GENITIVE: "Varulvars",
-			TOKEN_ARTIFACT_ALIEN: "{TEAM_ALIEN_GENITIVE}artefakt",
-			TOKEN_ARTIFACT_BODYGUARD: "{ROLE_BODYGUARD_DEFINITE_GENITIVE} artefakt",
-			TOKEN_ARTIFACT_CLOAK: "Pariaartefakt",
-			TOKEN_ARTIFACT_HUNTER: "{ROLE_HUNTER_DEFINITE_GENITIVE} artefakt",
-			TOKEN_ARTIFACT_MUTED: "Tystadsartefakt",
-			TOKEN_ARTIFACT_PRINCE: "{ROLE_PRINCE_DEFINITE_GENITIVE} artefakt",
-			TOKEN_ARTIFACT_TANNER: "{ROLE_TANNER_DEFINITE_GENITIVE} artefakt",
-			TOKEN_ARTIFACT_TRAITOR: "Förrädarartefakt",
-			TOKEN_ARTIFACT_VAMPIRE: "{TEAM_VAMPIRE_GENITIVE}artefakt",
-			TOKEN_ARTIFACT_VILLAGER: "{ROLE_VILLAGER_DEFINITE_GENITIVE} artefakt",
-			TOKEN_ARTIFACT_VOID: "Nullartefakt",
-			TOKEN_ARTIFACT_WEREWOLF: "{TEAM_WEREWOLF_GENITIVE}artefakt",
-			TOKEN_MARK_ASSASSIN: "{ROLE_ASSASSIN_DEFINITE_GENITIVE} märke",
-			TOKEN_MARK_CLARITY: "Rent märke",
-			TOKEN_MARK_COUNT: "{ROLE_COUNT_DEFINITE_GENITIVE} märke",
-			TOKEN_MARK_CUPID: "{ROLE_CUPID_DEFINITE_GENITIVE} märke",
-			TOKEN_MARK_DISEASED: "{ROLE_DISEASED_DEFINITE_GENITIVE} märke",
-			TOKEN_MARK_INSTIGATOR: "{ROLE_INSTIGATOR_DEFINITE_GENITIVE} märke",
-			TOKEN_MARK_RENFIELD: "{ROLE_RENFIELD_DEFINITE_GENITIVE} märke",
-			TOKEN_MARK_VAMPIRE: "{TEAM_VAMPIRE_PLURAL_DEFINITE_GENITIVE} märke",
-			TOKEN_SHIELD: "Sköldbricka",
-			
-			
-			//UI
-			UI_ABILITY_ALIEN: "Vaknar tillsammans med alla {TEAM_ALIEN_PLURAL} och identifierar andra {TEAM_ALIEN_PLURAL}. Kan också kollektivt få titta på ett eller fler kort slumpmässigt.",
-			UI_ABILITY_ALPHAWOLF: "Vaknar först tillsammans med alla {TEAM_WEREWOLF_PLURAL}. Vaknar sedan ensam och byter en icke-{TEAM_WEREWOLF_GENITIVE}spelares kort med det oanvända {TEAM_WEREWOLF_GENITIVE}kortet i mitten. Om {ROLE_ALPHAWOLF_DEFINITE} används placeras ytterligare ett {TEAM_WEREWOLF_GENITIVE}kort i mitten, roterat 90 grader.",
-			UI_ABILITY_APPRENTICEASSASSIN: "Vaknar samtidigt som {ROLE_ASSASSIN_DEFINITE} efter att {TOKEN_MARK_ASSASSIN} placerats ut så att de kan identifiera varandra. Om ingen {ROLE_ASSASSIN} är i spel så utför {ROLE_APPRENTICEASSASSIN_DEFINITE} den handlingen istället.",
-			UI_ABILITY_APPRENTICESEER: "Vaknar och får se på ett av mittenkorten.",
-			UI_ABILITY_APPRENTICETANNER: "Vaknar och får se vem {ROLE_TANNER_DEFINITE} är.",
-			UI_ABILITY_ARTIFACT_ALIEN: "Spelaren är nu en {TEAM_ALIEN}, oberoende av tidigare roll.",
-			UI_ABILITY_ARTIFACT_BODYGUARD: "Spelaren är nu en {ROLE_BODYGUARD}, oberoende av tidigare roll.",
-			UI_ABILITY_ARTIFACT_CLOAK: "Spelaren måste vända sig bort.",
-			UI_ABILITY_ARTIFACT_HUNTER: "Spelaren är nu en {ROLE_HUNTER}, oberoende av tidigare roll.",
-			UI_ABILITY_ARTIFACT_MUTED: "Spelaren får inte prata under dagen.",
-			UI_ABILITY_ARTIFACT_PRINCE: "Spelaren är nu en {ROLE_PRINCE}, oberoende av tidigare roll.",
-			UI_ABILITY_ARTIFACT_TANNER: "Spelaren är nu en {ROLE_TANNER}, oberoende av tidigare roll.",
-			UI_ABILITY_ARTIFACT_TRAITOR: "Spelaren är nu en förrädare och vinner endast om deras lag förlorar.",
-			UI_ABILITY_ARTIFACT_VAMPIRE: "Spelaren är nu en {TEAM_VAMPIRE}, oberoende av tidigare roll.",
-			UI_ABILITY_ARTIFACT_VILLAGER: "Spelaren är nu en {ROLE_VILLAGER}, oberoende av tidigare roll.",
-			UI_ABILITY_ARTIFACT_VOID: "Artefakten har ingen effekt.",
-			UI_ABILITY_ARTIFACT_WEREWOLF: "Spelaren är nu en {TEAM_WEREWOLF}, oberoende av tidigare roll.",
-			UI_ABILITY_ASSASSIN: "Vaknar och väljer en måltavla genom att placera {TOKEN_MARK_ASSASSIN} framför spelaren.",
-			UI_ABILITY_AURASEER: "Vaknar och får se vilka spelare som har tittat på eller flyttat ett kort under natten.",
-			UI_ABILITY_BEHOLDER: "Vaknar och får se vem {ROLE_SEER_DEFINITE} och {ROLE_APPRENTICESEER_DEFINITE} är. Kan sedan kontrollera deras kort för att se om korten har flyttats under natten.",
-			UI_ABILITY_BLOB: "Vaknar inte. I början av dagen annonseras vilka av de närmaste grannarna (0–4 st) som {ROLE_BLOB_DEFINITE} måste skydda.",
-			UI_ABILITY_BODYGUARD: "Spelaren som {ROLE_BODYGUARD_DEFINITE} röstar på kan inte röstas ut. Spelaren med näst högst antal röster blir istället utröstad.",
-			UI_ABILITY_BODYSNATCHER: "Vaknar och kan välja att byta en annan spelares kort mot sitt eget och sedan titta på sitt nya kort. Både {ROLE_BODYSNATCHER_DEFINITE} och det andra kortet är en {TEAM_ALIEN}.",
-			UI_ABILITY_COPYCAT: "Vaknar och tittar på ett av korten i mitten. {ROLE_COPYCAT_DEFINITE} kopierar den rollen och lagtillhörigheten. Roll/lag följer med kortet om det flyttas till en annan spelare under natten. {ROLE_COPYCAT_DEFINITE} vaknar senare under natten och utför den kopierade rollens aktivitet när den rollen ropas upp.",
-			UI_ABILITY_COUNT: "Vaknar tillsammans med alla {TEAM_VAMPIRE_PLURAL}. Vaknar sedan ensam och placerar {TOKEN_MARK_COUNT} framför en annan icke-{TEAM_VAMPIRE} spelare. Spelaren med märket får inte vakna eller utföra sin handling under natten.",
-			UI_ABILITY_COW: "Sträcker ut en hand utan att vakna. Om en eller flera {TEAM_ALIEN_PLURAL} sitter bredvid {ROLE_COW_DEFINITE} måste de röra vid {ROLE_COW_DEFINITE_GENITIVE} hand.",
-			UI_ABILITY_CUPID: "Vaknar och placerar {TOKEN_MARK_CUPID} framför två spelare. Spelarna med märket vaknar tillsammans och identifierar varandra. Om en av dem röstas ut så röstas även den andra ut.",
-			UI_ABILITY_CURATOR: "Vaknar och placerar en slumpmässig artefakt framför en valfri spelare, inklusive {ROLE_CURATOR_DEFINITE} själv. I början av dagen får spelaren titta på artefakten för att se vilken effekt den har. Om artefakten innebär ett rollbyte så tar den prioritet över spelarens kort vad gäller förmåga och lagtillhörighet.",
-			UI_ABILITY_CURSED: "Om minst en {TEAM_WEREWOLF}, {TEAM_VAMPIRE} eller {TEAM_ALIEN} röstar på {ROLE_CURSED_DEFINITE} så byter den lagtillhörighet till laget i fråga.",
-			UI_ABILITY_DISEASED: "Vaknar och placerar {TOKEN_MARK_DISEASED} framför en av sina grannar. En spelare som röstar på {ROLE_DISEASED_DEFINITE} eller på en spelare med märket förlorar automatiskt även om deras lag vinner.",
-			UI_ABILITY_DOPPELGANGER: "Vaknar och tittar på en annan spelares kort. {ROLE_DOPPELGANGER_DEFINITE} kopierar den rollen och lagtillhörigheten. Roll/lag följer med kortet om det flyttas till en annan spelare under natten. {ROLE_DOPPELGANGER_DEFINITE} blir sedan ombedd att vakna senare under natten och utför den kopierade rollens aktivitet.",
-			UI_ABILITY_DREAMWOLF: "Sticker ut tummen istället för att vakna tillsammans med {TEAM_WEREWOLF_PLURAL} så att de kan se vem {ROLE_DREAMWOLF_DEFINITE} är.",
-			UI_ABILITY_DRUNK: "Vaknar och byter sitt eget kort mot ett av de oanvända korten i mitten utan att titta på det nya kortet.",
-			UI_ABILITY_EMPATH: "Vaknar och får iakta spelare utföra en slumpmässig handling utan att själv vakna.",
-			UI_ABILITY_EXPOSER: "Vaknar och får vända 1-3 av mittenkorten ansiktet upp, antal bestäms slumpmässigt.",
-			UI_ABILITY_FEUDINGALIENS: "Vaknar tillsammans med alla {TEAM_ALIEN_PLURAL}. Vaknar sedan tillsammans och identifierar varandra.",
-			UI_ABILITY_GREMLIN: "Vaknar och byter antingen plats på två andra spelares markörer eller kort, inte båda.",
-			UI_ABILITY_HUNTER: "Om {ROLE_HUNTER_DEFINITE} blir utröstad kommer även spelaren som {ROLE_HUNTER_DEFINITE} röstade på att bli utröstad.",
-			UI_ABILITY_INSOMNIAC: "Vaknar sist och tittar på sitt eget kort.",
-			UI_ABILITY_INSTIGATOR: "Vaknar och ger en {TOKEN_MARK_INSTIGATOR} till en spelare. Spelaren med markören vinner endast om en spelare i dennes egna lag röstas ut.",
-			UI_ABILITY_LEADER: "Vaknar och får veta vilka spelare som är {TEAM_ALIEN_PLURAL}. Får även veta vilka av {TEAM_ALIEN_DEFINITE} som är {ROLE_FEUDINGALIENS_DEFINITE}. Om alla {TEAM_ALIEN_DEFINITE} pekar på {ROLE_LEADER_DEFINITE} så vinner de oavsett vad som händer i övrigt.",
-			UI_ABILITY_MARKSMAN: "Vaknar och får se på en annan spelares kort, och på en annan spelares markör. Det får inte vara samma spelare för båda.",
-			UI_ABILITY_MARK_ASSASSIN: "Spelaren är målet för {ROLE_ASSASSIN_DEFINITE}, som endast vinner om märkets ägare röstas ut.",
-			UI_ABILITY_MARK_CLARITY: "Märket har ingen effekt, och delas ut till samtliga spelare vid spelets början.",
-			UI_ABILITY_MARK_COUNT: "Spelaren får inte vakna under natten för att utföra sin handling.",
-			UI_ABILITY_MARK_CUPID: "Spelarna som mottar märket är bundna till varandra. Röstas en ut så röstas även de andra ut. Spelarna vaknar för att identifiera varandra.",
-			UI_ABILITY_MARK_DISEASED: "Spelare som röstar på märkets mottagare kan inte vinna, oavsett deras vinstvillkor.",
-			UI_ABILITY_MARK_INSTIGATOR: "Spelaren är nu en förrädare och vinner endast om deras lag förlorar.",
-			UI_ABILITY_MARK_RENFIELD: "Märket har ingen effekt och används endast av {ROLE_RENFIELD} för att ersätta andra märken.",
-			UI_ABILITY_MARK_VAMPIRE: "Spelaren är nu en {TEAM_VAMPIRE}, oberoende av tidigare roll.",
-			UI_ABILITY_MASON: "Vaknar tillsammans med den andra {ROLE_MASON_DEFINITE} och identifierar varandra.",
-			UI_ABILITY_MASTER: "Vaknar tillsammans med alla {TEAM_VAMPIRE_PLURAL}. Om minst en annan {TEAM_VAMPIRE} röstar på {ROLE_MASTER_DEFINITE} så blir han immun mot att röstas ut.",
-			UI_ABILITY_MINION: "Vaknar och får se vilka spelare som är en {TEAM_WEREWOLF}.",
-			UI_ABILITY_MORTICIAN: "Vaknar och får se på en eller båda sina grannars, eller sitt eget, kort. Bestäms slumpmässigt.",
-			UI_ABILITY_MYSTICWOLF: "Vaknar först tillsammans med alla {TEAM_WEREWOLF_PLURAL}. Vaknar sedan ensam och tittar på en annan spelares kort.",
-			UI_ABILITY_NOSTRADAMUS: "Vaknar och väljer att titta på upp till tre spelares kort. Om ett av korten inte tillhör {TEAM_VILLAGE_DEFINITE} får inga fler kort inspekteras, och {ROLE_NOSTRADAMUS_DEFINITE_GENITIVE} kort kopierar den lagtillhörigheten. Lagtillhörighet följer med kortet om det flyttas till en annan spelare under natten. Den nya lagtillhörigheten läses upp för alla.",
-			UI_ABILITY_ORACLE: "Vaknar och utför en slumpmässigt bestämd handling som läses upp.",
-			UI_ABILITY_PARANORMALINVESTIGATOR: "Vaknar och väljer att titta på upp till två spelares kort. Om ett av korten inte tillhör {TEAM_VILLAGE_DEFINITE} får inga fler kort inspekteras, och {ROLE_PARANORMALINVESTIGATOR_DEFINITE_GENITIVE} kort kopierar den lagtillhörigheten. Lagtillhörighet följer med kortet om det flyttas till en annan spelare under natten.",
-			UI_ABILITY_PICKPOCKET: "Vaknar och kan välja att byta en annan spelares markör mot sitt egna och sedan titta på sin nya markör.",
-			UI_ABILITY_PREFIX: "Förmåga/aktivitet",
-			UI_ABILITY_PRIEST: "Vaknar och byter ut sin egen och, om så önskas, en annan spelares markörer mot ett {TOKEN_MARK_CLARITY}.",
-			UI_ABILITY_PRINCE: "Kan inte röstas ut. Spelaren med näst högst antal röster blir istället utröstad.",
-			UI_ABILITY_PSYCHIC: "Vaknar och får se på en annan spelares kort med slumpmässiga restriktioner.",
-			UI_ABILITY_RASCAL: "Vaknar och utför slumpmässigt samma handling som {ROLE_TROUBLEMAKER_DEFINITE}, {ROLE_ROBBER_DEFINITE}, {ROLE_WITCH_DEFINITE}, {ROLE_VILLAGEIDIOT_DEFINITE} eller {ROLE_DRUNK_DEFINITE}.",
-			UI_ABILITY_RENFIELD: "Vaknar och ersätter sin egen markör med {TOKEN_MARK_RENFIELD}. Får se vilka spelare som är {TEAM_VAMPIRE}, samt vilken spelare de har gett en {TOKEN_MARK_VAMPIRE} till.",
-			UI_ABILITY_REVEALER: "Vaknar och vänder en annan spelares kort ansiktet upp. Om kortet inte tillhör {TEAM_VILLAGE_DEFINITE} så vänds kortet tillbaka med ansiktet ner.",
-			UI_ABILITY_ROBBER: "Vaknar och kan välja att byta en annan spelares kort mot sitt eget och sedan titta på sitt nya kort. Vaknar inte fler gånger under natten.",
-			UI_ABILITY_SEER: "Vaknar och får välja att se på en annan spelares kort, eller två av de oanvända korten i mitten.",
-			UI_ABILITY_SENTINEL: "Vaknar och placerar en {TOKEN_SHIELD} på en annan spelares kort. Kortet får inte flyttas eller tittas på av andra spelare under natten.",
-			UI_ABILITY_SHIELD: "En {TOKEN_SHIELD} placerad på ett kort förbjuder samtliga spelare, även kortets ägare, från att flytta eller titta på kortet.",
-			UI_ABILITY_SQUIRE: "Vaknar och får se vilka spelare som är en {TEAM_WEREWOLF}. Får även se på de spelarnas kort för att se om de har flyttats under natten. ",
-			UI_ABILITY_SYNTHETICALIEN: "Vaknar tillsammans med alla {TEAM_ALIEN_PLURAL} och identifierar andra {TEAM_ALIEN_PLURAL}. Kan också kollektivt få se på ett eller fler kort slumpmässigt.",
-			UI_ABILITY_TANNER: "Om {ROLE_TANNER_DEFINITE} blir utröstad förlorar {TEAM_WEREWOLF_DEFINITE}, {TEAM_VAMPIRE_DEFINITE} och {TEAM_ALIEN_DEFINITE}.",
-			UI_ABILITY_THING: "Vaknar och rör vid en av sina direkta grannar.",
-			UI_ABILITY_TROUBLEMAKER: "Vaknar och byter plats på två andra spelares kort utan att titta på korten.",
-			UI_ABILITY_VAMPIRE: "Vaknar tillsammans med alla {TEAM_VAMPIRE_PLURAL} och identifierar andra {TEAM_VAMPIRE_PLURAL}. Väljer kollektivt att placera {TOKEN_MARK_VAMPIRE} framför en annan spelare, vilket gör spelaren till en vampyr.",
-			UI_ABILITY_VILLAGEIDIOT: "Vaknar och väljer att skifta alla andra spelares kort ett steg till höger, vänster, eller inte alls.",
-			UI_ABILITY_VILLAGER: "Ingen.",
-			UI_ABILITY_WEREWOLF: "Vaknar tillsammans med alla {TEAM_WEREWOLF_PLURAL} och identifierar andra {TEAM_WEREWOLF_PLURAL}. Får titta på ett av de oanvända korten i mitten om ensam {TEAM_WEREWOLF}.",
-			UI_ABILITY_WITCH: "Vaknar och väljer om de vill titta på ett av de oanvända korten i mitten. Om ett kort inspekteras måste kortet bytas mot sitt eget eller någon annan spelares kort.",
-			UI_DAYTIMER_PAUSE: "Pausa",
-			UI_DAYTIMER_START: "Start",
-			UI_DAYTIMER_STOP: "Stopp",
-			UI_FILTER_COMPLEXITY: "Svårighet",
-			UI_FILTER_COMPLEXITY_EASY: "Enkel",
-			UI_FILTER_COMPLEXITY_HARD: "Svår",
-			UI_FILTER_COMPLEXITY_MEDIUM: "Medel",
-			UI_FILTER_RULESET: "Regelverk",
-			UI_FILTER_RULESET_ADVANCED: "Utökad",
-			UI_FILTER_RULESET_ALIEN: "Utomjordingar",
-			UI_FILTER_RULESET_BASIC: "Grund",
-			UI_FILTER_RULESET_VAMPIRE: "Vampyrer",
-			UI_GAMERULES: "Spelregler",
-			UI_GENERATED_PROMPT: "Spelprompt",
-			UI_PLAYER_COUNT: "Antal spelare:",
-			UI_PRINT: "Skriv ut",
-			UI_PROMPT_ERROR_INSUFFICIENT_PLAYERS: "Prompt kan inte skapas: för få roller är valda.",
-			UI_PROMPT_ERROR_INVALID_SETTINGS: "Prompt kan inte skapas: kontrollera inställningar.",
-			UI_PROMPT_SINGLETURN: "Dela",
-			UI_RERANDOMIZE: "Slumpa om",
-			UI_RESET: "Nollställ",
-			UI_ROLEDESCRIPTIONS: "Rollbeskrivningar",
-			UI_ROLESELECTION: "Välj roller",
-			UI_SEARCH: "Sök",
-			UI_SEARCH_PLACEHOLDER: "Filtrera roll...",
-			UI_SETTING: "Inställningar",
-			UI_SETTING_ALIENS_MAKE_ALIEN: "Gör en annan spelare till en {TEAM_ALIEN}",
-			UI_SETTING_ALIENS_MAKE_MINION: "Gör en annan spelare till en medhjälpare",
-			UI_SETTING_ALIENS_NOTHING: "Ingen handling",
-			UI_SETTING_ALIENS_SHOW_CARDS: "Visa sina kort för andra {TEAM_ALIEN_DEFINITE}",
-			UI_SETTING_ALIENS_TRADE_CARDS: "Byt kort med andra {TEAM_ALIEN_DEFINITE}",
-			UI_SETTING_ALIENS_VIEW_CARD_COLLECTIVE: "Titta på kort gemensamt",
-			UI_SETTING_ALIENS_VIEW_CARD_INDIVIDUAL: "Titta på kort individuellt",
-			UI_SETTING_BODYSNATCHER_FAKE_ACTION: "Sannolikhet att enbart få låtsas utföra handlingen.",
-			UI_SETTING_ERROR_WEIGHTGROUP_ORACLE_TEAM: "Viktgruppens sammanlagda vikt måste vara större än 0. Minst en {TEAM_WEREWOLF}, {TEAM_ALIEN} eller {TEAM_VAMPIRE} måste vara närvarande för att vikten för byte av lag ska räknas",
-			UI_SETTING_ERROR_WEIGHTGROUP_SUM_ZERO: "Viktgruppens sammanlagda vikt måste vara större än 0",
-			UI_SETTING_ERROR_WEIGHTGROUP_SUM_ZERO_CONTEXT: "Viktgruppens sammanlagda vikt måste vara större än 0, och uppfylla krav för valda roller",
-			UI_SETTING_EXPOSER_FLIP_ONE: "Vänd ett mittenkort",
-			UI_SETTING_EXPOSER_FLIP_THREE: "Vänd tre mittenkort",
-			UI_SETTING_EXPOSER_FLIP_TWO: "Vänd två mittenkort",
-			UI_SETTING_LABEL_RASCAL: "Utför en av följande handlingar",
-			UI_SETTING_LABEL_VIEW_CARD: "Titta på spelarkort",
-			UI_SETTING_ORACLE_BLOCK_ACTION: "Hindra en annan spelare från att vakna",
-			UI_SETTING_ORACLE_DRUNK: "Byter sitt kort mot ett mittenkort",
-			UI_SETTING_ORACLE_EVEN_ODD: "Annonsera om {ROLE_ORACLE_DEFINITE} har ett jämnt eller udda spelarnummer",
-			UI_SETTING_ORACLE_HUNT: "Orakeljakt",
-			UI_SETTING_ORACLE_HUNT_ALLOW_BAD_TEAMS: "Tillåt att vakna för onda roller",
-			UI_SETTING_ORACLE_HUNT_CHANCE: "Sannolikhet",
-			UI_SETTING_ORACLE_SWITCH_TEAM: "Byt lag",
-			UI_SETTING_ORACLE_SWITCH_TEAM_FULL: "Byt roll",
-			UI_SETTING_ORACLE_SWITCH_TEAM_MODE: "Chans att byta även roll",
-			UI_SETTING_ORACLE_SWITCH_TEAM_PARTIAL: "Byt endast lag",
-			UI_SETTING_ORACLE_VIEW_CENTER: "Titta på mittenkort",
-			UI_SETTING_ORACLE_VIEW_PLAYER: "Titta på spelarkort",
-			UI_SETTING_PSYCHIC_VIEW_TWO_CARDS: "Sannolikhet att få titta på två kort",
-			UI_SETTING_RIPPLE: "Krusning i rum-tid",
-			UI_SETTING_RIPPLE_DOUBLE_VOTE: "Vissa spelare får lägga två röster",
-			UI_SETTING_RIPPLE_DRUNK: "En spelare byter sitt kort mot ett av mittenkorten",
-			UI_SETTING_RIPPLE_DUAL_VIEW_PLAYER: "Två spelare får se på en annan spelares kort",
-			UI_SETTING_RIPPLE_INSOMNIAC: "Vissa spelare tittar på sina kort efter natten",
-			UI_SETTING_RIPPLE_MUTED: "Vissa spelare får inte prata",
-			UI_SETTING_RIPPLE_NONE: "Ingenting händer",
-			UI_SETTING_RIPPLE_ONE_MINUTE: "Speltid reducerad till 1 minut",
-			UI_SETTING_RIPPLE_REBUKED: "Vissa spelare måste vända sig bort",
-			UI_SETTING_RIPPLE_REVEALER: "En spelare får vända på en spelares kort",
-			UI_SETTING_RIPPLE_ROBBER: "En spelare får stjäla en annan spelares kort",
-			UI_SETTING_RIPPLE_TROUBLEMAKER: "En spelare byter plats på två andra spelare",
-			UI_SETTING_RIPPLE_VIEW_PLAYER: "En spelare får se på en annan spelares kort",
-			UI_SETTING_RIPPLE_WITCH: "En spelare får se på ett mittenkort och ge kortet till någon spelare",
-			UI_SETTING_VALIDATION_ERROR: "Fel i inställningar",
-			UI_SETTING_VIEW_CARD_CENTER_FOUR: "Fyra mittenkort",
-			UI_SETTING_VIEW_CARD_CENTER_ONE: "Ett mittenkort",
-			UI_SETTING_VIEW_CARD_CENTER_THREE: "Tre mittenkort",
-			UI_SETTING_VIEW_CARD_CENTER_TWO: "Två mittenkort",
-			UI_SETTING_VIEW_CARD_PLAYER_ANY: "Valfri spelare",
-			UI_SETTING_VIEW_CARD_PLAYER_EVEN: "Jämn spelare",
-			UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR: "Granne",
-			UI_SETTING_VIEW_CARD_PLAYER_NEIGHBOR_BOTH: "Båda grannar",
-			UI_SETTING_VIEW_CARD_PLAYER_ODD: "Udda spelare",
-			UI_SETTING_VIEW_CARD_PLAYER_SELF: "Sitt eget",
-			UI_SETTING_VIEW_CARD_PLAYER_SPECIFIC: "Specifik spelare",
-			UI_TITLE: "One Night Ultimate Werewolf – Promptbyggare",
-			UI_TOKENDESCRIPTIONS: "Brickor/märken",
-			UI_TOKENS_PLACES: "Placerar:",
-			UI_USEDBY_PREFIX: "Roller",
-			UI_WINCONDITION_APPRENTICEASSASSIN: "Vinner om {ROLE_ASSASSIN_DEFINITE} röstas ut, eller om den utvalda måltavlan röstas ut om ingen {ROLE_ASSASSIN} är i spel.",
-			UI_WINCONDITION_APPRENTICETANNER: "Vinner om {ROLE_TANNER_DEFINITE} röstas ut, eller om {ROLE_APPRENTICETANNER_DEFINITE} röstas ut om ingen {ROLE_TANNER} är i spel.",
-			UI_WINCONDITION_ASSASSIN: "Vinner om den utvalda måltavlan röstas ut.",
-			UI_WINCONDITION_BLOB: "Vinner om varken {ROLE_BLOB_DEFINITE} själv eller någon av spelarna den måste skydda röstas ut.",
-			UI_WINCONDITION_COPYCAT: "{ROLE_COPYCAT_DEFINITE} kopierar även vinstvillkor från den rollen som kopierades under natten.",
-			UI_WINCONDITION_CURSED: "{UI_WINCONDITION_TEAM_VILLAGE} Om lagtillhörigheten ändras under omröstningen ändras även vinstvillkoren.",
-			UI_WINCONDITION_DOPPELGANGER: "{ROLE_DOPPELGANGER_DEFINITE} kopierar även vinstvillkor från den rollen som kopierades under natten.",
-			UI_WINCONDITION_FEUDINGALIENS: "Om endast en av dem är i spel vinner de tillsammans med {TEAM_ALIEN}. Om båda är i spel vinner den ena om den andra röstas ut.",
-			UI_WINCONDITION_LEADER: "Om både {ROLE_FEUDINGALIENS_DEFINITE} är i spel så vinner {ROLE_LEADER_DEFINITE} om {ROLE_FEUDINGALIENS_DEFINITE} båda överlever. Annars vinner {ROLE_LEADER_DEFINITE} tillsammans med {TEAM_VILLAGE_DEFINITE}.",
-			UI_WINCONDITION_MINION: "Om minst en {TEAM_WEREWOLF} är i spel vinner {ROLE_MINION_DEFINITE} om ingen {TEAM_WEREWOLF} röstas ut, även om {ROLE_MINION_DEFINITE} själv blir utröstad. Om ingen {TEAM_WEREWOLF} är i spel vinner {ROLE_MINION_DEFINITE} om minst en annan spelare röstas ut.",
-			UI_WINCONDITION_MORTICIAN: "Vinner om en av {ROLE_MORTICIAN_DEFINITE} grannar röstas ut.",
-			UI_WINCONDITION_NOSTRADAMUS: "{UI_WINCONDITION_TEAM_VILLAGE} Om {ROLE_NOSTRADAMUS_DEFINITE} under natten ser en roll som inte tillhör {TEAM_VILLAGE_DEFINITE} så vinner {ROLE_NOSTRADAMUS_DEFINITE} tillsammans med det laget förutsatt att {ROLE_NOSTRADAMUS_DEFINITE} inte blir utröstad.",
-			UI_WINCONDITION_ORACLE: "{UI_WINCONDITION_TEAM_VILLAGE} {ROLE_ORACLE_DEFINITE_GENITIVE} vinstvillkor kan ändras om så väljs under natten.",
-			UI_WINCONDITION_PARANORMALINVESTIGATOR: "{UI_WINCONDITION_TEAM_VILLAGE} Om {ROLE_PARANORMALINVESTIGATOR_DEFINITE} under natten ser en roll som inte tillhör {TEAM_VILLAGE_DEFINITE} så gäller den rollens vinstvillkor även för {ROLE_PARANORMALINVESTIGATOR_DEFINITE}.",
-			UI_WINCONDITION_PREFIX: "Vinstvillkor",
-			UI_WINCONDITION_RENFIELD: "Om minst en {TEAM_VAMPIRE} är i spel vinner {ROLE_RENFIELD_DEFINITE} om ingen {TEAM_VAMPIRE} röstas ut, även om {ROLE_RENFIELD_DEFINITE} själv blir utröstad. Om ingen {TEAM_VAMPIRE} är i spel vinner {ROLE_RENFIELD_DEFINITE} tillsammans med {TEAM_VILLAGE_DEFINITE}.",
-			UI_WINCONDITION_SQUIRE: "Om minst en {TEAM_WEREWOLF} är i spel vinner {ROLE_SQUIRE_DEFINITE} om ingen {TEAM_WEREWOLF} röstas ut, även om {ROLE_SQUIRE_DEFINITE} själv blir utröstad. Om ingen {TEAM_WEREWOLF} är i spel vinner {ROLE_SQUIRE_DEFINITE} om minst en annan spelare röstas ut.",
-			UI_WINCONDITION_SYNTHETICALIEN: "Vinner om {ROLE_SYNTHETICALIEN_DEFINITE} röstas ut.",
-			UI_WINCONDITION_TANNER: "Vinner om {ROLE_TANNER_DEFINITE} röstas ut.",
-			UI_WINCONDITION_TEAM_ALIEN: "Vinner om ingen {TEAM_ALIEN} röstas ut.",
-			UI_WINCONDITION_TEAM_VAMPIRE: "Vinner om ingen {TEAM_VAMPIRE} röstas ut.",
-			UI_WINCONDITION_TEAM_VILLAGE: "Vinner om minst en {TEAM_WEREWOLF}, {TEAM_VAMPIRE} eller {TEAM_ALIEN} röstas ut.",
-			UI_WINCONDITION_TEAM_WEREWOLF: "Vinner om ingen {TEAM_WEREWOLF} röstas ut.",
-			UI_WINCONDITION_VARIABLE_NOTE: "Kortets vinstvillkor kan förändras, som vid kopiering av en annan roll.",
-			
-			
-			//Narration prompts
-			DIRECTION_LEFT: "vänster",
-			DIRECTION_RIGHT: "höger",
-			NUM_WORD: "{Select:count,1,NUM_ONE,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,5,NUM_FIVE,6,NUM_SIX,7,NUM_SEVEN,8,NUM_EIGHT,9,NUM_NINE}",
-			NUM_ONE: "ett",
-			NUM_TWO: "två",
-			NUM_THREE: "tre",
-			NUM_FOUR: "fyra",
-			NUM_FIVE: "fem",
-			NUM_SIX: "sex",
-			NUM_SEVEN: "sju",
-			NUM_EIGHT: "åtta",
-			NUM_NINE: "nio",
-			
-			PROMPT_BRIEF_HEADER: "{If:copiedRole,PROMPT_BRIEF_HEADER_ECHO,PROMPT_BRIEF_HEADER_DIRECT}",
-			PROMPT_BRIEF_HEADER_DIRECT: "{Identity:instigator}:",
-			PROMPT_BRIEF_HEADER_ECHO: "{Identity:instigator} ({Identity:copiedRole}):",
-			PROMPT_SLEEP_CALL: "{Identity:instigator}, somna.",
-			PROMPT_SLEEP_CALL_DOPPELGANGER: "{ROLE_DOPPELGANGER}, somna.",
-			PROMPT_WAKE_CALL: "{Identity:instigator}, vakna.",
-			PROMPT_WAKE_CALL_DOPPELGANGER_ECHO:   "{ROLE_DOPPELGANGER}, om du såg {Identity:copiedRole,definite}, vakna.",
-			PROMPT_WAKE_CALL_DOPPELGANGER_INLINE: "{ROLE_DOPPELGANGER}, om du såg {Identity:instigator,definite}, vakna.",
-			
-			PROMPT_ALIEN_TEAM: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_ALIEN_TEAM_DOPPELGANGER} vakna och identifiera varandra. {PROMPT_ALIEN_TEAM_ACTION} {If:hasCow,PROMPT_ALIEN_TEAM_COW} {Identity:instigator,plural}, somna.",
-			PROMPT_ALIEN_TEAM_ACTION: "{Select:type,do_nothing,PROMPT_ALIEN_TEAM_ACTION_NOTHING,make_alien,PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN,make_alien_minion,PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION,show_team_cards,PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS,trade_team_cards,PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS,view_card_collective,PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE,view_card_individual,PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL}",
-			PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN: "Alla andra spelare, håll ut en hand framför er. {Identity:instigator,plural}, rör vid en annan spelares hand. Spelaren är nu en {Identity:instigator} oavsett vad som händer med deras kort. Alla spelare, ner med händerna.",
-			PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION: "Alla andra spelare, håll ut en hand framför er. {Identity:instigator,plural}, rör vid en annan spelares hand. Spelaren vinner nu om {Identity:instigator,plural,definite} vinner oavsett om de själva blir utröstade och vad som händer med deras kort. Alla spelare, ner med händerna.",
-			PROMPT_ALIEN_TEAM_ACTION_NOTHING: "Gör ingenting, stirra bara på varandra tills det blir pinsamt.",
-			PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS: "Visa era kort för varandra.",
-			PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS: "Ge era kort till närmaste {Identity:instigator} till {Select:restriction,left,DIRECTION_LEFT,right,DIRECTION_RIGHT} om er.",
-			PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE: "Gemensamt inom laget får ni titta på {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL: "Individuellt får ni titta på {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_ALIEN_TEAM_COW: "{ROLE_COW}{If:hasDoppelganger,PROMPT_ALIEN_TEAM_COW_DOPPELGANGER}, håll ut en hand framför dig. {Identity:instigator,plural}, om minst en av er är granne med {ROLE_COW_DEFINITE}, rör vid {ROLE_COW_DEFINITE_GENITIVE} hand. {ROLE_COW}, ner med handen.",
-			PROMPT_ALIEN_TEAM_COW_DOPPELGANGER: ", och {ROLE_DOPPELGANGER_DEFINITE} om du såg {ROLE_COW_DEFINITE}",
-			PROMPT_ALIEN_TEAM_DOPPELGANGER: "och {ROLE_DOPPELGANGER_DEFINITE} om du såg ett av {Identity:instigator,definite,plural,genitive} kort,",
-			PROMPT_ALPHAWOLF: "{PROMPT_WAKE_CALL} Byt det extra kortet i mitten mot någon annan spelares kort som inte redan är varulv. {PROMPT_SLEEP_CALL}",
-			PROMPT_APPRENTICEASSASSIN: "{ROLE_APPRENTICEASSASSIN}, vakna. {PROMPT_APPRENTICEASSASSIN_ACTION} {ROLE_APPRENTICEASSASSIN}, somna. {If:hasDoppelganger,PROMPT_APPRENTICEASSASSIN_DOPPELGANGER}",
-			PROMPT_APPRENTICEASSASSIN_ACTION: "Identifiera Lönnmördaren. Om det inte finns någon Lönnmördare: {PROMPT_ASSASSIN_ACTION}",
-			PROMPT_APPRENTICEASSASSIN_DOPPELGANGER: "{ROLE_DOPPELGANGER}, om du såg {ROLE_APPRENTICEASSASSIN_DEFINITE}, vakna. {PROMPT_APPRENTICEASSASSIN_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_APPRENTICESEER: "{PROMPT_WAKE_CALL} Du får titta på ett av mittenkorten. {PROMPT_SLEEP_CALL}",
-			PROMPT_APPRENTICETANNER: "{PROMPT_WAKE_CALL} {ROLE_TANNER}, håll ut en tumme så att {Identity:instigator,definite} kan se vem du är. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_APPRENTICETANNER_DOPPELGANGER} {ROLE_TANNER}, ner med tummen.",
-			PROMPT_APPRENTICETANNER_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {ROLE_TANNER}, fortsätt hålla ut tummen så att {ROLE_DOPPELGANGER_DEFINITE} kan se vem du är. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_ASSASSIN: "{PROMPT_WAKE_CALL} {PROMPT_ASSASSIN_ACTION} {If:hasApprenticeAssassin,PROMPT_APPRENTICEASSASSIN} {PROMPT_SLEEP_CALL}",
-			PROMPT_ASSASSIN_ACTION: "Byt ut en annan spelares märke mot {TOKEN_MARK_ASSASSIN}.",
-			PROMPT_AURASEER: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, om ni har tittat på eller flyttat kort, håll ut en tumme så att {Identity:instigator,definite} kan se den. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_AURASEER_DOPPELGANGER} Samtliga spelare, ner med tummarna.",
-			PROMPT_AURASEER_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} Övriga spelare, fortsätt hålla ut tummen. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_BEHOLDER: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, håll ut en tumme så att {Identity:instigator,definite} kan se vem ni är. {Identity:instigator}, du får titta på deras kort. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_BEHOLDER_DOPPELGANGER} {IdentityList:listDetectableRoles,and}, ner med tummen.",
-			PROMPT_BEHOLDER_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} Övriga spelare, fortsätt hålla ut tummen. {ROLE_DOPPELGANGER}, du får titta på deras kort. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_BLOB: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {Select:blobTotal,0,PROMPT_BLOB_OBJECTIVE_ALONE,1,PROMPT_BLOB_OBJECTIVE_SINGLE,*,PROMPT_BLOB_OBJECTIVE_MULTI} {PROMPT_SLEEP_CALL}",
-			PROMPT_BLOB_OBJECTIVE_ALONE: "Du behöver bara förhindra att du själv blir utröstad.",
-			PROMPT_BLOB_OBJECTIVE_MULTI: "Du måste förhindra att närmaste {Value:blobLeft} spelare till vänster och {Value:blobRight} spelare till höger blir utröstade.",
-			PROMPT_BLOB_OBJECTIVE_SINGLE: "Du måste förhindra att spelaren närmast till {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT} blir utröstad.",
-			PROMPT_BODYSNATCHER: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {If:fakeAction,PROMPT_BODYSNATCHER_FAKE} {PROMPT_VIEW_CARD} Byt sedan ditt eget kort mot kortet du tittade på. Ditt nya kort är nu också en {TEAM_ALIEN}. {PROMPT_SLEEP_CALL}",
-			PROMPT_BODYSNATCHER_FAKE: "<Berättare: visa att handlingen inte ska utföras>.",
-			PROMPT_BRIEF_ALIEN_MAKE_ALIEN: "rör en hand, spelaren blir Utomjording.",
-			PROMPT_BRIEF_ALIEN_MAKE_MINION: "rör en hand, spelaren vinner med er.",
-			PROMPT_BRIEF_ALIEN_NOTHING: "gör ingenting.",
-			PROMPT_BRIEF_ALIEN_SHOW: "visa era kort för varandra.",
-			PROMPT_BRIEF_ALIEN_TEAM: "{Identity:instigator,plural}: identifiera varandra. {PROMPT_BRIEF_ALIEN_TEAM_ACTION}{If:hasCow,PROMPT_BRIEF_ALIEN_TEAM_COW}",
-			PROMPT_BRIEF_ALIEN_TEAM_ACTION: "{Select:type,do_nothing,PROMPT_BRIEF_ALIEN_NOTHING,make_alien,PROMPT_BRIEF_ALIEN_MAKE_ALIEN,make_alien_minion,PROMPT_BRIEF_ALIEN_MAKE_MINION,show_team_cards,PROMPT_BRIEF_ALIEN_SHOW,trade_team_cards,PROMPT_BRIEF_ALIEN_TRADE,view_card_collective,PROMPT_BRIEF_ALIEN_VIEW_COLLECTIVE,view_card_individual,PROMPT_BRIEF_ALIEN_VIEW_INDIVIDUAL}",
-			PROMPT_BRIEF_ALIEN_TEAM_COW: " Ko: håll ut handen, granne rör vid den.",
-			PROMPT_BRIEF_ALIEN_TRADE: "byt kort med granne till {Select:restriction,left,DIRECTION_LEFT,right,DIRECTION_RIGHT}.",
-			PROMPT_BRIEF_ALIEN_VIEW_COLLECTIVE: "titta gemensamt på {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_BRIEF_ALIEN_VIEW_INDIVIDUAL: "titta individuellt på {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_BRIEF_ALPHAWOLF: "{PROMPT_BRIEF_HEADER} byt det extra varulvskortet.",
-			PROMPT_BRIEF_APPRENTICEASSASSIN: "{ROLE_APPRENTICEASSASSIN}: identifiera Lönnmördaren (annars agera som denne).{If:hasDoppelganger,PROMPT_BRIEF_APPRENTICEASSASSIN_DOPPELGANGER}",
-			PROMPT_BRIEF_APPRENTICEASSASSIN_DOPPELGANGER: " {ROLE_DOPPELGANGER} (om sedd): samma.",	
-			PROMPT_BRIEF_APPRENTICESEER: "{PROMPT_BRIEF_HEADER} titta på ett mittenkort.",
-			PROMPT_BRIEF_APPRENTICETANNER: "{PROMPT_BRIEF_HEADER} titta på {ROLE_TANNER}.",
-			PROMPT_BRIEF_ASSASSIN: "{PROMPT_BRIEF_HEADER} byt ut en spelares märke. {If:hasApprenticeAssassin,PROMPT_BRIEF_APPRENTICEASSASSIN}",
-			PROMPT_BRIEF_AURASEER: "{PROMPT_BRIEF_HEADER} titta på vilka som agerat: {IdentityList:listDetectableRoles}.",
-			PROMPT_BRIEF_BEHOLDER: "{PROMPT_BRIEF_HEADER} titta på kort för {IdentityList:listDetectableRoles}.",
-			PROMPT_BRIEF_BLOB: "{PROMPT_BRIEF_HEADER} skydda {Select:blobTotal,0,PROMPT_BRIEF_BLOB_ALONE,1,PROMPT_BRIEF_BLOB_SINGLE,*,PROMPT_BRIEF_BLOB_MULTI}.",
-			PROMPT_BRIEF_BLOB_ALONE: "endast dig själv",
-			PROMPT_BRIEF_BLOB_MULTI: "{Value:blobLeft} till vänster och {Value:blobRight} till höger",
-			PROMPT_BRIEF_BLOB_SINGLE: "spelaren till {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT}",
-			PROMPT_BRIEF_BODYSNATCHER: "{PROMPT_BRIEF_HEADER}{If:fakeAction,PROMPT_BRIEF_FAKE_NOTE} byt kort med {PROMPT_VIEW_CARD_ENTRY}, bli Utomjording.",
-			PROMPT_BRIEF_CHECK_MARKS: "{PROMPT_BRIEF_HEADER} kolla era märken.",
-			PROMPT_BRIEF_COPYCAT: "{PROMPT_BRIEF_HEADER} titta på ett mittenkort, bli den rollen.",
-			PROMPT_BRIEF_COUNT: "{PROMPT_BRIEF_HEADER} placera {TOKEN_MARK_COUNT}.",
-			PROMPT_BRIEF_CUPID: "{PROMPT_BRIEF_HEADER} placera {TOKEN_MARK_CUPID} framför två spelare.",
-			PROMPT_BRIEF_CURATOR: "{PROMPT_BRIEF_HEADER} placera en artefakt.",
-			PROMPT_BRIEF_DISEASED: "{PROMPT_BRIEF_HEADER} placera {TOKEN_MARK_DISEASED}.",
-			PROMPT_BRIEF_DOPPELGANGER: "{PROMPT_BRIEF_HEADER} titta på ett spelarkort, bli den rollen.{If:hasImmediateActionRoles,PROMPT_BRIEF_DOPPELGANGER_IMMEDIATE}",
-			PROMPT_BRIEF_DOPPELGANGER_IMMEDIATE: " Om: {IdentityList:listImmediateActionRoles,or} — agera nu.",
-			PROMPT_BRIEF_DRUNK: "{PROMPT_BRIEF_HEADER} byt ditt kort mot ett mittenkort.",
-			PROMPT_BRIEF_EMPATH: "{PROMPT_BRIEF_HEADER} spelare {ValueList:players}: {LocalizedValue:question}",
-			PROMPT_BRIEF_EXPOSER: "{PROMPT_BRIEF_HEADER} vänd {Value:count} mittenkort.",
-			PROMPT_BRIEF_FAKE_NOTE: " (fejk)",
-			PROMPT_BRIEF_FEUDINGALIENS: "{Identity:instigator,plural}: identifiera varandra.",
-			PROMPT_BRIEF_GREMLIN: "{PROMPT_BRIEF_HEADER} byt plats på två märken eller kort.",
-			PROMPT_BRIEF_INSOMNIAC: "{PROMPT_BRIEF_HEADER} titta på ditt eget kort.",
-			PROMPT_BRIEF_INSTIGATOR: "{PROMPT_BRIEF_HEADER} byt ut en spelares märke.",
-			PROMPT_BRIEF_LEADER: "{PROMPT_BRIEF_HEADER} titta på {TEAM_ALIEN_PLURAL}. {If:hasFeudingAliens,PROMPT_BRIEF_LEADER_FEUDINGALIENS}",
-			PROMPT_BRIEF_LEADER_FEUDINGALIENS: "Vinner om både Groob och Zerb överlever.",
-			PROMPT_BRIEF_LOVERS: "{PROMPT_BRIEF_HEADER} identifiera varandra.",
-			PROMPT_BRIEF_MARKSMAN: "{PROMPT_BRIEF_HEADER} titta på en spelares kort + märke.",
-			PROMPT_BRIEF_MASON: "{PROMPT_BRIEF_HEADER} identifiera varandra.",
-			PROMPT_BRIEF_MINION: "{PROMPT_BRIEF_HEADER} titta på {TEAM_WEREWOLF_PLURAL}.",
-			PROMPT_BRIEF_MORTICIAN: "{PROMPT_BRIEF_HEADER} titta på {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_BRIEF_MYSTICWOLF: "{PROMPT_BRIEF_HEADER} titta på en spelares kort.",
-			PROMPT_BRIEF_NOSTRADAMUS: "{PROMPT_BRIEF_HEADER} titta på 1-3 kort.{If:hasDangerRoles,PROMPT_BRIEF_NOSTRADAMUS_WARNING} Annonsera lag: {LocalizedValue:fallbackTeam}.",
-			PROMPT_BRIEF_NOSTRADAMUS_WARNING: " Varning vid: {IdentityList:listDangerRoles,or}.",
-			PROMPT_BRIEF_ORACLE: "{PROMPT_BRIEF_HEADER} {Select:type,view_card,PROMPT_BRIEF_ORACLE_VIEW,oracle_change_team,PROMPT_BRIEF_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_BRIEF_ORACLE_BLOCK_ACTION,role_action,PROMPT_BRIEF_ORACLE_ROLE_ACTION,oracle_announce_even_odd,PROMPT_BRIEF_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_BRIEF_ORACLE_HUNT}",
-			PROMPT_BRIEF_ORACLE_BLOCK_ACTION: "blockera en spelares handling.",
-			PROMPT_BRIEF_ORACLE_CHANGE_TEAM: "erbjud lagbyte ({Identity:joinTeam}, {Select:joinFull,true,PROMPT_BRIEF_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_BRIEF_ORACLE_CHANGE_TEAM_PARTIAL}).",
-			PROMPT_BRIEF_ORACLE_CHANGE_TEAM_FULL: "helt",
-			PROMPT_BRIEF_ORACLE_CHANGE_TEAM_PARTIAL: "delvis",
-			PROMPT_BRIEF_ORACLE_EVEN_ODD: "<Berättare: annonsera jämn/udda>.",
-			PROMPT_BRIEF_ORACLE_HUNT: "{Select:huntActive,true,PROMPT_BRIEF_ORACLE_HUNT_STARTED,false,PROMPT_BRIEF_ORACLE_HUNT_AVOIDED}",
-			PROMPT_BRIEF_ORACLE_HUNT_AVOIDED: "jakten undviks — får vakna en gång för allseende.{If:showExclusionWarning,PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE}",
-			PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE: " Ej vid: {IdentityList:listExcludedRoles,or}.",
-			PROMPT_BRIEF_ORACLE_HUNT_STARTED: "jakten startar — spelarnas mål byts till att hitta Oraklet.",
-			PROMPT_BRIEF_ORACLE_ROLE_ACTION: "agera som {RoleName:role}.",
-			PROMPT_BRIEF_ORACLE_VIEW: "titta på {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_BRIEF_PARANORMALINVESTIGATOR: "{PROMPT_BRIEF_HEADER} titta på 1-2 kort. Varning vid: {IdentityList:listDangerRoles,or}.",
-			PROMPT_BRIEF_PICKPOCKET: "{PROMPT_BRIEF_HEADER} byt märke med en spelare, titta på det.",
-			PROMPT_BRIEF_PRIEST: "{PROMPT_BRIEF_HEADER} ersätt ditt märke med ett {TOKEN_MARK_CLARITY}, och valfritt även en annan spelares.",
-			PROMPT_BRIEF_PSYCHIC: "{PROMPT_BRIEF_HEADER} titta på {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_BRIEF_RASCAL: "{PROMPT_BRIEF_HEADER} agera som {RoleName:role}.",
-			PROMPT_BRIEF_RENFIELD: "{PROMPT_BRIEF_HEADER} identifiera {TEAM_VAMPIRE_DEFINITE}, byt ditt märke.",
-			PROMPT_BRIEF_REVEALER: "{PROMPT_BRIEF_HEADER} vänd ett kort, vänd tillbaka om: {IdentityList:listHiddenRoles,or}.",
-			PROMPT_BRIEF_RIPPLE: "{If:noRipple,PROMPT_BRIEF_RIPPLE_NONE} Krusning: {PROMPT_BRIEF_RIPPLE_SELECTOR}",
-			PROMPT_BRIEF_RIPPLE_DOUBLE_VOTE: "spelare {ValueList:players} får dubbla röster.",
-			PROMPT_BRIEF_RIPPLE_MUTED: "spelare {ValueList:players} får inte prata.",
-			PROMPT_BRIEF_RIPPLE_NONE: "(endast om Orakel tvingar)",
-			PROMPT_BRIEF_RIPPLE_REBUKED: "spelare {ValueList:players} vänder sig bort.",
-			PROMPT_BRIEF_RIPPLE_ROLE_ACTION: "spelare {Value:player} agerar som {RoleName:role}.",
-			PROMPT_BRIEF_RIPPLE_SELECTOR: "{Select:type,ripple_timer,PROMPT_BRIEF_RIPPLE_TIMER,ripple_role_action,PROMPT_BRIEF_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_BRIEF_RIPPLE_MUTED,ripple_rebuked,PROMPT_BRIEF_RIPPLE_REBUKED,ripple_view_player,PROMPT_BRIEF_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_BRIEF_RIPPLE_DOUBLE_VOTE}",
-			PROMPT_BRIEF_RIPPLE_TIMER: "en minut kvar att diskutera.",
-			PROMPT_BRIEF_RIPPLE_VIEW_PLAYER: "spelare {Value:player} titta på kort för {ValueList:players}.",
-			PROMPT_BRIEF_ROBBER: "{PROMPT_BRIEF_HEADER} byt kort med en spelare, titta på det.",
-			PROMPT_BRIEF_SEER: "{PROMPT_BRIEF_HEADER} titta på ett spelarkort, eller två mittenkort.",
-			PROMPT_BRIEF_SENTINEL: "{PROMPT_BRIEF_HEADER} placera en {TOKEN_SHIELD}.",
-			PROMPT_BRIEF_SQUIRE: "{PROMPT_BRIEF_HEADER} titta på kort för {TEAM_WEREWOLF_PLURAL}.",
-			PROMPT_BRIEF_THING: "{PROMPT_BRIEF_HEADER} rör en grannes hand.",
-			PROMPT_BRIEF_TROUBLEMAKER: "{PROMPT_BRIEF_HEADER} byt plats på två spelares kort.",
-			PROMPT_BRIEF_VAMPIRE_TEAM: "{Identity:instigator,plural}: identifiera varandra, märk en spelare.",
-			PROMPT_BRIEF_VILLAGEIDIOT: "{PROMPT_BRIEF_HEADER} flytta alla kort ett steg, eller inte alls.",
-			PROMPT_BRIEF_WEREWOLF_DREAMWOLF: "{Identity:instigator,plural} (ej {ROLE_DREAMWOLF}): identifiera varandra. {ROLE_DREAMWOLF}: visa tumme för dem.",
-			PROMPT_BRIEF_WEREWOLF_STANDARD: "{Identity:instigator,plural}: identifiera varandra (ensam: titta på mittenkort).",
-			PROMPT_BRIEF_WEREWOLF_TEAM: "{If:hasDreamWolf,PROMPT_BRIEF_WEREWOLF_DREAMWOLF,PROMPT_BRIEF_WEREWOLF_STANDARD}",
-			PROMPT_BRIEF_WITCH: "{PROMPT_BRIEF_HEADER} titta på ett mittenkort, ge bort det om du vill.",		
-			PROMPT_CHECK_MARKS: "{PROMPT_WAKE_CALL} Kontrollera era märken utan att visa dem för någon annan. {PROMPT_SLEEP_CALL}",
-			PROMPT_COPYCAT: "{PROMPT_WAKE_CALL} Titta på ett av mittenkorten. Du är nu rollen du såg. När rollen ropas upp, vakna och utför dess handling. {PROMPT_SLEEP_CALL}",
-			PROMPT_COUNT: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_COUNT_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_COUNT_ACTION: "Byt ut en annan spelares märke mot {ROLE_COUNT_DEFINITE_GENITIVE} märke.",
-			PROMPT_CUPID: "{PROMPT_WAKE_CALL} Byt ut två andra spelares märken mot {ROLE_CUPID_DEFINITE_GENITIVE} märke. {PROMPT_SLEEP_CALL}",
-			PROMPT_CURATOR: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_CURATOR_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_CURATOR_ACTION: "Placera en artefakt utan att titta på den med ansiktet ner framför en annan spelare.",
-			PROMPT_DISEASED: "{PROMPT_WAKE_CALL} Byt ut en av dina grannars märke mot {Identity:instigator,definite,genitive} märke. {PROMPT_SLEEP_CALL}",
-			PROMPT_DOPPELGANGER: "{PROMPT_WAKE_CALL} Titta på en annan spelares kort. Du är nu rollen du såg. {If:hasImmediateActionRoles,PROMPT_DOPPELGANGER_IMMEDIATE_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_DOPPELGANGER_IMMEDIATE_ACTION: "Om rollen du såg var {IdentityList:listImmediateActionRoles,or}, utför dess handling nu.",
-			PROMPT_DO_ROLE_ACTION: "{RoleAction:role}",
-			PROMPT_DRUNK: "{PROMPT_WAKE_CALL} {PROMPT_DRUNK_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_DRUNK_ACTION: "Byt ditt kort mot ett av mittenkorten utan att se vad det är.",
-			PROMPT_EMPATH: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} Iakta vad de andra spelarna gör. Spelare {ValueList:players}, utan att vakna, {LocalizedValue:question} {PROMPT_SLEEP_CALL}",
-			PROMPT_EMPATH_QUESTION_10: "visa tummen upp om du tror att du kommer vinna, eller tummen ner om du tror att du kommer förlora.",
-			PROMPT_EMPATH_QUESTION_11: "peka på den spelare som du tror är mest sannolik att redan ha glömt sin roll.",
-			PROMPT_EMPATH_QUESTION_1: "peka på en spelare som du tror kommer vinna.",
-			PROMPT_EMPATH_QUESTION_2: "peka på en spelare som du tror blir utröstad.",
-			PROMPT_EMPATH_QUESTION_3: "peka på den spelare som du litar mest på.",
-			PROMPT_EMPATH_QUESTION_4: "peka på den spelare som du litar minst på.",
-			PROMPT_EMPATH_QUESTION_5: "peka på en spelare som du tror är en av {TEAM_VILLAGE_DEFINITE}.",
-			PROMPT_EMPATH_QUESTION_6: "peka på den spelare som du tror kommer prata mest.",
-			PROMPT_EMPATH_QUESTION_7: "peka på den spelare som du tror kommer prata minst.",
-			PROMPT_EMPATH_QUESTION_8: "peka på den spelare som du tror är bäst på att bluffa.",
-			PROMPT_EMPATH_QUESTION_9: "peka på den spelare som du tror är sämst på att bluffa.",
-			PROMPT_EXPOSER: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} Du får {PROMPT_EXPOSER_ACTION}. {PROMPT_SLEEP_CALL}",
-			PROMPT_EXPOSER_ACTION: "vända {NUM_WORD} av mittenkorten",
-			PROMPT_FEUDINGALIENS: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_FEUDINGALIENS_DOPPELGANGER} vakna och identifiera varandra. {PROMPT_SLEEP_CALL}",
-			PROMPT_FEUDINGALIENS_DOPPELGANGER: "och {ROLE_DOPPELGANGER_DEFINITE} om du såg ett av {Identity:instigator,plural,definite,genitive} kort,",
-			PROMPT_GREMLIN: "{PROMPT_WAKE_CALL} {PROMPT_GREMLIN_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_GREMLIN_ACTION: "Byt plats på två andra spelares märken eller två andra spelares kort, utan att titta på något av dem.",
-			PROMPT_INSOMNIAC: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_INSOMNIAC_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_INSOMNIAC_ACTION: "Titta på ditt eget kort.",
-			PROMPT_INSTIGATOR: "{PROMPT_WAKE_CALL} Byt ut en annan spelares märke mot {ROLE_INSTIGATOR_DEFINITE_GENITIVE} märke. {PROMPT_SLEEP_CALL}",
-			PROMPT_LEADER: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, håll ut en tumme så att {Identity:instigator,definite} kan se. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, dra tillbaka tummarna.",
-			PROMPT_LEADER_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_ALIEN_PLURAL}, fortsätt hålla ut tummarna så att {ROLE_DOPPELGANGER_DEFINITE} kan se. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_LEADER_FEUDINGALIENS: "{ROLE_FEUDINGALIENS}, håll ut båda tummarna. {Identity:instigator}, om du ser både {ROLE_FEUDINGALIENS_DEFINITE} vinner du om ingen av dem röstas ut.",
-			PROMPT_LOVERS: "{PROMPT_WAKE_CALL} Identifiera varandra. Om en av er röstas ut så kommer samtliga att röstas ut. {PROMPT_SLEEP_CALL}",
-			PROMPT_MARKSMAN: "{PROMPT_WAKE_CALL} {PROMPT_MARKSMAN_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_MARKSMAN_ACTION: "Titta på en annan spelares kort, samt ytterligare en annan spelares märke. Det får inte vara samma spelare.",
-			PROMPT_MASON: "{Identity:instigator,plural}, {If:hasDoppelganger,PROMPT_MASON_DOPPELGANGER} vakna och identifiera varandra. {Identity:instigator,plural}, somna.",
-			PROMPT_MASON_DOPPELGANGER: "och {ROLE_DOPPELGANGER_DEFINITE} om du såg en av {Identity:instigator,plural,definite},",
-			PROMPT_MINION: "{PROMPT_WAKE_CALL} {TEAM_WEREWOLF_PLURAL}, håll ut en tumme så att {Identity:instigator,definite} kan se vem ni är. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_MINION_DOPPELGANGER} {TEAM_WEREWOLF_PLURAL}, ner med tummarna.",
-			PROMPT_MINION_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, fortsätt hålla ut tummen så att {ROLE_DOPPELGANGER_DEFINITE} kan se vem ni är. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_MORTICIAN: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_VIEW_CARD} {PROMPT_SLEEP_CALL}",
-			PROMPT_MYSTICWOLF: "{PROMPT_WAKE_CALL} Du får titta på en annan spelares kort. {PROMPT_SLEEP_CALL}",
-			PROMPT_NOSTRADAMUS: "{PROMPT_WAKE_CALL} Du kan titta på en till tre andra spelares kort. {If:hasDangerRoles,PROMPT_NOSTRADAMUS_WARNING} {PROMPT_SLEEP_CALL}",
-			PROMPT_NOSTRADAMUS_DOPPELGANGER: "{ROLE_DOPPELGANGER}, om du såg {Identity:instigator,definite} gäller samma vinstvillkor för dig.",
-			PROMPT_NOSTRADAMUS_WARNING: "Om du ser: {IdentityList:listDangerRoles,or}, måste du sluta. <Berättare: annonsera vilket lag {Identity:instigator,definite} nu tillhör, eller {LocalizedValue:fallbackTeam}>. Om du inte blir utröstad och det laget vinner så vinner även du. {If:hasDoppelganger,PROMPT_NOSTRADAMUS_DOPPELGANGER}",
-			PROMPT_ORACLE: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {Select:type,view_card,PROMPT_VIEW_CARD,oracle_change_team,PROMPT_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_ORACLE_BLOCK_ACTION,role_action,PROMPT_DO_ROLE_ACTION,oracle_announce_even_odd,PROMPT_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_ORACLE_HUNT} {PROMPT_SLEEP_CALL}",
-			PROMPT_ORACLE_BLOCK_ACTION: "Samtliga andra spelare, räck ut en hand framför er. {Identity:instigator}, rör vid en annan spelares hand som du vill blockera. Spelaren får inte vakna eller utföra någon handling under natten oavsett vad deras roll är.",
-			PROMPT_ORACLE_CHANGE_TEAM: "Vill du gå med i {Identity:joinTeam,definite,genitive} lag? Om ja, {Select:joinFull,true,PROMPT_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_ORACLE_CHANGE_TEAM_PARTIAL} Om nej, {Identity:instigator,definite} är kvar i {TEAM_VILLAGE_DEFINITE_GENITIVE} lag.",
-			PROMPT_ORACLE_CHANGE_TEAM_FULL: "{Identity:instigator,definite} är nu den rollen, och vaknar tillsammans med dem.",
-			PROMPT_ORACLE_CHANGE_TEAM_PARTIAL: "{Identity:instigator,definite} vinner nu tillsammans med det laget, men är inte den rollen och vaknar inte tillsammans med dem.",
-			PROMPT_ORACLE_EVEN_ODD: "<Berättare: avslöja om {Identity:instigator,definite} har ett jämt eller udda spelarnummer>.",
-			PROMPT_ORACLE_HUNT: "Gissa ett tal mellan 1 och 10. {Select:huntActive,true,PROMPT_ORACLE_HUNT_STARTED,false,PROMPT_ORACLE_HUNT_AVOIDED}",
-			PROMPT_ORACLE_HUNT_AVOIDED: "Korrekt. När en annan roll blir tillsagd att vakna kan du en gång under natten vakna tillsammans med dem för att iakta vem de är och vad de gör. {If:showExclusionWarning,PROMPT_ORACLE_HUNT_OMNISCIENCE}",
-			PROMPT_ORACLE_HUNT_OMNISCIENCE: "Du får dock inte vakna för att iakta någon av följande roller: {IdentityList:listExcludedRoles,or}.",
-			PROMPT_ORACLE_HUNT_STARTED: "Fel. {Identity:instigator}, du vinner nu endast om du inte blir utröstad. Övriga spelare, oberoende av tidigare roll- och lagtillhörighet har ni nu endast ett vinstvillkor: hitta {Identity:instigator,definite}.",
-			PROMPT_PARANORMALINVESTIGATOR: "{PROMPT_WAKE_CALL} Du kan titta på en till två andra spelares kort. {If:hasDangerRoles,PROMPT_PARANORMALINVESTIGATOR_WARNING} {PROMPT_SLEEP_CALL}",
-			PROMPT_PARANORMALINVESTIGATOR_WARNING: "Om du ser: {IdentityList:listDangerRoles,or}, måste du sluta. Du tillhör då deras lag.",
-			PROMPT_PICKPOCKET: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_PICKPOCKET_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_PICKPOCKET_ACTION: "Du kan välja att stjäla en annan spelares märke och ersätta det med ditt märke. Titta sedan på märket du stal.",
-			PROMPT_PRIEST: "{PROMPT_WAKE_CALL} Byt ut ditt märke mot ett {TOKEN_MARK_CLARITY}. Om du vill får du även byta ut en annan spelares märke mot ett {TOKEN_MARK_CLARITY}. {PROMPT_SLEEP_CALL}",
-			PROMPT_PSYCHIC: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_VIEW_CARD} {PROMPT_SLEEP_CALL}",
-			PROMPT_RASCAL: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_RASCAL_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_RASCAL_ACTION: "{PROMPT_DO_ROLE_ACTION}",
-			PROMPT_RENFIELD: "{PROMPT_WAKE_CALL} {TEAM_VAMPIRE_PLURAL}, peka på den spelare som ni har gett {TEAM_VAMPIRE_DEFINITE_GENITIVE} märke. {Identity:instigator}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_RENFIELD_DOPPELGANGER} {TEAM_VAMPIRE_PLURAL}, sluta peka.",
-			PROMPT_RENFIELD_ACTION: "identifiera {TEAM_VAMPIRE_DEFINITE} och byt ut ditt märke mot {Identity:instigator,definite,genitive} märke.",
-			PROMPT_RENFIELD_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_VAMPIRE_PLURAL}, fortsätt peka på den spelare som ni har gett {TEAM_VAMPIRE_DEFINITE_GENITIVE} märke. {ROLE_DOPPELGANGER}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_REVEALER: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_REVEALER_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_REVEALER_ACTION: "Vänd en annan spelares kort ansiktet upp. {If:hasHiddenRoles,PROMPT_REVEALER_HIDDEN_ROLE}",
-			PROMPT_REVEALER_HIDDEN_ROLE: "Om kortet är: {IdentityList:listHiddenRoles,or}, vänd kortet tillbaka med ansiktet ner.",
-			PROMPT_RIPPLE: "{If:noRipple,PROMPT_RIPPLE_NONE} Det har inträffat en krusning i rum-tiden. {PROMPT_RIPPLE_SELECTOR}",
-			PROMPT_RIPPLE_DOUBLE_VOTE: "Spelare {ValueList:players} får under omröstningen använda båda händerna för dubbla röster.",
-			PROMPT_RIPPLE_MUTED: "Spelare {ValueList:players} får inte prata förrän efter omröstningen.",
-			PROMPT_RIPPLE_NONE: "<Berättare: ignorera följande om inte {ROLE_ORACLE_DEFINITE} valt att tvinga fram en krusning>",
-			PROMPT_RIPPLE_REBUKED: "Spelare {ValueList:players} måste vända sig från bordet förrän efter omröstningen.",
-			PROMPT_RIPPLE_ROLE_ACTION: "Spelare {Value:player}, vakna. {PROMPT_DO_ROLE_ACTION} Spelare {Value:player}, somna.",
-			PROMPT_RIPPLE_SELECTOR: "{Select:type,ripple_timer,PROMPT_RIPPLE_TIMER,ripple_role_action,PROMPT_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_RIPPLE_MUTED,ripple_rebuked,PROMPT_RIPPLE_REBUKED,ripple_view_player,PROMPT_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_RIPPLE_DOUBLE_VOTE}",
-			PROMPT_RIPPLE_TIMER: "Ni har endast en minut på er innan ni måste rösta.",
-			PROMPT_RIPPLE_VIEW_PLAYER: "Spelare {Value:player}, vakna. Du får titta på kort för spelare {ValueList:players}. Spelare {Value:player}, somna.",
-			PROMPT_ROBBER: "{PROMPT_WAKE_CALL} {PROMPT_ROBBER_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_ROBBER_ACTION: "Du kan välja att stjäla en annan spelares kort och ersätta det med ditt kort. Titta sedan på kortet du stal. Du ska inte vakna när din nya roll ropas upp.",
-			PROMPT_SEER: "{PROMPT_WAKE_CALL} Du kan titta på en annan spelares kort, eller två av mittenkorten. {PROMPT_SLEEP_CALL}",
-			PROMPT_SENTINEL: "{PROMPT_WAKE_CALL} Placera en {TOKEN_SHIELD} på en annan spelares kort. {PROMPT_SLEEP_CALL}",
-			PROMPT_SQUIRE: "{PROMPT_WAKE_CALL} {TEAM_WEREWOLF_PLURAL}, håll ut en tumme så att {Identity:instigator,definite} kan se vem ni är. {Identity:instigator}, du får titta på deras kort. {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_SQUIRE_DOPPELGANGER} {TEAM_WEREWOLF_PLURAL}, ner med tummarna.",
-			PROMPT_SQUIRE_DOPPELGANGER: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, fortsätt hålla ut tummen så att {ROLE_DOPPELGANGER_DEFINITE} kan se vem ni är. {ROLE_DOPPELGANGER}, du får titta på deras kort. {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			PROMPT_THING: "{PROMPT_WAKE_CALL} Samtliga andra spelare, räck ut en hand framför er. {ROLE_THING}, rör handen tillhörande spelaren närmast till höger eller vänster. {PROMPT_SLEEP_CALL}",
-			PROMPT_TROUBLEMAKER: "{PROMPT_WAKE_CALL} {PROMPT_TROUBLEMAKER_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_TROUBLEMAKER_ACTION: "Byt plats på två andra spelares kort, utan att titta på något av dem.",
-			PROMPT_VAMPIRE_TEAM: "{If:hasDoppelganger,PROMPT_VAMPIRE_TEAM_DOPPELGANGER_PREFIX} {Identity:instigator,plural}, vakna och identifiera varandra. Tillsammans får ni välja en spelare vars märke ni byter ut mot {Identity:instigator,plural,definite,genitive} märke. {Identity:instigator,plural}, somna.",
-			PROMPT_VAMPIRE_TEAM_DOPPELGANGER_PREFIX: "{ROLE_DOPPELGANGER}, om du såg någon av {Identity:instigator,plural,definite}, vakna tillsammans med dem när de blir ombedda.",
-			PROMPT_VIEW_CARD: "Du får titta på {PROMPT_VIEW_CARD_ENTRY}.",
-			PROMPT_VIEW_CARD_CENTER: "{NUM_WORD} av mittenkorten",
-			PROMPT_VIEW_CARD_ENTRY: "{Select:target,center,PROMPT_VIEW_CARD_CENTER,neighbor,PROMPT_VIEW_CARD_NEIGHBOR,even_player,PROMPT_VIEW_CARD_EVEN,odd_player,PROMPT_VIEW_CARD_ODD,player,PROMPT_VIEW_CARD_PLAYER,self,PROMPT_VIEW_CARD_SELF}",
-			PROMPT_VIEW_CARD_EVEN: "{NUM_WORD} kort från jämna spelare",
-			PROMPT_VIEW_CARD_NEIGHBOR: "{Select:restriction,left,PROMPT_VIEW_CARD_NEIGHBOR_LEFT,right,PROMPT_VIEW_CARD_NEIGHBOR_RIGHT,both,PROMPT_VIEW_CARD_NEIGHBOR_BOTH,any,PROMPT_VIEW_CARD_NEIGHBOR_ANY}",
-			PROMPT_VIEW_CARD_NEIGHBOR_ANY: "en av dina grannars kort",
-			PROMPT_VIEW_CARD_NEIGHBOR_BOTH: "båda dina grannars kort",
-			PROMPT_VIEW_CARD_NEIGHBOR_LEFT: "din vänstra grannes kort",
-			PROMPT_VIEW_CARD_NEIGHBOR_RIGHT: "din högra grannes kort",
-			PROMPT_VIEW_CARD_ODD: "{NUM_WORD} kort från udda spelare",
-			PROMPT_VIEW_CARD_PLAYER: "{Select:restriction,any,PROMPT_VIEW_CARD_PLAYER_ANY,specific,PROMPT_VIEW_CARD_PLAYER_SPECIFIC}",
-			PROMPT_VIEW_CARD_PLAYER_ANY: "{NUM_WORD} kort från {Select:count,1,PROMPT_VIEW_CARD_PLAYER_ANY_SINGLE,PROMPT_VIEW_CARD_PLAYER_ANY_MULTI} spelare",
-			PROMPT_VIEW_CARD_PLAYER_ANY_SINGLE: "en annan",
-			PROMPT_VIEW_CARD_PLAYER_ANY_MULTI: "andra",
-			PROMPT_VIEW_CARD_PLAYER_SPECIFIC: "kort som tillhör spelare {ValueList:players}",
-			PROMPT_VIEW_CARD_SELF: "ditt eget kort",
-			PROMPT_VILLAGEIDIOT: "{PROMPT_WAKE_CALL} {PROMPT_VILLAGEIDIOT_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_VILLAGEIDIOT_ACTION: "Du kan välja att flytta samtliga spelares kort ett steg åt vänster, åt höger, eller inte alls.",
-			PROMPT_WEREWOLF_TEAM: "{If:hasDoppelganger,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX} {If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF,PROMPT_WEREWOLF_TEAM_CORE_STANDARD}",
-			PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF: "{Identity:instigator,plural}, med undantag för {ROLE_DREAMWOLF_DEFINITE}, vakna och identifiera varandra. Om det bara finns en {Identity:instigator} får du titta på ett av mittenkorten. {ROLE_DREAMWOLF}, stick ut tummen så att andra {Identity:instigator,plural} kan se vem du är. {ROLE_DREAMWOLF}, ner med tummen. {Identity:instigator,plural}, somna.",
-			PROMPT_WEREWOLF_TEAM_CORE_STANDARD: "{Identity:instigator,plural}, vakna och identifiera varandra. Om det bara finns en {Identity:instigator} får du titta på ett av mittenkorten. {Identity:instigator,plural}, somna.",
-			PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX: "{If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_DREAMWOLF,PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_STANDARD}",
-			PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_DREAMWOLF: "{ROLE_DOPPELGANGER}, om du såg någon av {Identity:instigator,plural,definite} förutom {ROLE_DREAMWOLF_DEFINITE}, vakna tillsammans med dem när de blir ombedda. Om du såg {ROLE_DREAMWOLF_DEFINITE}, vakna inte men följ den rollens instruktioner.",
-			PROMPT_WEREWOLF_TEAM_DOPPELGANGER_PREFIX_STANDARD: "{ROLE_DOPPELGANGER}, om du såg någon av {Identity:instigator,plural,definite}, vakna tillsammans med dem när de blir ombedda.",
-			PROMPT_WITCH: "{PROMPT_WAKE_CALL} {PROMPT_WITCH_ACTION} {PROMPT_SLEEP_CALL}",
-			PROMPT_WITCH_ACTION: "Du kan välja att titta på ett av korten i mitten. Om du gör det måste du ge det kortet till dig själv eller en annan spelare.",						
-			
-			
-			//Full rules HTML text
-			UI_RULES_FULL: `
-				<h2>Spelregler – One Night Ultimate Werewolf</h2>
+				</ul>`,
+			SWE: `<h2>Spelregler – One Night Ultimate Werewolf</h2>
 
 				<p>
-					<strong>One Night Ultimate Werewolf</strong> är ett snabbt socialt deduktionsspel bestående av två faser (tre om roller från <strong>One Night Ultimate Vampire</strong> används, då en skymmningsfas kommer först): nattfasen där alla handlingar sker, följt av dagfasen där spelarna diskuterar och försöker besluta vem som ska röstas ut efter att dagfasen är över. 
+					<strong>One Night Ultimate Werewolf</strong> är ett snabbt socialt deduktionsspel bestående av två faser (tre om roller från <strong>One Night Ultimate Vampire</strong> används, då en skymmningsfas kommer först): nattfasen där alla handlingar sker, följt av dagfasen där spelarna diskuterar och försöker besluta vem som ska röstas ut efter att dagfasen är över.
 					Spelet leds av en berättare som guidar spelarna genom nattens olika steg.
 				</p>
 
@@ -2181,7 +4382,7 @@ const Localization = (() => {
 				<ul>
 					<li>Endast de spelare vars roll nämns får öppna ögonen.</li>
 					<li>Spelare utför sina handlingar tyst, enligt instruktionerna, eller låter berättaren göra det åt dem.</li>
-					<li>Vissa roller tittar på kort, vissa byter kort, vissa får iakta andra spelare göra något, och vissa gör ingenting.</li>
+					<li>Vissa roller tittar på kort, vissa byter kort, vissa får iaktta andra spelare göra något, och vissa gör ingenting.</li>
 					<li>Om en roll inte är med i spelet hoppas den fasen över. Dock ska de oanvända rollerna i mitten också få instruktioner för att förhindra spelare från att veta vilka de är.</li>
 					<li>Spelare som vaknar samtidigt får inte kommunicera mer än nödvändigt för att utföra sin handling.</li>
 				</ul>
@@ -2251,33 +4452,47 @@ const Localization = (() => {
 					<li>En spelare kan byta lag utan att själv veta om det.</li>
 					<li>All information från natten är privat och spelare väljer själva vad de vill dela med sig av – det finns inga garantier för att någon talar sanning.</li>
 					<li>Att bluffa är ett verktyg för att skydda sig själv, men även för att få fram information från andra.</li>
-				</ul>
-				`
+				</ul>`,
 		},
 	};
+
 
 
 	/* =========================
 	   Initialization
 	   ========================= */
-	
+
 	function _init() {
 		_loadLanguage();
 	}
-	
+
+	_init();
+
+
+
 	/* =========================
 	   Private functions
 	   ========================= */
-	
+
+	// Persists the current language (LANG) to localStorage. No parameters, no return value.
 	function _saveLanguage() {
 		localStorage.setItem(LANGUAGE_STORE, LANG);
 	}
 
+	// Restores the persisted language into LANG, if one was saved; otherwise leaves LANG at its existing (default) value. No parameters,
 	function _loadLanguage() {
 		LANG = localStorage.getItem(LANGUAGE_STORE) || LANG;
 	}
 
-	//Splits the argument portion of a template primitive, converting the raw string input to a typed value
+	/*
+	 * Converts one raw argument string from a template primitive call (e.g. the "true" in {Function:true}) into its typed value.
+	 *
+	 * value - the raw, comma-split argument text, not yet trimmed or unquoted.
+	 *
+	 * Returns, in order of precedence: "" for an empty/whitespace-only argument; the literals true/false/null/undefined as their actual
+	 * typed values; a quoted string ('...' or "...") with its quotes stripped; a bare integer or decimal as a Number; otherwise the
+	 * trimmed string unchanged.
+	 */
 	function _parseTemplateArg(value) {
 		value = value.trim();
 
@@ -2299,42 +4514,56 @@ const Localization = (() => {
 
 		return value;
 	}
-	
-	//Capitalizes the first letter of each sentence (after a ./!/? or at the very start of the text), left over from template expansion pulling in lowercase fragments
+
+	/*
+	 * Capitalizes the first letter of each sentence (after a ./!/? or at the very start of the text), left over from template expansion
+	 * pulling in lowercase fragments. text - fully resolved narration text. Returns the capitalized text.
+	 */
 	function _normalizeSentences(text) {
 		return text.replace(/([.!?]|^)\s*(\p{L})/gu, (_, punct, letter) => {
 			return (punct === "" ? "" : punct + " ") + letter.toUpperCase();
 		});
 	}
-	
-	//Collapses runs of multiple spaces to one, removes a stray space before ,.!?, and trims the ends — cleanup for gaps left by conditional/empty template expansion.
+
+	/*
+	 * Collapses runs of multiple spaces to one, removes a stray space before ,.!?, and trims the ends — cleanup for gaps left by
+	 * conditional/empty template expansion. text - fully resolved narration text. Returns the cleaned-up text.
+	 */
 	function _trimExtraSpaces(text) {
 		return text.replace(/ {2,}/g, " ").replace(/ ([,.!?])/g, "$1").trim();
 	}
-	
+
 	/*
-	 * Recursively resolves template expressions embedded within localized text.
+	 * Iteratively resolves template expressions embedded within localized text.
 	 *
-	 * Templates are entered into localized strings using the bracket {...} notation.
-	 * Templates can by default substitute localized keys directly. If a function
-	 * table is provided, it can also call named primitives with arguments. Arguments
-	 * are provided as comma separated values, prefixed by a colon.
+	 * Templates are entered into localized strings using the bracket {...} notation. Templates can by default substitute localized keys directly. If a function
+	 * table is provided, it can also call named primitives with arguments. Arguments are provided as comma separated values, prefixed by a colon.
+	 *
+	 * A name that matches an entry in funcs always takes priority over a plain localization key of the same name - {Break} calls
+	 * funcs.Break(data) even though "Break" isn't itself a real localization key, and would still do so even if it happened to be one.
+	 *
+	 * Template functions may themselves return templates, allowing complex narration to be assembled from small reusable components. Resolution continues until no
+	 * template expressions remain or the maximum iteration count is reached.
 	 *
 	 * Template syntax:
 	 *	{KEY}
 	 *		Inserts another localization key.
 	 *	{Function:arg1,arg2,...}
-	 *		Invokes a built-in template function. Will only accept arguments as strings
-	 *		that are then converted to typed values (e.g. "true" -> boolean true).
+	 *		Invokes a named function from the supplied function table, e.g. Interpreter.PRIMITIVES. Arguments are always passed as strings, converted to typed
+	 *      values first (e.g. "true" -> boolean true).
 	 *
-	 * Template functions may themselves return templates, allowing complex
-	 * narration to be assembled from small reusable components.
+	 * An optional data argument and error function can also be provided for extra control over arguments and error handling.
 	 *
-	 * An optional data argument and error function can also be provided for extra
-	 * control over arguments and error handling.
+	 *   text    - the text to resolve; typically starts as a single {KEY} (see localize()) but may already contain arbitrary text mixed
+	 *             with further {...} expressions once functions start returning their own templates.
+	 *   funcs   - optional function table (name -> (data, ...args) => string); a name absent from funcs falls back to a plain localization
+	 *             key lookup instead. null/undefined disables function calls entirely, treating every {name...} as a key lookup.
+	 *   data    - opaque value passed as the first argument to every function call; not otherwise inspected here.
+	 *   onError - (type, key, data) => string | undefined, called for "missing_key" (a plain key or function name resolved to nothing) or
+	 *             "max_iterations" (resolution didn't settle within MAX_ITERATIONS - very likely a cyclic reference). Defaults to
+	 *             _defaultTemplateError. See that function for the undefined-return convention on the "max_iterations" path.
 	 *
-	 * Resolution continues until no template expressions remain or the maximum
-	 * recursion depth is reached.
+	 * Returns the fully resolved, sentence-capitalized, whitespace-cleaned text (see _normalizeSentences/_trimExtraSpaces).
 	 */
 	function _resolveTemplate(text, funcs, data, onError) {
 		let result = text;
@@ -2366,55 +4595,83 @@ const Localization = (() => {
 		return _normalizeSentences(_trimExtraSpaces(result));
 	}
 
-	//Default error handling, generates readable placeholder output when template/localization evaluation fails (e.g. missing localization key definition).
+	/*
+	 * Default onError implementation for _resolveTemplate (see its `onError` parameter for the contract).
+	 *   type - "missing_key" or "max_iterations".
+	 *   key  - the missing key/function name for "missing_key"; the original, still-unresolved text for "max_iterations".
+	 * Returns a visible "UNDEF: KEY" placeholder for "missing_key" (recoverable - narration continues around it); returns undefined for
+	 * "max_iterations" (unrecoverable), which tells _resolveTemplate's caller to fall back to keeping the partially-resolved text rather
+	 * than substituting anything in its place.
+	 */
 	function _defaultTemplateError(type, key) {
 		console.warn(`Template resolution issue (${type}):`, key);
 		return type === "missing_key" ? `UNDEF: ${key}` : undefined; // undefined ⇒ caller keeps the partially-resolved text
 	}
 
 
+
 	/* =========================
 	   Public functions
 	   ========================= */
-	
+
 	/*
 	 * Public localization interface.
 	 *
-	 * Most callers should use localize(), which resolves both localization keys
-	 * and any embedded template expressions.
+	 * Most callers should use localize(), which resolves both localization keys and any embedded template expressions.
 	 */
-	
+
+	/*
+	 * Resolves key (and anything it expands into) to final narration text - the main entry point for localizing a key.
+	 * See _resolveTemplate for the full parameter contract (funcs/data/onError) and template syntax. Returns the resolved text.
+	 */
 	function localize(key, funcs = null, data = null, onError = _defaultTemplateError) {
 		return _resolveTemplate(`{${key}}`, funcs, data, onError);
 	}
-	
+
+	/*
+	 * True if key exists in the current language's dictionary. Returns false (rather than throwing) if the current language itself has no
+	 * loaded dictionary.
+	 */
 	function hasKey(key) {
-		return LOCALIZATION_KEYS[LANG][key] ? true : false;
-	}
-	
-	function getString(key) {
-		if (LOCALIZATION_KEYS[LANG])
-			return LOCALIZATION_KEYS[LANG][key];
-		
-		return null;
+		return getString(key) !== undefined;
 	}
 
+	/*
+	 * Looks up key's raw (unresolved) string in the current language's dictionary.
+	 *
+	 * key - the localization key to look up.
+	 *
+	 * Returns the raw string if found; undefined if the current language has a dictionary but key isn't in it; null if the current
+	 * language itself has no dictionary at all (e.g. an unrecognized LANG). Note the two "not found" cases return different values -
+	 * _resolveTemplate's missing-key check only tests `!== undefined`, so the null case would currently pass through as a resolved value
+	 * of `null` rather than triggering onError. Worth keeping in mind if LANG can ever end up invalid at runtime.
+	 */
+	function getString(key) {
+		const entry = LOCALIZATION_KEYS[key];
+		if (!entry) return undefined;
+		return entry[LANG] ?? entry.COMMON;
+	}
+
+	// Returns the current language code (e.g. "ENG", "SWE"). No parameters.
 	function getLanguage() {
 		return LANG;
 	}
 
+	// Sets the current language and persists it. lang - a language code matching a key in LOCALIZATION_KEYS. No return value.
 	function setLanguage(lang) {
 		LANG = lang;
 		_saveLanguage();
 	}
 
+	/*
+	 * Returns every key in the current language's dictionary whose name contains pattern (plain substring match via String.includes, not
+	 * a regex) - e.g. used by EmpathResolver to enumerate all "PROMPT_EMPATH_QUESTION_*" variants without hardcoding how many exist.
+	 */
 	function getKeysContaining(pattern) {
-		return Object.keys(LOCALIZATION_KEYS[LANG]).filter(k => k.includes(pattern));
+		return Object.keys(LOCALIZATION_KEYS).filter(k => k.includes(pattern) && getString(k) !== undefined);
 	}
 
 
-	//Initialization
-	_init();
 
 	return {
 		getLanguage,

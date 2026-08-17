@@ -1207,6 +1207,13 @@ body.day-timer-expanded .day-timer-panel {
 		pointer-events: none;
 		font-size: 0.9em;
 	}
+	
+/* Layout wrapping a numeric input */
+.settings-numeric-input {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+}
 
 /* Separator item, a horizontal line without controls or children */
 .settings-separator {
@@ -1436,4 +1443,232 @@ body.day-timer-expanded .day-timer-panel {
     min-width: 4.5em;
     text-align: center;
     font-variant-numeric: tabular-nums;
+}
+
+
+
+
+/* ==========================================
+   Speech controls
+   ========================================== */
+
+.speech-controls {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+	margin-top: 8px;
+}
+
+.speech-buttons {
+	display: flex;
+	gap: 4px;
+}
+
+/* Deliberately as plain as prompt-navigation-button above - a bigger,
+   themed icon button (see .day-timer-btn) reads as more prominent than this
+   control should be. */
+.speech-btn {
+	padding: 2px 8px;
+	min-width: 32px;
+	cursor: pointer;
+}
+
+.speech-btn:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.speech-status {
+	color: #444;
+	font-size: 0.9rem;
+}
+
+
+
+
+
+/* ==========================================
+   Speech overlay
+   ========================================== */
+
+.speech-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 10000;
+
+	display: none;
+
+	background: rgba(0, 0, 0, 0.95);
+
+	align-items: center;
+	justify-content: center;
+
+	color: #fff;
+}
+
+.speech-overlay.visible {
+	display: flex;
+}
+
+.speech-overlay-content {
+	width: min(90vw, 1100px);
+	height: 90vh;
+	max-height: 90vh;
+
+	display: flex;
+	flex-direction: column;
+
+	text-align: center;
+}
+
+.speech-overlay-state {
+	flex: 0 0 auto;
+
+	padding-top: 20px;
+	margin-bottom: 15px;
+
+	color: rgba(255, 255, 255, 0.7);
+
+	font-size: 1.2rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+}
+
+.speech-overlay-text {
+	flex: 0 0 auto;
+
+	width: 100%;
+
+	color: #fff;
+
+	font-size: 3.5rem;
+	font-weight: 500;
+	line-height: 1.4;
+
+	overflow-wrap: break-word;
+}
+
+.speech-overlay-countdown {
+	flex: 0 0 auto;
+
+	margin-top: 60px;
+
+	color: #fff;
+
+	font-size: 6rem;
+	font-weight: 700;
+	line-height: 1;
+
+	font-variant-numeric: tabular-nums;
+}
+
+/* Applied only while an input's wait is running, so it can share vertical
+   space with the option buttons below it - the ordinary pause countdown
+   stays at full size, since it has no buttons competing for room. */
+.speech-overlay-countdown-compact {
+	font-size: 2.5rem;
+	margin-top: 20px;
+}
+
+.speech-overlay-options {
+	flex: 0 0 auto;
+	margin-top: 30px;
+
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 12px;
+}
+
+.speech-overlay-option {
+	min-width: 120px;
+	min-height: 56px;
+	padding: 10px 24px;
+
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+
+	border: 1px solid rgba(255, 255, 255, 0.3);
+	border-radius: 6px;
+
+	font-size: 1.6rem;
+	line-height: 1.2;
+
+	cursor: pointer;
+}
+
+.speech-overlay-option:hover {
+	background: rgba(255, 255, 255, 0.2);
+}
+
+.speech-overlay-option.selected {
+	background: rgba(255, 255, 255, 0.35);
+	border-color: #fff;
+}
+
+.speech-overlay-controls {
+	margin-top: auto;
+	padding-bottom: 20px;
+
+	display: flex;
+	justify-content: center;
+	gap: 16px;
+}
+
+.speech-overlay-controls button {
+	min-width: 64px;
+	min-height: 52px;
+	padding: 8px 18px;
+
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+
+	border: 1px solid rgba(255, 255, 255, 0.3);
+	border-radius: 6px;
+
+	font-size: 1.4rem;
+	line-height: 1;
+
+	cursor: pointer;
+}
+
+.speech-overlay-controls button:hover {
+	background: rgba(255, 255, 255, 0.2);
+}
+
+.speech-overlay-controls button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+@media (max-width: 600px) {
+	.speech-overlay-content {
+		width: 94vw;
+		height: 90vh;
+	}
+
+	.speech-overlay-text {
+		font-size: 2.5rem;
+	}
+
+	.speech-overlay-countdown {
+		font-size: 4rem;
+	}
+
+	.speech-overlay-controls button {
+		min-width: 56px;
+		min-height: 48px;
+	}
+	
+	.speech-overlay-countdown-compact {
+		font-size: 2rem;
+	}
+
+	.speech-overlay-option {
+		min-width: 100px;
+		min-height: 48px;
+		font-size: 1.3rem;
+	}
 }
