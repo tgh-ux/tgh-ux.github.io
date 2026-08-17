@@ -2,16 +2,28 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Piper TTS test</title>
+<title>Piper TTS test mk3</title>
+
+<!-- Resolves the one bare import the vendored library needs internally.
+     Pointing this at plain jsDelivr (not esm.sh) means no Node-compat shims,
+     which avoids the "process.versions.node" misdetection bug. -->
+<script type="importmap">
+{
+	"imports": {
+		"onnxruntime-web/wasm": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.wasm.min.mjs"
+	}
+}
+</script>
 </head>
 <body>
-<h1>Piper TTS test mk2</h1>
+<h1>Piper TTS test</h1>
 <button id="go">Run test</button>
 <pre id="log"></pre>
 
 <script type="module">
-	// Pin onnxruntime-web explicitly - the library's own default path is broken (see chat).
-	import * as PiperTTS from "https://esm.sh/@mintplex-labs/piper-tts-web@1.0.5?deps=onnxruntime-web@1.19.2";
+	// Vendored, unmodified files - see ./vendor/. Loading these directly (not via
+	// esm.sh) means no Node-compat polyfills get injected into their scope.
+	import * as PiperTTS from "./vendor/piper-tts-web.js";
 
 	const logEl = document.getElementById("log");
 	function log(msg) {
@@ -19,7 +31,9 @@
 		logEl.textContent += msg + "\n";
 	}
 
-	// Override only the onnx runtime path; leave piperData/piperWasm at their library defaults.
+	// The library's own default onnxWasm path (cdnjs, pinned to 1.18.0) is missing
+	// a file its onnxruntime-web version needs - override it to match the version
+	// pinned in the import map above.
 	const wasmPaths = {
 		...PiperTTS.TtsSession.WASM_LOCATIONS,
 		onnxWasm: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/",
@@ -35,9 +49,7 @@
 			});
 			log(`[${label}] session ready, synthesizing...`);
 			const wav = await session.predict(text);
-			log(`[${label}] session.predict done...`);
 			const audio = new Audio(URL.createObjectURL(wav));
-			log(`[${label}] new Audio done...`);
 			await audio.play();
 			log(`[${label}] playing OK`);
 		} catch (err) {
