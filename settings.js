@@ -17,7 +17,11 @@ const Settings = (() => {
 	   
 	const SETTINGS_STORE = "onuw_settings";
 	
-	//Current settings, mapping all OIDs to a value
+	/*
+	 * Current settings, mapping all OIDs to a value.
+	 * Initially populated with all OIDs and their default values defined by SETTINGS_TREE during initialization, then overwritten by any values from persistent storage. May be mutated at
+	 * runtime by changes in the UI, and used for lookup by other modules through the public `getValue(oid)`.
+	 */
 	const OID_TO_VALUE = {};
 	
 	// All input-type nodes, keyed by OID, for lookup and validation
@@ -88,7 +92,7 @@ const Settings = (() => {
 	};
 
 	/*
-	 * Declarative description of the settings UI.
+	 * Static, declarative description of the settings UI: the hierarchy of settings nodes, their types, and their default values.
 	 *
 	 * The same hierarchy drives:
 	 * 	- GUI generation
@@ -102,19 +106,22 @@ const Settings = (() => {
 	 *    + weight: integer >= 0, used for weighted choice pools
 	 *    + percent: integer [0,100]
 	 *    + numeric: integer or float, see numericType/allowNegative below
-	 *    + toggle: boolean (future)
+	 *    + toggle: boolean
 	 *    + label: simple text node (supports children)
 	 *    + separator: vertical line
-	 *  - id: string, must be unique per hierarchy
+	 *  - id: string id that is used for OID assembly and to identify a node from its siblings. Must be unique within its sibling group, but can be reused elsewhere in the tree
 	 *  - textKey: string, localized key
 	 *  - textStyle: string array containing font styles to apply to a label element
 	 *    + "bold" | "italic" | "underline" | "muted" | "none"
-	 *  - weightGroupId: ID for weight group, validation demands sum > 0. Must be unique per sibling group
+	 *  - weightGroupId: (weight only) ID for weight group, validation demands sum > 0. Must be unique per sibling group
 	 *  - requiresContext: (optional) key into CONTEXT_REQUIREMENTS - if present, this node's weight only counts toward its weight group's sum when the check passes
 	 *  - contextErrorMsg: (optional) localization key used as error message if requiresContext validation fails
 	 *  - defaultValue: default value of the input control
 	 *  - numericType: (numeric only) "integer" | "float"
 	 *  - allowNegative: (numeric only) boolean, whether values below zero are valid
+	 *  - affectedRoles: an array of roles (role IDs or team IDs) for whom the settings are relevant, inherited by the node's children. Used to separate errors that will impact
+	 *                   the current state from those that don't. For example, an error in the settings for a role that is not currently selected is still an error, but would
+	 *                   not prevent a valid narration script from being generated as the incorrectly configured setting will never be used
 	 */
 	const SETTINGS_TREE = [
 		{
@@ -413,12 +420,6 @@ const Settings = (() => {
 					weightGroupId: 1,
 					defaultValue: 20
 				},
-				{
-					type: "percent",
-					id: "fake",
-					textKey: "UI_SETTING_BODYSNATCHER_FAKE_ACTION",
-					defaultValue: 0
-				}
 			]
 		},
 		{

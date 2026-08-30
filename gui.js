@@ -400,7 +400,12 @@ function getRoleList(roleIds) {
 	   Sprites
 	   ========================= */
 
-	// CSS attributes of the sprite sheet matching the given type
+	/*
+	 * Reads the CSS-defined sprite-sheet geometry for a sprite type.
+	 *    type - "role" | "card" | "token".
+	 * Returns { width, height, scale, columns, rows }, where width/height are the abstract sprite cell dimensions, scale a global size multiplier
+	 * and columns/rows describe the size of the sheet in terms of individual sprite cells
+	 */
 	function getSpriteData(type) {
 		const styles = getComputedStyle(document.documentElement);
 
@@ -472,7 +477,7 @@ function getRoleList(roleIds) {
 		const el = document.createElement("div");
 		el.classList.add(...classes);
 		el.dataset.tokenName = getTokenSearchText(token);  // normalized name, used for search/filtering
-		el.dataset.tokenId = token.id;                      // identifies the associated token
+		el.dataset.tokenId = token.id;                     // identifies the associated token
 
 		return el;
 	}
@@ -497,7 +502,13 @@ function getRoleList(roleIds) {
 		return tile;
 	}
 
-	// Adds listeners to a selection tile: click to select, hold to open the description overlay
+	/*
+	 * Adds pointer interaction to a role-selection tile:
+	 *   - short click -> select/cycle the role;
+	 *   - hold for LONG_PRESS_DELAY -> open its description;
+	 *   - moving more than 10px or cancelling/leaving the pointer aborts the hold.
+	 * A completed long press suppresses the click that follows it.
+	 */
 	function applySelectionTileListeners(tile, role) {
 		const MAX_DISTANCE = 10;
 		let pressTimer = null;
@@ -1694,7 +1705,7 @@ function updatePrompt(relevantErrors) {
 		openSpeechOverlay();
 		resetSpeechOverlay();
 
-		Speech.play(promptState.rawTurns, { verbosity: "verbose" }, {
+		Speech.play(promptState.rawTurns, {
 			onSpeaking: clbkSpeechSpeaking,
 			onPause: clbkSpeechPause,
 			onTurnComplete: clbkSpeechTurnComplete,
@@ -2079,16 +2090,22 @@ function updateGUIScale() {
 	const MAX_SELECT_SCALE = 1.0;
 	const MIN_DESCRIPTION_SCALE = 0.75;
 	const MAX_DESCRIPTION_SCALE = 1.0;
+	const MIN_TTS_SCALE = 0.2;
+	const MAX_TTS_SCALE = 1.0;
 	const SELECT_BASE_SIZE = 800;
 	const DESCRIPTION_BASE_SIZE = 800;
+	const TTS_BASE_SIZE = 800;
 
 	let selectScale = minViewport / SELECT_BASE_SIZE;
 	selectScale = Math.max(MIN_SELECT_SCALE, Math.min(MAX_SELECT_SCALE, selectScale));
 	let descriptionScale = minViewport / DESCRIPTION_BASE_SIZE;
 	descriptionScale = Math.max(MIN_DESCRIPTION_SCALE, Math.min(MAX_DESCRIPTION_SCALE, descriptionScale));
+	let ttsScale = minViewport / TTS_BASE_SIZE;
+	ttsScale = Math.max(MIN_TTS_SCALE, Math.min(MAX_TTS_SCALE, ttsScale));
 
 	document.documentElement.style.setProperty("--selection-tile-scale", selectScale.toFixed(3));
 	document.documentElement.style.setProperty("--description-tile-scale", descriptionScale.toFixed(3));
+	document.documentElement.style.setProperty("--tts-text-scale", ttsScale.toFixed(3));
 }
 
 

@@ -48,8 +48,7 @@ const Roles = (() => {
 
 	/* 
 	 * Definition of all roles present in the game, pre-defined with unique per-role data Only data that is unique to an individual role is stored here.
-	 * Shared properties such as tags, team membership, active phase, localization keys and IDs are injected during initialization
-	 * from the lookup tables below.
+	 * Shared properties such as tags, team membership, active phase, localization keys and IDs are injected during initialization from the lookup tables below.
 	 * 
 	 * RoleID:
 	 * 	- icon: x/y coordinates for the character portrait and first card art in their respective sprite sheets

@@ -95,13 +95,10 @@ const Rules = (() => {
 			return { blobTotal: finalLeft + finalRight, blobLeft: finalLeft, blobRight: finalRight };
 		},
 		/*
-		 * Picks who/what the Bodysnatcher views, plus a separate independent roll (`fakeAction`) for whether this turn is actually a decoy the
-		 * app narrates purely to keep other players guessing about who has night actions — the interpreter/UI decides how to use that flag,
-		 * this resolver only reports whether it's set.
+		 * Picks who/what the Bodysnatcher views.
 		 */
 		BodysnatcherResolver: (ctx, action, instigator, data) => {
 			const rngKey = "bodysnatcher_event" + (data.copiedRole ? "_doppelganger" : "");
-			const fakeAction = _getCachedRandom(rngKey + ".fake") * 100 < Settings.getValue("bodysnatcher.fake");
 			
 			const choices = [
 				{ weight: Settings.getValue("bodysnatcher.center"), data: { type: "view_card", target: "center", restriction: "any", count: 1 } },
@@ -111,7 +108,7 @@ const Rules = (() => {
 				{ weight: Settings.getValue("bodysnatcher.specific"), data: { type: "view_card", target: "player", restriction: "specific", count: 1, players: _getRandomPlayers(ctx.playerCount, rngKey) } },
 			];
 			
-			return { ..._chooseWeightedTree(choices, rngKey), fakeAction: fakeAction };
+			return { ..._chooseWeightedTree(choices, rngKey) };
 		},
 		/*
 		 * EmpathResolver queries Localization directly for available question keys, then picks one random question to assign for the prompt.
@@ -171,7 +168,7 @@ const Rules = (() => {
 			// Add Tanner/Apprentice Tanner, if present
 			[ "TANNER", "APPRENTICETANNER" ].forEach((t) => {
 				if (ctx.isRolePresent(t))
-					choices.push({ weight: 1, data: { fallbackTeam: "ROLE_" + t + "_DEFINITE" } });
+					choices.push({ weight: 1, data: { fallbackTeam: "ROLE_" + t + "_PLURAL_DEFINITE" } });
 			});
 			// Add village team (always present, as it's Nostradamus default, and give it a 50% chance
 			choices.push({ weight: Math.max(choices.length, 1), data: { fallbackTeam: "TEAM_VILLAGE_PLURAL_DEFINITE" } });
@@ -195,6 +192,9 @@ const Rules = (() => {
 		 * The final _chooseWeightedTree call is wrapped in try/catch purely to produce a clearer diagnostic in the specific case where the only
 		 * non-zero weight is "change_team" but no evil team exists to switch to — a misconfiguration that would otherwise surface as an opaque
 		 * "total weight is zero" error.
+		 *
+		 * defaultEvenOdd, defaultHuntGuess, and defaultJoinAccepted are used by the automatic TTS narration and is deliberately uncached random
+		 * booleans as they are intended to emulate a player response at the table if none is given, not a stable value for the script.
 		 *
 		 * NOTE: this is now effectively a historical artifact. It predates settings.js's requiresContext mechanism, which already declares
 		 * oracle.change_team as requiring evilTeamPresent within its weight group — Settings.validate() catches this exact misconfiguration
@@ -235,7 +235,7 @@ const Rules = (() => {
 			// Calculate hunt event
 			const huntActive = _getCachedRandom(rngKey + ".hunt") * 100 < Settings.getValue("oracle.hunt.chance");
 			const allowBad = Settings.getValue("oracle.hunt.allow_bad_teams")
-			const exclusionData = ctx.getTagList("ORACLE_OMNISCIENCE_EXCLUDED", "ExcludedRoles")
+			const exclusionData = ctx.getTagList("ExcludedRoles", "ORACLE_OMNISCIENCE_EXCLUDED")
 			choices.push({ weight: Settings.getValue("oracle.hunt"), data: { type: "oracle_hunt", huntActive: huntActive, showExclusionWarning: !allowBad && (exclusionData.countExcludedRoles > 0), defaultHuntGuess: Math.floor(Math.random() * 10) + 1, ...exclusionData } });
 			
 			// Calculate team switch
@@ -323,7 +323,7 @@ const Rules = (() => {
 		 *
 		 * "none" (no ripple) is intentionally the last entry in `choices` so it can be sliced off: if the first roll lands on "none", a second
 		 * roll (".backup") is made against every *other* option to guarantee a real ripple is always available as a backup — this exists
-		 * because Oracle's "block_action"-style outcomes can force a ripple to occur even when the primary roll said there wouldn't be one.
+		 * because Oracle's "force_ripple"-style outcome can force a ripple to occur even when the primary roll said there wouldn't be one.
 		 * `noRipple` reports whether the primary roll actually wanted a ripple, so callers can tell a "genuine" ripple from a "backup one
 		 * that only exists in case it's needed".
 		 *
@@ -348,7 +348,7 @@ const Rules = (() => {
 				{ weight: Settings.getValue("ripple.troublemaker"), data: { type: "ripple_role_action", role: "TROUBLEMAKER", player: rndPlayers[0] } },
 				{ weight: Settings.getValue("ripple.robber"), data: { type: "ripple_role_action", role: "ROBBER", player: rndPlayers[0] } },
 				{ weight: Settings.getValue("ripple.witch"), data: { type: "ripple_role_action", role: "WITCH", player: rndPlayers[0] } },
-				{ weight: Settings.getValue("ripple.revealer"), data: { type: "ripple_role_action", role: "REVEALER", player: rndPlayers[0], ...ctx.getTagList("REVEALER_HIDDEN_ROLE", "HiddenRoles") } },
+				{ weight: Settings.getValue("ripple.revealer"), data: { type: "ripple_role_action", role: "REVEALER", player: rndPlayers[0], ...ctx.getTagList("HiddenRoles", "REVEALER_HIDDEN_ROLE") } },
 				{ weight: Settings.getValue("ripple.drunk"), data: { type: "ripple_role_action", role: "DRUNK", player: rndPlayers[0] } },
 				{ weight: Settings.getValue("ripple.muted"), data: { type: "ripple_mute", players: rndEffectPlayers, count: rndEffectPlayers.length } },
 				{ weight: Settings.getValue("ripple.rebuked"), data: { type: "ripple_rebuked", players: rndEffectPlayers, count: rndEffectPlayers.length } },
@@ -374,7 +374,10 @@ const Rules = (() => {
 	 * Declarative turn definitions. The turns are ordered chronologically, and is simply evaluated from top to bottom in buildPrompt().
 	 *
 	 * Each entry represents a possible narration step in chronological order. Each must contain, at minimum, an action field (what to do), as well as
-	 * an instigator field (who does the action). The action value is used in the interpreter to find an entry point among the localization keys.
+	 * an instigator field (who does the action). The action value is used in the interpreter to find an entry point among the localization keys. Note
+	 * that an action, while normally corresponding to the instigator, does not have to match. The Doppelganger role performs the actions of a role it
+	 * copied extensively, in which case the action may belong to one role while the Doppelganger is the instigator of the action. For this case in
+	 * particular, it is also paired with the `copiedRole` value to reference the role that the Doppelganger copied.
 	 * Optional fields are condition, resolveData and resolver.
 	 *
 	 * Rules may:
@@ -402,7 +405,11 @@ const Rules = (() => {
 			action: "DOPPELGANGER",
 			instigator: "ROLE_DOPPELGANGER",
 			condition: ctx => ctx.isRolePresent("DOPPELGANGER") && ctx.isAnyTagPresent("MARKS_ROLE"),
-			resolveData: ctx => ({ ...ctx.getTagList("DOPPELGANGER_IMMEDIATE_ACTION", "ImmediateActionRoles") }),
+			resolveData: ctx => ({ 
+				...ctx.getTagList("ImmediateActionRoles", "DOPPELGANGER_IMMEDIATE_ACTION"),
+				...ctx.getTeamList("EvilTeams", "TEAM_ALIEN", "TEAM_VAMPIRE", "TEAM_WEREWOLF"),
+				hasDreamWolf: ctx.isRolePresent("DREAMWOLF"),
+			}),
 		},
 		{
 			action: "VAMPIRE_TEAM",
@@ -484,7 +491,11 @@ const Rules = (() => {
 			action: "DOPPELGANGER",
 			instigator: "ROLE_DOPPELGANGER",
 			condition: ctx => ctx.isRolePresent("DOPPELGANGER") && !ctx.isAnyTagPresent("MARKS_ROLE"),
-			resolveData: ctx => ({ ...ctx.getTagList("DOPPELGANGER_IMMEDIATE_ACTION", "ImmediateActionRoles") }),
+			resolveData: ctx => ({ 
+				...ctx.getTagList("ImmediateActionRoles", "DOPPELGANGER_IMMEDIATE_ACTION"),
+				...ctx.getTeamList("EvilTeams", "TEAM_ALIEN", "TEAM_VAMPIRE", "TEAM_WEREWOLF"),
+				hasDreamWolf: ctx.isRolePresent("DREAMWOLF"),
+			}),
 		},
 		{
 			action: "ALIEN_TEAM",
@@ -571,7 +582,7 @@ const Rules = (() => {
 			action: "PARANORMALINVESTIGATOR",
 			instigator: "ROLE_PARANORMALINVESTIGATOR",
 			condition: ctx => ctx.isRolePresent("PARANORMALINVESTIGATOR"),
-			resolveData: ctx => ({ ...ctx.getTagList("PI_CONVERSION_ROLE", "DangerRoles") }),
+			resolveData: ctx => ({ ...ctx.getTagList("DangerRoles", "PI_CONVERSION_ROLE") }),
 		},
 		{
 			action: "MARKSMAN",
@@ -589,7 +600,7 @@ const Rules = (() => {
 			instigator: "ROLE_NOSTRADAMUS",
 			condition: ctx => ctx.isRolePresent("NOSTRADAMUS"),
 			resolver: "NostradamusResolver",
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), ...ctx.getTagList("PI_CONVERSION_ROLE", "DangerRoles") }),
+			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), ...ctx.getTagList("DangerRoles", "PI_CONVERSION_ROLE") }),
 		},
 		{
 			action: "PSYCHIC",
@@ -639,7 +650,7 @@ const Rules = (() => {
 			action: "AURASEER",
 			instigator: "ROLE_AURASEER",
 			condition: ctx => ctx.isRolePresent("AURASEER") && ctx.isAnyTagPresent("AURA_SEER_DETECTABLE"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), ...ctx.getTagList("AURA_SEER_DETECTABLE", "DetectableRoles") })
+			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), ...ctx.getTagList("DetectableRoles", "AURA_SEER_DETECTABLE") })
 		},
 		{
 			action: "GREMLIN",
@@ -691,19 +702,19 @@ const Rules = (() => {
 			action: "BEHOLDER",
 			instigator: "ROLE_BEHOLDER",
 			condition: ctx => ctx.isRolePresent("BEHOLDER") && ctx.isAnyTagPresent("BEHOLDER_DETECTABLE"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), ...ctx.getTagList("BEHOLDER_DETECTABLE", "DetectableRoles") })
+			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), ...ctx.getTagList("DetectableRoles", "BEHOLDER_DETECTABLE") })
 		},
 		{
 			action: "REVEALER",
 			instigator: "ROLE_REVEALER",
 			condition: ctx => ctx.isRolePresent("REVEALER"),
-			resolveData: ctx => ({ ...ctx.getTagList("REVEALER_HIDDEN_ROLE", "HiddenRoles") }),
+			resolveData: ctx => ({ ...ctx.getTagList("HiddenRoles", "REVEALER_HIDDEN_ROLE") }),
 		},
 		{
 			action: "REVEALER",
 			instigator: "ROLE_DOPPELGANGER",
 			condition: ctx => ctx.isAllRolesPresent("REVEALER", "DOPPELGANGER"),
-			resolveData: ctx => ({ copiedRole: "ROLE_REVEALER", ...ctx.getTagList("REVEALER_HIDDEN_ROLE", "HiddenRoles") })
+			resolveData: ctx => ({ copiedRole: "ROLE_REVEALER", ...ctx.getTagList("HiddenRoles", "REVEALER_HIDDEN_ROLE") })
 		},
 		{
 			action: "EXPOSER",
@@ -994,17 +1005,34 @@ const Rules = (() => {
 	}
 
 	/*
-	 * Creates the immutable evaluation context passed to every rule.
+	 * Creates the evaluation context passed to every rule.
 	 *
 	 * The context exposes convenience queries over the selected role set, allowing rule conditions and resolvers to remain declarative rather
 	 * than repeatedly inspecting the raw role collection.
 	 *
-	 *   roleCounts - Map<roleID, count> of the currently selected roles, as supplied to buildPrompt().
+	 *    roleCounts - Map<roleID, count> of the currently selected roles, as supplied to buildPrompt().
 	 *
-	 * Returns a context object exposing playerCount, selectedRoles (== roleCounts), and the role/team/tag query methods below.
-	 * getTagList(tag, fieldName) in particular returns { [`has${fieldName}`], [`count${fieldName}`], [`list${fieldName}`] } — dynamically
-	 * named so a resolver can spread its result straight into a turn's data under caller-chosen field names (see OracleResolver's
-	 * "ExcludedRoles" usage).
+	 * Returns a context object exposing playerCount, selectedRoles (same as the roleCount map), and the query methods and what they return below:
+	 *    isRolePresent(roleID)                - True if a role is in the selection
+	 *    isMinRolePresent(roleID, minCount)   - True if at least minCount instances of a role is in the selection
+	 *    isAllRolesPresent(...roleIDs)        - True if all provided roles are in the selection
+	 *    isAnyRolePresent(...roleIDs)         - True if any of the provided roles are in the selection
+	 *    isAnyTagPresent(tag)                 - True if any role with the tag is in the selection
+	 *    isTeamPresent(team)                  - True if any role belonging to the team is in the selection
+	 *    getRoleCountPresent(roleID)          - The number of instances of a role in the selection
+	 *    getTotalRoleCountPresent(...roleIDs) - The total number of instances of all the provided roles in the selection
+	 *    getRolesPresentWithTag(tag)          - An array of role IDs for all roles in the selection that have the tag
+	 *    getRolesPresentWithAllTags(...tags)  - An array with the role IDs of all roles in the selection that has all the provided tags
+	 *    getRolesPresentInTeam(team)          - An array of role IDs for all roles in the selection that belong to the team
+	 *    getTagList(fieldName, tag)           - An object containing information about roles in the selection that have the provided tag:
+	 *                                              has<fieldName>   - true if at least one matching role is found, else false
+	 *                                              count<fieldName> - total number of matching roles found
+	 *                                              list<fieldName>  - an array of all matching role IDs
+	 *                                           Primarily used for generating necessary data for a turn resolver and/or to be passed onward. E.g.
+	 *                                           getTagList("Test", "SOME_TAG") would generate { hasTest: ..., countTest: ..., listTest: [ ... ] },
+	 *                                           with values based on the selected roles that have the SOME_TAG tag.
+	 *    getTeamList(fieldName, ...teams)     - Similar to getTagList, except returns boolean, count and list based on which of the provided teams
+	 *                                           have at least one role present in the game
 	 */
 	function _makeCtx(roleCounts) {
 		return {
@@ -1058,8 +1086,17 @@ const Rules = (() => {
 			getRolesPresentInTeam(team) {
 				return [...this.selectedRoles.keys()].filter(roleID => Roles.isTeam(roleID, team));
 			},
-			getTagList(tag, fieldName) {
+			getTagList(fieldName, tag) {
 				const list = this.getRolesPresentWithTag(tag);
+				return { ["has" + fieldName]: list.length > 0, ["count" + fieldName]: list.length, ["list" + fieldName]: list };
+			},
+			getTeamList(fieldName, ...teams) {
+				const list = [];
+				for (const team of teams) {
+					// Need to special-case the Synthetic Alien since it is technically not a member of the alien team, but acts like it
+					if (this.isTeamPresent(team) || (team === "TEAM_ALIEN" && this.isRolePresent("SYNTHETICALIEN")))
+						list.push(team);
+				}
 				return { ["has" + fieldName]: list.length > 0, ["count" + fieldName]: list.length, ["list" + fieldName]: list };
 			},
 		};
@@ -1076,7 +1113,8 @@ const Rules = (() => {
 	}
 
 	/*
-	 * Evaluates the turn definitions against the selected roles and produces the complete structured narration sequence.
+	 * Evaluates the turn definitions in TURN_ORDER against the selected roles and produces the complete structured narration sequence. Evaluation
+	 * is top-down according to the order of the TURN_ORDER entries, and the result returned preserves the same order.
 	 *
 	 * Rules that fail during resolution are preserved in the output as error turns rather than aborting generation entirely.
 	 *

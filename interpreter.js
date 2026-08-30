@@ -12,14 +12,17 @@
  * without introducing a pause. sequenceToText() derives flat narration text from a sequence, ignoring everything but "text" segments - used for the
  * manual script view, which never needs pause/input timing.
  *
- * Resolution happens in one of two modes, chosen per call via options.mode:
- *   - "manual" (default): every {Input:...} resolves straight to its manualKey, exactly as if it weren't there - the moderator-facing narration this
- *     produces never depends on anything not already known. Always resolved eagerly, in one batch (renderAll), since it has nothing to wait on.
+ * Resolution happens in one of three modes, chosen per call via the `mode` parameter (resolveTurn/renderAll):
+ *   - "verbose" (default) / "brief": collectively "manual" - every {Input:...} resolves straight to its manualKey, exactly as if it weren't
+ *     there - the moderator-facing narration this produces never depends on anything not already known. Always resolved eagerly, in one batch
+ *     (renderAll), since it has nothing to wait on. The two differ only in which localization key variant they resolve from (PROMPT_ vs
+ *     PROMPT_BRIEF_) - see _entryPointKey.
  *   - "automatic": every {Input:...} instead becomes a real "input" segment - Choice inputs get every branch resolved eagerly, right here, before
  *     playback ever sees the node; Value inputs resolve their option labels eagerly but leave their continuation deferred until a real value is
- *     bound (see resolveDeferredInput). Because a later turn can depend on a value an earlier turn's input just bound (via options.boundValues,
- *     merged into that turn's data), automatic resolution has to happen turn-by-turn as playback reaches each one (resolveTurn), never as one
- *     upfront batch the way manual mode is.
+ *     bound (see resolveDeferredInput). Because a later turn can depend on a value an earlier turn's input just bound (via the boundValues
+ *     parameter, merged into that turn's data), automatic resolution has to happen turn-by-turn as playback reaches each one (resolveTurn), never
+ *     as one upfront batch the way manual mode is. Verbosity has no meaning here - there's only ever one PROMPT_AUTO_/PROMPT_ variant.
+ *
  * {AutoKey:manualKey,autoKey} exists for content that needs to diverge between the two modes at a point deeper than a turn's own entry point
  * (_entryPointKey's PROMPT_AUTO_ fallback only ever fires once, before any resolving has started) - e.g. one arm of a Select needing an introductory
  * line for automatic playback that manual narration has no equivalent for.
@@ -74,6 +77,7 @@ const Interpreter = (() => {
 			return key;
 		},
 
+		// {RoleName:field[,form]} -  Near-identical to Identity, but takes a role ID and adds the role key prefix.
 		RoleName: (data, field, ...form) => {
 			const role = data[field];
 			if (role == null)
@@ -110,15 +114,22 @@ const Interpreter = (() => {
 			return `{${v}}`;
 		},
 
-		// {IdentityList:field[,join]} — field holds an array of bare role ids (e.g. from ctx.getRolesPresentWithTag). Each element gets ROLE_-prefixed and resolved; join is "and" (default) or "or".
+		// {IdentityList:field[,join]} — field holds an array of bare role ids (e.g. from ctx.getRolesPresentWithTag). If the elment has either a ROLE_ or TEAM_ prefix
+		// it gets resolved as-is. If it has no prefix, it gets the ROLE_-prefix first. Join is "and" (default) or "or".
 		IdentityList: (data, field, join = "and") => {
 			const list = data[field];
 			if (!Array.isArray(list))
 				throw new Error(`IdentityList: list '${field}' is not an array`);
 			if (list.length === 0)
 				return "";
-
-			return _joinList(list.map(id => `{ROLE_${id}}`), join);
+			
+			return _joinList(list.map(id => {
+					if (!id.startsWith("ROLE_") && !id.startsWith("TEAM_"))
+						id = "ROLE_" + id;
+					return `{${id}}`;
+				}),
+				join
+			);
 		},
 
 		// {ValueList:field[,join]} — field holds an array of display-ready values (e.g. player numbers). No per-item resolution, just joins.
@@ -132,20 +143,26 @@ const Interpreter = (() => {
 			return _joinList(list.map(String), join);
 		},
 
-		// {If:field,key} — insert `key` iff data[field] is truthy, else nothing. Sugar over Select's two-arm case; kept separate because it's the overwhelmingly common case and reads better at the call site.
+		// {If:field,keyTrue[,keyFalse]} — insert `keyTrue` iff data[field] is truthy, else keyFalse if provided, or empty string. Accepts localization keys as well as string literals
 		If: (data, field, keyTrue, keyFalse) => {
-			if (data[field]) return `{${keyTrue}}`;
-			return keyFalse ? `{${keyFalse}}` : "";
+			const branch = data[field] ? keyTrue : keyFalse;
+			if (branch === undefined) return "";
+			return Localization.isLiteral(branch) ? branch.toString() : `{${branch}}`;
 		},
 
-		// {Select:field,label,key,label,key,...,*,key} — match data[field] against each label (string-compared), "*" is the catch-all. Used for both type-based branching (Tier 4 outcomes) and grammatical selection (e.g. {Select:count,1,CARD_SINGULAR,*,CARD_PLURAL}).
+		/*
+		 * {Select:field,label,key,label,key,...,*,key} — match data[field] against each label (string-compared), "*" is the catch-all. Used for both type-based branching and grammatical
+		 * selection (e.g. {Select:count,1,CARD_SINGULAR,*,CARD_PLURAL}). Accepts both localization keys as well as string literals
+		 */
 		Select: (data, field, ...arms) => {
 			const value = String(data[field]);
 			for (let i = 0; i < arms.length; i += 2) {
-				if (String(arms[i]) === value || arms[i] === "*")
-					return `{${arms[i + 1]}}`;
+				if (String(arms[i]) === value || arms[i] === "*") {
+					const branch = arms[i + 1];
+					return Localization.isLiteral(branch) ? branch.toString() : `{${branch}}`;
+				}
 			}
-			throw new Error(`Select: no matching arm for field '${field}'='${value}' (no '*' catch-all provided)`);
+			throw new Error(`Select: no matching arm for field '${field}'='${value}' (and no '*' catch-all provided)`);
 		},
 
 		/*
@@ -178,6 +195,18 @@ const Interpreter = (() => {
 		Break: () => {
 			return `${MARKER_DELIM}BREAK${MARKER_DELIM}`;
 		},
+		
+		// {AutoKey:manualKey,autoKey} - Special, branches depending on narration mode. See _makeAutoKeyPrimitive().
+		
+		/*
+		 * {Input:field,kind,manualKey,duration,defaultField,...args}
+		 * Where args are either:
+		 *   value,label,continuationKey,...  - for kind "choice"
+		 *   optionsField,continuationKey     - for kind "value"
+		 * 
+		 * Creates an input sequence, pausing the narration and displays buttons on screen, then handles the input and continues resolving.
+		 * Only used for automatic narration mode, for use inside PROMPT_ keys only. See _makeInputPrimitive().
+		 */
 	};
 
 
@@ -413,16 +442,24 @@ const Interpreter = (() => {
 
 	/*
 	 * Maps a turn action to its corresponding prompt template as an entry point for the parsing.
-	 * action - the turn's action id; verbosity - "verbose" | "brief" (manual mode only); mode - "manual" | "automatic".
+	 *   action - the turn's action id
+	 *   mode   - "verbose" | "brief" | "automatic": the narration mode, the two former being manual narration, the latter TTS narration.
 	 * Returns the localization key to start resolving from: PROMPT_AUTO_<action> if it exists (falling back to PROMPT_<action>) in
-	 * automatic mode, else PROMPT_<action> or PROMPT_BRIEF_<action> depending on verbosity.
+	 * automatic mode, else PROMPT_<action> or PROMPT_BRIEF_<action> depending on manual verbosity.
 	 */
-	function _entryPointKey(action, verbosity, mode) {
-		if (mode === "automatic") {
-			const autoKey = `PROMPT_AUTO_${action}`;
-			return Localization.hasKey(autoKey) ? autoKey : `PROMPT_${action}`;
+	function _entryPointKey(action, mode) {
+		switch (mode) {
+			case "verbose":
+				return `PROMPT_${action}`;
+			case "brief":
+				return `PROMPT_BRIEF_${action}`;
+			case "automatic": {
+				const autoKey = `PROMPT_AUTO_${action}`;
+				return Localization.hasKey(autoKey) ? autoKey : `PROMPT_${action}`;
+			}
+			default:
+				throw new Error(`_entryPointKey: unrecognized narration mode '${mode}'`);
 		}
-		return `PROMPT${verbosity === "brief" ? "_BRIEF_" : "_"}${action}`;
 	}
 
 	/*
@@ -468,23 +505,22 @@ const Interpreter = (() => {
 	/*
 	 * Resolves a single turn into localized narration while converting any rendering failures into user-visible diagnostics.
 	 *
-	 *   turn    - the turn to render: { action, instigator, data } normally, or { action, instigator, error } if Rules already failed to
-	 *             build it (that error is surfaced as-is, without attempting to render).
-	 *   options - { mode = "manual", verbosity = "verbose", boundValues = {} }; boundValues is merged under turn.data, so a value
-	 *             set there can still be overridden by the turn's own data.
+	 *   turn        - the turn to render: { action, instigator, data } normally, or { action, instigator, error } if Rules already failed
+	 *                 to build it (that error is surfaced as-is, without attempting to render).
+	 *   mode        - optional narration mode, "brief"|"verbose"|"automatic"
+	 *   boundValues - optional extra values, merged before turn.data, so a duplicate value is overridden by the turn's own data.
+	 *                 Used by the automatic narration mode in order to insert deferred values from user input.
 	 *
 	 * Returns { sequence, error }. error is null on success; on any failure (a pre-existing turn.error, or an exception thrown while
 	 * resolving) sequence instead holds a single diagnostic text segment describing the failure (see _formatErrorText).
 	 */
-	function _renderTurnSafe(turn, options) {
+	function _renderTurnSafe(turn, mode = "verbose", boundValues = {}) {
 		if (turn.error)
 			return { sequence: _errorSequence(_formatErrorText(turn)), error: turn.error };
-
-		const verbosity = options.verbosity ?? "verbose";
-		const mode = options.mode ?? "manual";
-		const boundValues = options.boundValues ?? {};
+		
 		const data = { ...boundValues, ...turn.data, action: turn.action, instigator: turn.instigator };
-		const entryKey = _entryPointKey(turn.action, verbosity, mode);
+		// If the mode is invalid, an error will be thrown here rather than try to continue generate prompts in an undefined mode
+		const entryKey = _entryPointKey(turn.action, mode);
 
 		try {
 			if (mode === "automatic")
@@ -554,26 +590,28 @@ const Interpreter = (() => {
 	 * Resolves every turn in one batch via resolveTurn (see below for per-turn behavior).
 	 *
 	 *   turns   - array of Rules-produced turns.
-	 *   options - forwarded unchanged to resolveTurn for every turn.
+	 *   mode    - optional narration mode, "brief"|"verbose"|"automatic"
 	 *
 	 * Returns an array of { action, instigator, sequence, error }, one per input turn, in the same order.
 	 */
-	function renderAll(turns, options = {}) {
-		return turns.map(turn => resolveTurn(turn, options));
+	function renderAll(turns, mode = "verbose") {
+		return turns.map(turn => resolveTurn(turn, mode));
 	}
 
 	/*
 	 * Resolves a single turn into localized narration, isolating any rendering failure to just this turn so one malformed template never
 	 * prevents the rest of the narration from being generated (see _renderTurnSafe).
 	 *
-	 *   turn    - one Rules-produced turn: { action, instigator, data } or, for a turn Rules itself failed to build, { action, instigator, error }.
-	 *   options - { mode = "manual", verbosity = "verbose", boundValues = {} }, forwarded to _renderTurnSafe unchanged.
+	 *   turn        - one Rules-produced turn: { action, instigator, data } or, for a turn Rules itself failed to build, { action, instigator, error }.
+	 *   mode        - optional narration mode, "brief"|"verbose"|"automatic"
+	 *   boundValues - optional extra values, merged before turn.data, so a duplicate value is overridden by the turn's own data.
+	 *                 Used by the automatic narration mode in order to insert deferred values from user input.
 	 *
 	 * Returns { action, instigator, sequence, error }. error is null on success; sequence always contains at least a diagnostic text
 	 * segment even on failure, so callers can render *something* for a turn without checking error first.
 	 */
-	function resolveTurn(turn, options = {}) {
-		const { sequence, error } = _renderTurnSafe(turn, options);
+	function resolveTurn(turn, mode = "verbose", boundValues = {}) {
+		const { sequence, error } = _renderTurnSafe(turn, mode, boundValues);
 		return { action: turn.action, instigator: turn.instigator, sequence, error };
 	}
 

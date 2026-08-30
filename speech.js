@@ -2,7 +2,7 @@
  * Speech playback.
  *
  * Plays a game's raw turns (as produced by Rules, before localization) as spoken narration, reporting progress via callbacks. Each turn is resolved
- * into a sequence just before it plays - never ahead of time - via Interpreter.resolveTurn(turn, { mode: "automatic", ... }), so a value an
+ * into a sequence just before it plays - never ahead of time - via Interpreter.resolveTurn(turn, "automatic", _boundValues), so a value an
  * earlier turn's input just bound (see _boundValues) is already visible to every turn resolved after it.
  *
  * This module is the only place aware of which speech engine is actually talking, and the only place aware of how an "input" segment's wait differs
@@ -47,6 +47,12 @@ const Speech = (() => {
 	 * suspend the countdown and resume() pick it back up from the same point, rather than restarting or losing track of elapsed time.
 	 */
 	let _wait = null;
+	
+	/*
+	 * Set only while a pre-recorded clip is playing (mirrors _wait's "only set while waiting" convention) - lets pause()/resume()/_reset()
+	 * know a clip, not speechSynthesis, is the thing currently live during _phase === "speaking".
+	 */
+	let _activeAudio = null;
 
 	/*
 	 * Values bound by resolved input nodes, threaded forward into every subsequent turn's resolution - see Interpreter's boundValues merge.
@@ -76,6 +82,61 @@ const Speech = (() => {
 	   Private functions
 	   ========================= */
 
+	/*
+	 * Plays a pre-recorded clip in place of TTS for one text segment. Falls back to _speakTextAsUtterance on playback failure (a 404, a
+	 * decoding error, etc.) rather than leaving the turn stuck - a lookup miss and a playback failure both degrade to TTS, just at different
+	 * points (see _speakText for the miss case).
+	 *
+	 *   url        - the clip's audio URL, as returned by TTSManifest.lookup().
+	 *   value      - the original text, kept only so a playback failure can still fall back to speaking it.
+	 *   generation - session generation guard, as elsewhere.
+	 *   onDone     - invoked with no arguments once the clip finishes (or, on failure, once the TTS fallback finishes).
+	 */
+	function _playClip(url, value, generation, onDone) {
+		const audio = new Audio(url);
+		_activeAudio = audio;
+
+		audio.onended = () => {
+			if (generation === _generation) {
+				_activeAudio = null;
+				onDone();
+			}
+		};
+		audio.onerror = () => {
+			console.warn("Clip playback failed, falling back to speech synthesis:", url);
+			_activeAudio = null;
+			if (generation === _generation) _speakTextAsUtterance(value, generation, onDone);
+		};
+
+		audio.play();
+	}
+	
+	/*
+	 * Speaks a single text segment via the browser's speech synthesis engine. Split out from _speakText so both the lookup-miss path there
+	 * and the playback-failure fallback in _playClip can call the same code rather than maintaining two copies.
+	 *
+	 *   value      - the text to speak.
+	 *   generation - session generation guard, as in _playTurn.
+	 *   onDone     - invoked with no arguments once speech ends, successfully or via error.
+	 */
+	function _speakTextAsUtterance(value, generation, onDone) {
+		const utterance = new SpeechSynthesisUtterance(value);
+		utterance.lang = _langTag();
+
+		const voice = _pickVoice(utterance.lang);
+		if (voice) utterance.voice = voice;
+
+		utterance.onend = () => {
+			if (generation === _generation) onDone();
+		};
+		utterance.onerror = (event) => {
+			console.warn("Speech synthesis error:", event.error);
+			if (generation === _generation) onDone();
+		};
+
+		window.speechSynthesis.speak(utterance);
+	}
+
 	// Shared by stop() and the start of play() - invalidates whatever session was previously running and clears any of its pending state.
 	function _reset() {
 		_generation++;
@@ -90,6 +151,12 @@ const Speech = (() => {
 			_pendingTimer = null;
 		}
 
+		if (_activeAudio) {
+			_activeAudio.pause();
+			_activeAudio.onended = null;
+			_activeAudio.onerror = null;
+			_activeAudio = null;
+		}
 		window.speechSynthesis?.cancel();
 	}
 
@@ -101,13 +168,12 @@ const Speech = (() => {
 	 *   turnIndex     - the turn to resolve and play now. Recurses onto turnIndex + 1 once this turn's sequence and its inter-turn gap complete.
 	 *   generation    - the session generation captured at play() time; re-checked against the live _generation before proceeding, so a
 	 *                   stopped session's in-flight continuation becomes a no-op.
-	 *   renderOptions - passed straight through to Interpreter.resolveTurn() (mode/verbosity); not interpreted here.
 	 *   callbacks     - the full, already-defaulted callback set for this session (see play()).
 	 *
 	 * No return value - once turnIndex runs past the end of rawTurns, callbacks.onFinished() is invoked instead; all other progress is
 	 * reported to callbacks as playback proceeds.
 	 */
-	function _playTurn(rawTurns, turnIndex, generation, renderOptions, callbacks) {
+	function _playTurn(rawTurns, turnIndex, generation, callbacks) {
 		if (generation !== _generation) return;
 
 		if (turnIndex >= rawTurns.length) {
@@ -118,7 +184,7 @@ const Speech = (() => {
 		}
 
 		const { action, instigator, sequence, error } =
-			Interpreter.resolveTurn(rawTurns[turnIndex], { ...renderOptions, boundValues: _boundValues });
+			Interpreter.resolveTurn(rawTurns[turnIndex], "automatic", _boundValues);
 
 		if (error)
 			console.error(`Narration: failed to render turn (action=${action}, instigator=${instigator}):`, error);
@@ -126,7 +192,7 @@ const Speech = (() => {
 		_playSegments(sequence, 0, generation, callbacks, () => {
 			callbacks.onTurnComplete(turnIndex);
 			_startWait(INTER_TURN_GAP_SECONDS, generation, () => {}, () =>
-				_playTurn(rawTurns, turnIndex + 1, generation, renderOptions, callbacks));
+				_playTurn(rawTurns, turnIndex + 1, generation, callbacks));
 		});
 	}
 
@@ -263,21 +329,13 @@ const Speech = (() => {
 	 *   onDone     - invoked with no arguments once speech ends, successfully or via error.
 	 */
 	function _speakText(value, generation, onDone) {
-		const utterance = new SpeechSynthesisUtterance(value);
-		utterance.lang = _langTag();
+		const clipUrl = TTSManifest.lookup(value);
+		if (clipUrl) {
+			_playClip(clipUrl, value, generation, onDone);
+			return;
+		}
 
-		const voice = _pickVoice(utterance.lang);
-		if (voice) utterance.voice = voice;
-
-		utterance.onend = () => {
-			if (generation === _generation) onDone();
-		};
-		utterance.onerror = (event) => {
-			console.warn("Speech synthesis error:", event.error);
-			if (generation === _generation) onDone();
-		};
-
-		window.speechSynthesis.speak(utterance);
+		_speakTextAsUtterance(value, generation, onDone);
 	}
 
 	/*
@@ -331,8 +389,9 @@ const Speech = (() => {
 				clearTimeout(_pendingTimer);
 				_pendingTimer = null;
 			}
-			//Account for whatever fraction of the current step had already elapsed, so the countdown doesn't lose (or gain) time across a pause - resume() sees an accurate remainingMs either way.
 			_wait.remainingMs = Math.max(0, _wait.remainingMs - (Date.now() - _wait.stepStartedAt));
+		} else if (_phase === "speaking" && _activeAudio) {
+			_activeAudio.pause();
 		} else if (_phase === "speaking") {
 			window.speechSynthesis.pause();
 		}
@@ -345,6 +404,8 @@ const Speech = (() => {
 
 		if (_phase === "waiting") {
 			_scheduleWaitStep();
+		} else if (_phase === "speaking" && _activeAudio) {
+			_activeAudio.play();
 		} else if (_phase === "speaking") {
 			window.speechSynthesis.resume();
 		}
@@ -352,24 +413,23 @@ const Speech = (() => {
 
 	/*
 	 * Plays rawTurns (e.g. Rules.buildPrompt(...).turns) from the start. Each turn is resolved into a sequence just before it plays - see the module
-	 * comment - so, options.verbosity aside, whatever a turn's template does with boundValues from an earlier turn is always current.
+	 * comment - so whatever a turn's template does with boundValues from an earlier turn is always current.
 	 *
 	 * Any playback already in progress is stopped first, and _boundValues is reset fresh for this session.
 	 *
-	 *   rawTurns                        - the raw turn array to play.
-	 *   options.verbosity               - "verbose" (default) or "brief"; forwarded to Interpreter.resolveTurn() to pick which localization key variant narrates each turn.
+	 *   rawTurns                        - the raw turn array to play. If empty, will reset the state but then stop with no further action or callbacks.
 	 *   callbacks (all optional):       - Callback table if functions to call when different events as document below triggers during the narration
 	 *     onSpeaking(text)                - a text segment has started speaking.
-	 *     onPause(secondsLeft)            - during an ordinary pause, roughly once a second, with the time remaining.
+	 *     onPause(secondsLeft)            - ordinary narration pause segments only; not the automatic inter-turn gap or manual pauses.
 	 *     onInputStart(field,options)     - an input's wait has begun; options is [{value,label}, ...] to render as choices. See selectInput().
 	 *     onInputCountdown(secondsLeft)   - same shape as onPause, fired for an input's wait instead - kept separate so a caller can show both a countdown and the option buttons at once.
 	 *     onInputResolved(field,value)    - the input's wait has fully elapsed and value (selected or defaulted) is now bound; its continuation is about to play. Buttons can be cleared now.
-	 *     onTurnComplete(index)           - rawTurns[index] has finished playing.
+	 *     onTurnComplete(index)           - rawTurns[index] has finished playing the final segment, immediately before the inter-turn gap.
 	 *     onFinished()                    - every turn finished playing on its own, start to end - not fired by stop(), since a caller that stops already knows to reset its own state.
 	 *
 	 * No return value - progress is reported entirely through callbacks.
 	 */
-	function play(rawTurns, options = {}, callbacks = {}) {
+	function play(rawTurns, callbacks = {}) {
 		if (!isSupported()) {
 			console.warn("Speech synthesis is not supported by this browser.");
 			return;
@@ -380,8 +440,7 @@ const Speech = (() => {
 
 		_active = true;
 		_boundValues = {};
-		const renderOptions = { mode: "automatic", verbosity: options.verbosity ?? "verbose" };
-		_playTurn(rawTurns, 0, _generation, renderOptions, { ..._NOOP_CALLBACKS, ...callbacks });
+		_playTurn(rawTurns, 0, _generation, { ..._NOOP_CALLBACKS, ...callbacks });
 	}
 	
 	/*

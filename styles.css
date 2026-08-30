@@ -5,6 +5,7 @@
 :root {
 	--selection-tile-scale: 1.0;	/* Selection tiles scale */
 	--description-tile-scale: 1.0;	/* Role descriptions tile scale */
+	--tts-text-scale: 1.0;			/* Scale of auto-narrator text */
 	
 	/* Data for the sprites used
 	   Assumes tightly packed cells with no gaps, scale is controlled by sprite-scale (and also tile-scale for the full tile on which the icon is placed)
@@ -1530,7 +1531,7 @@ body.day-timer-expanded .day-timer-panel {
 
 	color: rgba(255, 255, 255, 0.7);
 
-	font-size: 1.2rem;
+	font-size: calc(1.2rem * var(--tts-text-scale));
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.08em;
@@ -1543,7 +1544,7 @@ body.day-timer-expanded .day-timer-panel {
 
 	color: #fff;
 
-	font-size: 3.5rem;
+	font-size: calc(3.5rem * var(--tts-text-scale));
 	font-weight: 500;
 	line-height: 1.4;
 
@@ -1557,7 +1558,7 @@ body.day-timer-expanded .day-timer-panel {
 
 	color: #fff;
 
-	font-size: 6rem;
+	font-size: calc(6.0rem * var(--tts-text-scale));
 	font-weight: 700;
 	line-height: 1;
 
@@ -1568,7 +1569,7 @@ body.day-timer-expanded .day-timer-panel {
    space with the option buttons below it - the ordinary pause countdown
    stays at full size, since it has no buttons competing for room. */
 .speech-overlay-countdown-compact {
-	font-size: 2.5rem;
+	font-size: calc(2.5rem * var(--tts-text-scale));
 	margin-top: 20px;
 }
 
@@ -1593,7 +1594,7 @@ body.day-timer-expanded .day-timer-panel {
 	border: 1px solid rgba(255, 255, 255, 0.3);
 	border-radius: 6px;
 
-	font-size: 1.6rem;
+	font-size: calc(1.6rem * var(--tts-text-scale));
 	line-height: 1.2;
 
 	cursor: pointer;
@@ -1628,7 +1629,7 @@ body.day-timer-expanded .day-timer-panel {
 	border: 1px solid rgba(255, 255, 255, 0.3);
 	border-radius: 6px;
 
-	font-size: 1.4rem;
+	font-size: calc(1.4rem * var(--tts-text-scale));
 	line-height: 1;
 
 	cursor: pointer;
@@ -1648,7 +1649,7 @@ body.day-timer-expanded .day-timer-panel {
 		width: 94vw;
 		height: 90vh;
 	}
-
+/*
 	.speech-overlay-text {
 		font-size: 2.5rem;
 	}
@@ -1656,19 +1657,19 @@ body.day-timer-expanded .day-timer-panel {
 	.speech-overlay-countdown {
 		font-size: 4rem;
 	}
-
+*/
 	.speech-overlay-controls button {
 		min-width: 56px;
 		min-height: 48px;
 	}
-	
+/*	
 	.speech-overlay-countdown-compact {
 		font-size: 2rem;
 	}
-
+*/
 	.speech-overlay-option {
 		min-width: 100px;
 		min-height: 48px;
-		font-size: 1.3rem;
+		/*font-size: 1.3rem;*/
 	}
 }
