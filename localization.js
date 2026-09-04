@@ -215,11 +215,7 @@ const Localization = (() => {
 			SWE: "{ROLE_DOPPELGANGER}, om du såg {ROLE_APPRENTICEASSASSIN_DEFINITE}, vakna. {PROMPT_APPRENTICEASSASSIN_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
 		},
 		PROMPT_APPRENTICESEER: {
-			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_APPRENTICESEER_ACTION} {PROMPT_SLEEP_CALL}",
-		},
-		PROMPT_APPRENTICESEER_ACTION: {
-			ENG: "You may look at one of the center cards. {Pause:short}",
-			SWE: "Du får titta på ett av mittenkorten. {Pause:short}",
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_VIEW_CARD} {Pause:short} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_APPRENTICETANNER: {
 			ENG: "{PROMPT_WAKE_CALL} {ROLE_TANNER}, hold out a thumb so {ROLE_APPRENTICETANNER_DEFINITE} can see who you are. {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_APPRENTICETANNER_DOPPELGANGER} {ROLE_TANNER}, put your thumb down.",
@@ -238,7 +234,7 @@ const Localization = (() => {
 		},
 		PROMPT_AURASEER: {
 			ENG: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, if you looked at or moved a card, hold out a thumb so {ROLE_AURASEER_DEFINITE} can see it. {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_AURASEER_DOPPELGANGER} All players, put your thumbs down.",
-			SWE: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, om ni har tittat på eller flyttat kort, håll ut en tumme så att {ROLE_AURASEER_DEFINITE} kan se den. {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_AURASEER_DOPPELGANGER} Samtliga spelare, ner med tummarna.",
+			SWE: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, om ni har tittat på eller flyttat kort, håll ut en tumme så att {ROLE_AURASEER_DEFINITE} kan se den. {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_AURASEER_DOPPELGANGER} Alla spelare, ner med tummarna.",
 		},
 		PROMPT_AURASEER_DOPPELGANGER: {
 			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} Other players, keep holding out your thumb. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
@@ -252,7 +248,7 @@ const Localization = (() => {
 		},
 		PROMPT_BEHOLDER: {
 			ENG: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, hold out a thumb so {ROLE_BEHOLDER_DEFINITE} can see who you are. {ROLE_BEHOLDER}, you may look at their cards. {Pause:medium} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_BEHOLDER_DOPPELGANGER} All players, put your thumbs down.",
-			SWE: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, håll ut en tumme så att {ROLE_BEHOLDER_DEFINITE} kan se vem ni är. {ROLE_BEHOLDER}, du får titta på deras kort. {Pause:medium} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_BEHOLDER_DOPPELGANGER} Alla spelare, ner med tummen.",
+			SWE: "{PROMPT_WAKE_CALL} {IdentityList:listDetectableRoles,and}, håll ut en tumme så att {ROLE_BEHOLDER_DEFINITE} kan se vem ni är. {ROLE_BEHOLDER}, du får titta på deras kort. {Pause:medium} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_BEHOLDER_DOPPELGANGER} Alla spelare, ner med tummarna.",
 		},
 		PROMPT_BEHOLDER_DOPPELGANGER: {
 			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} Other players, keep holding out your thumb. {ROLE_DOPPELGANGER}, you may look at their cards. {Pause:medium} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
@@ -812,7 +808,7 @@ const Localization = (() => {
 		},
 		PROMPT_LEADER: {
 			ENG: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, hold out a thumb so {ROLE_LEADER_DEFINITE} can see. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, put your thumbs down.",
-			SWE: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, håll ut en tumme så att {ROLE_LEADER_DEFINITE} kan se. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, dra tillbaka tummarna.",
+			SWE: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, håll ut en tumme så att {ROLE_LEADER_DEFINITE} kan se. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, ner med tummarna.",
 		},
 		PROMPT_LEADER_DOPPELGANGER: {
 			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_ALIEN_PLURAL}, keep holding out your thumbs so {ROLE_DOPPELGANGER_DEFINITE} can see. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
@@ -823,11 +819,10 @@ const Localization = (() => {
 			SWE: "{ROLE_FEUDINGALIENS_PLURAL}, håll ut båda tummarna. {ROLE_LEADER}, om du ser både {ROLE_FEUDINGALIENS_DEFINITE} vinner du om ingen av dem röstas ut.",
 		},
 		PROMPT_LOVERS: {
-			COMMON: "{PROMPT_WAKE_CALL} {PROMPT_LOVERS_ACTION} {PROMPT_SLEEP_CALL}",
+			ENG: "{SPECIAL_LOVERS}, wake up and identify each other. If one of you is voted out, the other is voted out too. {Pause:short} {PROMPT_SLEEP_CALL}",
+			SWE: "{SPECIAL_LOVERS}, vakna och identifiera varandra. Om en av er röstas ut så kommer samtliga att röstas ut. {Pause:short} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_LOVERS_ACTION: {
-			ENG: "Identify each other. If one of you is voted out, the other is voted out too. {Pause:short}",
-			SWE: "Identifiera varandra. Om en av er röstas ut så kommer samtliga att röstas ut. {Pause:short}",
 		},
 		PROMPT_MARKSMAN: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_MARKSMAN_ACTION} {PROMPT_SLEEP_CALL}",
@@ -856,18 +851,14 @@ const Localization = (() => {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_VIEW_CARD} {Pause:short} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_MYSTICWOLF: {
-			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_MYSTICWOLF_ACTION} {PROMPT_SLEEP_CALL}",
-		},
-		PROMPT_MYSTICWOLF_ACTION: {
-			ENG: "You may look at another player's card. {Pause:short}",
-			SWE: "Du får titta på en annan spelares kort. {Pause:short}",
+			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_VIEW_CARD} {Pause:short} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_NOSTRADAMUS: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_NOSTRADAMUS_ACTION} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_NOSTRADAMUS_ACTION: {
 			ENG: "You may look at one to three other players' cards. {If:hasDangerRoles,PROMPT_NOSTRADAMUS_WARNING,PROMPT_NOSTRADAMUS_NO_WARNING}",
-			SWE: "Du kan titta på en till tre andra spelares kort. {If:hasDangerRoles,PROMPT_NOSTRADAMUS_WARNING,PROMPT_NOSTRADAMUS_NO_WARNING}",
+			SWE: "Du får titta på en till tre andra spelares kort. {If:hasDangerRoles,PROMPT_NOSTRADAMUS_WARNING,PROMPT_NOSTRADAMUS_NO_WARNING}",
 		},
 		PROMPT_NOSTRADAMUS_DOPPELGANGER: {
 			ENG: "{ROLE_DOPPELGANGER}, if you saw {ROLE_NOSTRADAMUS_DEFINITE}, the same win condition applies to you.",
@@ -956,7 +947,7 @@ const Localization = (() => {
 		},
 		PROMPT_ORACLE_HUNT: {
 			ENG: "Guess a number between one and ten. {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_AUTO}",
-			SWE: "Gissa ett tal mellan one och ten. {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_AUTO}",
+			SWE: "Gissa ett tal mellan ett och tio. {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_AUTO}",
 		},
 		PROMPT_ORACLE_HUNT_AUTO: {
 			COMMON: "{Input:oracleHuntGuess,choice,PROMPT_ORACLE_HUNT_MANUAL,short,defaultHuntGuess,1,UI_NUM_1,PROMPT_ORACLE_HUNT_RESOLVE,2,UI_NUM_2,PROMPT_ORACLE_HUNT_RESOLVE,3,UI_NUM_3,PROMPT_ORACLE_HUNT_RESOLVE,4,UI_NUM_4,PROMPT_ORACLE_HUNT_RESOLVE,5,UI_NUM_5,PROMPT_ORACLE_HUNT_RESOLVE,6,UI_NUM_6,PROMPT_ORACLE_HUNT_RESOLVE,7,UI_NUM_7,PROMPT_ORACLE_HUNT_RESOLVE,8,UI_NUM_8,PROMPT_ORACLE_HUNT_RESOLVE,9,UI_NUM_9,PROMPT_ORACLE_HUNT_RESOLVE,10,UI_NUM_10,PROMPT_ORACLE_HUNT_RESOLVE}",
@@ -987,7 +978,7 @@ const Localization = (() => {
 		},
 		PROMPT_PARANORMALINVESTIGATOR_ACTION: {
 			ENG: "You may look at one to two other players' cards. {If:hasDangerRoles,PROMPT_PARANORMALINVESTIGATOR_WARNING} {Pause:medium}",
-			SWE: "Du kan titta på en till två andra spelares kort. {If:hasDangerRoles,PROMPT_PARANORMALINVESTIGATOR_WARNING} {Pause:medium}",
+			SWE: "Du får titta på en till två andra spelares kort. {If:hasDangerRoles,PROMPT_PARANORMALINVESTIGATOR_WARNING} {Pause:medium}",
 		},
 		PROMPT_PARANORMALINVESTIGATOR_WARNING: {
 			ENG: "If you see: {IdentityList:listDangerRoles,or}, you must stop, and will join their team.",
@@ -1075,8 +1066,8 @@ const Localization = (() => {
 			SWE: "Ni har endast en minut på er innan ni måste rösta.",
 		},
 		PROMPT_RIPPLE_VIEW_PLAYER: {
-			ENG: "Player {Value:player}, wake up. You may look at the {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} belonging to {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}. {Pause:medium} Player {Value:player}, go to sleep.",
-			SWE: "Spelare {Value:player}, vakna. Du får titta på {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} för {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}. {Pause:medium} Spelare {Value:player}, somna.",
+			ENG: "Player {Value:player}, wake up. {PROMPT_VIEW_CARD} {Pause:medium} Player {Value:player}, go to sleep.",
+			SWE: "Spelare {Value:player}, vakna. {PROMPT_VIEW_CARD} {Pause:medium} Spelare {Value:player}, somna.",
 		},
 		PROMPT_ROBBER: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_ROBBER_ACTION} {PROMPT_SLEEP_CALL}",
@@ -1090,14 +1081,14 @@ const Localization = (() => {
 		},
 		PROMPT_SEER_ACTION: {
 			ENG: "You may look at another player's card, or two of the center cards. {Pause:short}",
-			SWE: "Du kan titta på en annan spelares kort, eller två av mittenkorten. {Pause:short}",
+			SWE: "Du får titta på en annan spelares kort, eller två av mittenkorten. {Pause:short}",
 		},
 		PROMPT_SENTINEL: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_SENTINEL_ACTION} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_SENTINEL_ACTION: {
-			ENG: "Place a {TOKEN_SHIELD} on another player's card. {Pause:short}",
-			SWE: "Placera en {TOKEN_SHIELD} på en annan spelares kort. {Pause:short}",
+			ENG: "Place a {TOKEN_SHIELD} on another player's card. Other players may not look at or move the card during the night. {Pause:short}",
+			SWE: "Placera en {TOKEN_SHIELD} på en annan spelares kort. Andra spelare får varken titta på eller flytta kortet under natten. {Pause:short}",
 		},
 		PROMPT_SLEEP_CALL: {
 			ENG: "{Identity:instigator}, go to sleep.",
@@ -1112,8 +1103,8 @@ const Localization = (() => {
 			SWE: "{PROMPT_WAKE_CALL} {TEAM_WEREWOLF_PLURAL}, håll ut en tumme så att {ROLE_SQUIRE_DEFINITE} kan se vem ni är. {ROLE_SQUIRE}, du får titta på deras kort. {Pause:medium} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_SQUIRE_DOPPELGANGER} {TEAM_WEREWOLF_PLURAL}, ner med tummarna.",
 		},
 		PROMPT_SQUIRE_DOPPELGANGER: {
-			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, keep holding out your thumb so {ROLE_DOPPELGANGER_DEFINITE} can see who you are. {ROLE_DOPPELGANGER}, you may look at their cards. {Pause:medium} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, fortsätt hålla ut tummen så att {ROLE_DOPPELGANGER_DEFINITE} kan se vem ni är. {ROLE_DOPPELGANGER}, du får titta på deras kort. {Pause:medium} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, keep holding out your thumb. {ROLE_DOPPELGANGER}, you may look at their cards. {Pause:medium} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_WEREWOLF_PLURAL}, fortsätt hålla ut tummen. {ROLE_DOPPELGANGER}, du får titta på deras kort. {Pause:medium} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
 		},
 		PROMPT_THING: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_THING_ACTION} {PROMPT_SLEEP_CALL}",
@@ -4592,33 +4583,127 @@ const Localization = (() => {
 	 * Returns the fully resolved, sentence-capitalized, whitespace-cleaned text (see _normalizeSentences/_trimExtraSpaces).
 	 */
 	function _resolveTemplate(text, funcs, data, onError) {
-		let result = text;
+		return _resolveTemplateCore(text, funcs, data, onError).text;
+	}
+
+	/*
+	 * Same resolution as _resolveTemplate, but keeps track of which substrings of the final result came from
+	 * which distinct {...} expression, all the way down through recursive expansion (a primitive returning
+	 * another key reference, that key's own COMMON entry containing further primitives, etc.) - so a caller
+	 * can treat each one as an individually addressable "atom" (e.g. for per-role/per-phrase pre-recorded audio
+	 * clips - see Interpreter's automatic-mode splicing) without any change to how localization strings are
+	 * authored.
+	 *
+	 * Instead of rewriting one string in place like _resolveTemplate did, this maintains an ordered list of
+	 * { text, final } chunks. Each pass scans every non-final chunk for {...} matches: a match's replacement
+	 * always becomes a *new* chunk of its own (marked final only once it itself contains no further {...}),
+	 * and any literal text immediately before/after/between matches within the same chunk is split off as its
+	 * own final chunk. Because a match can only ever occupy a contiguous span of exactly one chunk's text (a
+	 * replacement is never glued onto surrounding chunks), this converges on precisely the boundaries between
+	 * "text produced by resolving one {...} expression" and "text that was always literal" - e.g.
+	 * "{Identity:instigator}, vakna." first becomes one chunk (the Identity call spans the whole original
+	 * text), then on the next pass splits into [Identity's result (still unresolved), ", vakna." (already
+	 * final)], and finally the first chunk itself resolves down to a single leaf of plain text.
+	 *
+	 * Every leaf chunk ends up its own atom here - no attempt is made to guess which boundaries are "really"
+	 * static (e.g. a bareword {KEY} reference, which never varies with `data`) and pre-merge them with their
+	 * neighbors. An earlier version of this function tried exactly that, tracking a `dynamic` flag through the
+	 * resolution chain and merging unbroken runs of non-dynamic chunks - but that guess turned out to be both
+	 * unnecessary and occasionally wrong (a bareword role reference sitting inside an {If:...}/{Select:...}
+	 * branch has to be treated as dynamic too, since Localization can't tell "choosing between two whole
+	 * sentences" apart from "choosing a grammar word" - both are just a function call whose result gets
+	 * rescanned for more {...}). TTSManifest.lookupParts now makes that grouping decision instead, empirically,
+	 * by trying every way of joining adjacent atoms and checking what's actually recorded - which strictly
+	 * subsumes any merge this layer could have pre-computed (the same grouping is found whenever that combined
+	 * text is recorded) while staying free to fall back to finer atoms whenever a coarser one isn't recorded,
+	 * something a merge locked in here could never undo. So the simplest, most granular boundary is also the
+	 * most useful one: split at every distinct {...} expression, and let the manifest decide what to combine.
+	 *
+	 * Same parameter contract as _resolveTemplate/localize.
+	 *
+	 * Returns { text, atoms }. text is exactly what _resolveTemplate used to return (all chunks joined, then
+	 * sentence-capitalized/whitespace-cleaned as before). atoms is the ordered list of leaf chunks with empty
+	 * ones dropped (text kept raw/untrimmed otherwise - see the comment where atoms is built, below) - or null
+	 * if resolution hit MAX_ITERATIONS, since a cyclic reference makes the chunk boundaries themselves
+	 * unreliable; callers that don't need atoms should keep using _resolveTemplate/localize, which never
+	 * inspects this field.
+	 */
+	function _resolveTemplateCore(text, funcs, data, onError) {
+		let segments = [{ text, final: false }];
 
 		for (let i = 0; i < MAX_ITERATIONS; i++) {
 			let changed = false;
+			const next = [];
 
-			result = result.replace(/\{(.*?)\}/g, (match, inner) => {
-				changed = true;
+			for (const seg of segments) {
+				if (seg.final) { next.push(seg); continue; }
 
-				const colonIdx = inner.indexOf(":");
-				const name = colonIdx === -1 ? inner : inner.slice(0, colonIdx);
-				const argStr = colonIdx === -1 ? "" : inner.slice(colonIdx + 1);
-				const args = argStr === "" ? [] : _splitTemplateArgs(argStr).map(a => _parseTemplateArg(a));
+				const regex = /\{(.*?)\}/g;
+				let lastIndex = 0;
+				let match;
+				let sawMatch = false;
 
-				if (funcs && typeof funcs[name] === "function")
-					return funcs[name](data, ...args) ?? "";
+				while ((match = regex.exec(seg.text)) !== null) {
+					sawMatch = true;
+					changed = true;
 
-				const key = getString(name);
-				return key !== undefined ? key : onError("missing_key", name, data);
-			});
+					if (match.index > lastIndex)
+						next.push({ text: seg.text.slice(lastIndex, match.index), final: true });
+
+					const inner = match[1];
+					const colonIdx = inner.indexOf(":");
+					const name = colonIdx === -1 ? inner : inner.slice(0, colonIdx);
+					const argStr = colonIdx === -1 ? "" : inner.slice(colonIdx + 1);
+					const args = argStr === "" ? [] : _splitTemplateArgs(argStr).map(a => _parseTemplateArg(a));
+
+					let replacement;
+					if (funcs && typeof funcs[name] === "function")
+						replacement = funcs[name](data, ...args) ?? "";
+					else {
+						const key = getString(name);
+						replacement = key !== undefined ? key : onError("missing_key", name, data);
+					}
+
+					next.push({ text: String(replacement), final: false });
+					lastIndex = regex.lastIndex;
+				}
+
+				if (!sawMatch) { next.push({ ...seg, final: true }); continue; }
+
+				if (lastIndex < seg.text.length)
+					next.push({ text: seg.text.slice(lastIndex), final: true });
+			}
+
+			segments = next;
 
 			if (!changed) break;
 
-			if (i === MAX_ITERATIONS - 1)
-				return onError("max_iterations", text, data) ?? result;
+			if (i === MAX_ITERATIONS - 1) {
+				const joined = segments.map(s => s.text).join("");
+				return { text: onError("max_iterations", text, data) ?? joined, atoms: null };
+			}
 		}
 
-		return _normalizeSentences(_trimExtraSpaces(result));
+		const joined = segments.map(s => s.text).join("");
+
+		// Every leaf chunk becomes its own atom, one per distinct {...} expression (or literal gap between
+		// them) - no attempt is made here to guess which ones are "really" static and could safely be merged.
+		// That decision is made later, empirically, by TTSManifest.lookupParts: it tries every way of grouping
+		// adjacent atoms and picks whichever full covering actually has recordings, which strictly subsumes
+		// any merge this layer could have pre-computed (it can reconstruct the same grouping whenever that
+		// combined text is recorded) while also staying free to fall back to finer atoms whenever a coarser
+		// grouping isn't recorded - something a merge performed here, once locked in, could never undo. Text
+		// is kept raw/untrimmed here (including whitespace-only atoms, e.g. the space IdentityList glues
+		// between two role names) so a caller reconstructing text from atoms gets the same spacing joined
+		// would; trimming/dropping whitespace is left to the caller, which needs different rules depending on
+		// what it's using atoms for (Interpreter trims per-atom only for clip lookup, not for the text it
+		// rebuilds - see _toSequenceFromAtoms).
+		const atoms = segments.map(s => ({ text: s.text })).filter(s => s.text.length > 0);
+
+		return {
+			text: _normalizeSentences(_trimExtraSpaces(joined)),
+			atoms,
+		};
 	}
 
 	/*
@@ -4658,6 +4743,28 @@ const Localization = (() => {
 	 */
 	function localize(key, funcs = null, data = null, onError = _defaultTemplateError) {
 		return _resolveTemplate(`{${key}}`, funcs, data, onError);
+	}
+
+	/*
+	 * Same as localize(), but also returns the atom breakdown described in _resolveTemplateCore - for callers
+	 * that need to know which parts of the resolved text came from which distinct template expression (e.g.
+	 * Interpreter's automatic-mode audio splicing). Plain localize() callers are unaffected; this is purely
+	 * additive.
+	 *
+	 * Returns { text, atoms } - see _resolveTemplateCore.
+	 */
+	function localizeWithAtoms(key, funcs = null, data = null, onError = _defaultTemplateError) {
+		return _resolveTemplateCore(`{${key}}`, funcs, data, onError);
+	}
+
+	/*
+	 * Applies the same sentence-capitalization/whitespace-cleanup localize() applies to its result, to a piece
+	 * of text a caller assembled itself outside the normal resolve loop. Used by Interpreter when it rebuilds
+	 * per-sentence text directly from localizeWithAtoms' atom list (see _toSequenceFromAtoms) rather than from
+	 * one already-cleaned flat string, so both paths end up looking identical to a reader/listener.
+	 */
+	function normalizeText(text) {
+		return _normalizeSentences(_trimExtraSpaces(text));
 	}
 
 	/*
@@ -4718,710 +4825,9 @@ const Localization = (() => {
 		hasKey,
 		isLiteral,
 		localize,
+		localizeWithAtoms,
+		normalizeText,
 		setLanguage,
 	};
 	
 })();
-
-
-
-/*
-Övriga spelare, fortsätt hålla ut tummen.
-Övriga spelare, oberoende av tidigare roll- och lagtillhörighet har ni nu endast ett vinstvillkor: hitta Oraklet.
-Alla andra spelare, håll ut en hand framför er.
-Alla spelare, ner med händerna.
-Alla spelare, ner med tummen.
-Ange om du har ett jämnt eller udda spelarnummer.
-Betraktare, du får titta på deras kort.
-Borgmästare, om du ser både Groob och Zerb vinner du om ingen av dem röstas ut.
-Byt det extra kortet i mitten mot någon annan spelares kort som inte redan är Varulv.
-Byt ditt kort mot ett av mittenkorten utan att se vad det är.
-Byt plats på två andra spelares kort, utan att titta på något av dem.
-Byt plats på två andra spelares märken eller två andra spelares kort, utan att titta på något av dem.
-Byt sedan ditt eget kort mot kortet du tittade på.
-Byt ut ditt märke mot ett Rent märke.
-Byt ut en annan spelares märke mot Anstiftarens märke.
-Byt ut en annan spelares märke mot Grevens märke.
-Byt ut en annan spelares märke mot Lönnmördarens märke.
-Byt ut en av dina grannars märken mot den Smittades märke.
-Byt ut två andra spelares märken mot Amors märke.
-Det får inte vara samma spelare.
-Det har inträffat en krusning i rum-tiden.
-Ditt nya kort är nu också en Utomjording.
-Drömvarg, ner med tummen.
-Drömvarg, stick ut tummen så att andra Varulvar kan se vem du är.
-Du är nu rollen du såg.
-Du får titta på åtta av mittenkorten.
-Du får titta på åtta kort från andra spelare.
-Du får titta på åtta kort från jämna spelare.
-Du får titta på åtta kort från udda spelare.
-Du får titta på båda grannars kort.
-Du får titta på ditt eget kort.
-Du får titta på en annan spelares kort.
-Du får titta på en grannes kort.
-Du får titta på ett av mittenkorten.
-Du får titta på ett kort från en annan spelare.
-Du får titta på ett kort från jämna spelare.
-Du får titta på ett kort från udda spelare.
-Du får titta på fem av mittenkorten.
-Du får titta på fem kort från andra spelare.
-Du får titta på fem kort från jämna spelare.
-Du får titta på fem kort från udda spelare.
-Du får titta på fyra av mittenkorten.
-Du får titta på fyra kort från andra spelare.
-Du får titta på fyra kort från jämna spelare.
-Du får titta på fyra kort från udda spelare.
-Du får titta på höger grannes kort.
-Du får titta på nio av mittenkorten.
-Du får titta på nio kort från andra spelare.
-Du får titta på nio kort från jämna spelare.
-Du får titta på nio kort från udda spelare.
-Du får titta på sex av mittenkorten.
-Du får titta på sex kort från andra spelare.
-Du får titta på sex kort från jämna spelare.
-Du får titta på sex kort från udda spelare.
-Du får titta på sju av mittenkorten.
-Du får titta på sju kort från andra spelare.
-Du får titta på sju kort från jämna spelare.
-Du får titta på sju kort från udda spelare.
-Du får titta på tre av mittenkorten.
-Du får titta på tre kort från andra spelare.
-Du får titta på tre kort från jämna spelare.
-Du får titta på tre kort från udda spelare.
-Du får titta på två av mittenkorten.
-Du får titta på två kort från andra spelare.
-Du får titta på två kort från jämna spelare.
-Du får titta på två kort från udda spelare.
-Du får titta på vänster grannes kort.
-Du får vända åtta av mittenkorten.
-Du får vända ett av mittenkorten.
-Du får vända fem av mittenkorten.
-Du får vända fyra av mittenkorten.
-Du får vända nio av mittenkorten.
-Du får vända sex av mittenkorten.
-Du får vända sju av mittenkorten.
-Du får vända tre av mittenkorten.
-Du får vända två av mittenkorten.
-Du kan titta på en annan spelares kort, eller två av mittenkorten.
-Du kan titta på en till tre andra spelares kort.
-Du kan titta på en till två andra spelares kort.
-Du kan välja att flytta samtliga spelares kort ett steg åt vänster, åt höger, eller inte alls.
-Du kan välja att stjäla en annan spelares kort och ersätta det med ditt kort.
-Du kan välja att stjäla en annan spelares märke och ersätta det med ditt märke.
-Du kan välja att titta på ett av korten i mitten.
-Du behöver enbart förhindra att du själv blir utröstad.
-Du måste förhindra att närmaste fyra spelare till vänster och närmaste fyra spelare till höger blir utröstade.
-Du måste förhindra att närmaste fyra spelare till vänster och närmaste spelare till höger blir utröstade.
-Du måste förhindra att närmaste fyra spelare till vänster och närmaste tre spelare till höger blir utröstade.
-Du måste förhindra att närmaste fyra spelare till vänster och närmaste två spelare till höger blir utröstade.
-Du måste förhindra att närmaste spelare till vänster och närmaste fyra spelare till höger blir utröstade.
-Du måste förhindra att närmaste spelare till vänster och närmaste spelare till höger blir utröstade.
-Du måste förhindra att närmaste spelare till vänster och närmaste tre spelare till höger blir utröstade.
-Du måste förhindra att närmaste spelare till vänster och närmaste två spelare till höger blir utröstade.
-Du måste förhindra att närmaste tre spelare till vänster och närmaste fyra spelare till höger blir utröstade.
-Du måste förhindra att närmaste tre spelare till vänster och närmaste spelare till höger blir utröstade.
-Du måste förhindra att närmaste tre spelare till vänster och närmaste tre spelare till höger blir utröstade.
-Du måste förhindra att närmaste tre spelare till vänster och närmaste två spelare till höger blir utröstade.
-Du måste förhindra att närmaste två spelare till vänster och närmaste fyra spelare till höger blir utröstade.
-Du måste förhindra att närmaste två spelare till vänster och närmaste spelare till höger blir utröstade.
-Du måste förhindra att närmaste två spelare till vänster och närmaste tre spelare till höger blir utröstade.
-Du måste förhindra att närmaste två spelare till vänster och närmaste två spelare till höger blir utröstade.
-Du måste förhindra att spelaren närmast till höger blir utröstad.
-Du måste förhindra att spelaren närmast till vänster blir utröstad.
-Du ska inte vakna när din nya roll ropas upp.
-Dubbelgångare, du får titta på deras kort.
-Dubbelgångare, identifiera Vampyrerna och byt ut ditt märke mot Renfields märke.
-Dubbelgångare, om du såg Lönnmördarnovisen, vakna.
-Dubbelgångare, om du såg någon av Vampyrerna, vakna tillsammans med dem när de blir ombedda.
-Dubbelgångare, om du såg någon av Varulvarna förutom Drömvargen, vakna tillsammans med dem när de blir ombedda.
-Dubbelgångare, om du såg någon av Varulvarna, vakna tillsammans med dem när de blir ombedda.
-Dubbelgångare, om du såg Profeten gäller samma vinstvillkor för dig.
-Dubbelgångare, somna.
-En krusning är nu garanterad att inträffa.
-Fel.
-Frimurare, och Dubbelgångaren om du såg en av Frimurarna, vakna och identifiera varandra.
-Frimurare, somna.
-Frimurare, vakna och identifiera varandra.
-Gör ingenting, stirra bara på varandra tills det blir pinsamt.
-Garvare, fortsätt hålla ut tummen så att Dubbelgångaren kan se vem du är.
-Garvare, håll ut en tumme så att Garvargesällen kan se vem du är.
-Garvare, ner med tummen.
-Ge era kort till närmaste Utomjording till höger om er.
-Ge era kort till närmaste Utomjording till vänster om er.
-Gemensamt inom laget får ni titta på åtta av mittenkorten.
-Gemensamt inom laget får ni titta på åtta kort från andra spelare.
-Gemensamt inom laget får ni titta på åtta kort från jämna spelare.
-Gemensamt inom laget får ni titta på åtta kort från udda spelare.
-Gemensamt inom laget får ni titta på båda grannars kort.
-Gemensamt inom laget får ni titta på ditt eget kort.
-Gemensamt inom laget får ni titta på en grannes kort.
-Gemensamt inom laget får ni titta på ett av mittenkorten.
-Gemensamt inom laget får ni titta på ett kort från en annan spelare.
-Gemensamt inom laget får ni titta på ett kort från jämna spelare.
-Gemensamt inom laget får ni titta på ett kort från udda spelare.
-Gemensamt inom laget får ni titta på fem av mittenkorten.
-Gemensamt inom laget får ni titta på fem kort från andra spelare.
-Gemensamt inom laget får ni titta på fem kort från jämna spelare.
-Gemensamt inom laget får ni titta på fem kort från udda spelare.
-Gemensamt inom laget får ni titta på fyra av mittenkorten.
-Gemensamt inom laget får ni titta på fyra kort från andra spelare.
-Gemensamt inom laget får ni titta på fyra kort från jämna spelare.
-Gemensamt inom laget får ni titta på fyra kort från udda spelare.
-Gemensamt inom laget får ni titta på höger grannes kort.
-Gemensamt inom laget får ni titta på nio av mittenkorten.
-Gemensamt inom laget får ni titta på nio kort från andra spelare.
-Gemensamt inom laget får ni titta på nio kort från jämna spelare.
-Gemensamt inom laget får ni titta på nio kort från udda spelare.
-Gemensamt inom laget får ni titta på sex av mittenkorten.
-Gemensamt inom laget får ni titta på sex kort från andra spelare.
-Gemensamt inom laget får ni titta på sex kort från jämna spelare.
-Gemensamt inom laget får ni titta på sex kort från udda spelare.
-Gemensamt inom laget får ni titta på sju av mittenkorten.
-Gemensamt inom laget får ni titta på sju kort från andra spelare.
-Gemensamt inom laget får ni titta på sju kort från jämna spelare.
-Gemensamt inom laget får ni titta på sju kort från udda spelare.
-Gemensamt inom laget får ni titta på tre av mittenkorten.
-Gemensamt inom laget får ni titta på tre kort från andra spelare.
-Gemensamt inom laget får ni titta på tre kort från jämna spelare.
-Gemensamt inom laget får ni titta på tre kort från udda spelare.
-Gemensamt inom laget får ni titta på två av mittenkorten.
-Gemensamt inom laget får ni titta på två kort från andra spelare.
-Gemensamt inom laget får ni titta på två kort från jämna spelare.
-Gemensamt inom laget får ni titta på två kort från udda spelare.
-Gemensamt inom laget får ni titta på vänster grannes kort.
-Gissa ett tal mellan one och ten.
-Groob och Zerb, håll ut båda tummarna.
-Groob och Zerb, och Dubbelgångaren om du såg ett av Groobs och Zerbs kort, vakna och identifiera varandra.
-Groob och Zerb, vakna och identifiera varandra.
-Iaktta vad de andra spelarna gör.
-Identifiera Lönnmördaren.
-Identifiera varandra.
-Individuellt får ni titta på åtta av mittenkorten.
-Individuellt får ni titta på åtta kort från andra spelare.
-Individuellt får ni titta på åtta kort från jämna spelare.
-Individuellt får ni titta på åtta kort från udda spelare.
-Individuellt får ni titta på båda grannars kort.
-Individuellt får ni titta på ditt eget kort.
-Individuellt får ni titta på en grannes kort.
-Individuellt får ni titta på ett av mittenkorten.
-Individuellt får ni titta på ett kort från en annan spelare.
-Individuellt får ni titta på ett kort från jämna spelare.
-Individuellt får ni titta på ett kort från udda spelare.
-Individuellt får ni titta på fem av mittenkorten.
-Individuellt får ni titta på fem kort från andra spelare.
-Individuellt får ni titta på fem kort från jämna spelare.
-Individuellt får ni titta på fem kort från udda spelare.
-Individuellt får ni titta på fyra av mittenkorten.
-Individuellt får ni titta på fyra kort från andra spelare.
-Individuellt får ni titta på fyra kort från jämna spelare.
-Individuellt får ni titta på fyra kort från udda spelare.
-Individuellt får ni titta på höger grannes kort.
-Individuellt får ni titta på nio av mittenkorten.
-Individuellt får ni titta på nio kort från andra spelare.
-Individuellt får ni titta på nio kort från jämna spelare.
-Individuellt får ni titta på nio kort från udda spelare.
-Individuellt får ni titta på sex av mittenkorten.
-Individuellt får ni titta på sex kort från andra spelare.
-Individuellt får ni titta på sex kort från jämna spelare.
-Individuellt får ni titta på sex kort från udda spelare.
-Individuellt får ni titta på sju av mittenkorten.
-Individuellt får ni titta på sju kort från andra spelare.
-Individuellt får ni titta på sju kort från jämna spelare.
-Individuellt får ni titta på sju kort från udda spelare.
-Individuellt får ni titta på tre av mittenkorten.
-Individuellt får ni titta på tre kort från andra spelare.
-Individuellt får ni titta på tre kort från jämna spelare.
-Individuellt får ni titta på tre kort från udda spelare.
-Individuellt får ni titta på två av mittenkorten.
-Individuellt får ni titta på två kort från andra spelare.
-Individuellt får ni titta på två kort från jämna spelare.
-Individuellt får ni titta på två kort från udda spelare.
-Individuellt får ni titta på vänster grannes kort.
-Ingen krusning är garanterad, men kan fortfarande inträffa slumpmässigt.
-Ko, håll ut en hand framför dig.
-Ko, ner med handen.
-Ko, och Dubbelgångaren om du såg Kon, håll ut en hand framför dig.
-Kontrollera era märken utan att visa dem för någon annan.
-Korrekt.
-Lönnmördarnovis, vakna.
-Lakej, du får titta på deras kort.
-literal false literal true Lönnmördarnovis, somna.
-När en annan roll blir tillsagd att vakna kan du en gång under natten vakna tillsammans med dem för att iaktta vem de är och vad de gör.
-När rollen ropas upp, vakna och utför dess handling.
-Ni har endast en minut på er innan ni måste rösta.
-Om det bara finns en Varulv får du titta på ett av mittenkorten.
-Om det inte finns någon Lönnmördare: Byt ut en annan spelares märke mot Lönnmördarens märke.
-Om du gör det måste du ge det kortet till dig själv eller en annan spelare.
-Om du inte blir utröstad och det laget vinner så vinner även du.
-Om du såg Drömvargen, vakna inte men följ den rollens instruktioner.
-Om du vill får du även byta ut en annan spelares märke mot ett Rent märke.
-Om en av er röstas ut så kommer samtliga att röstas ut.
-Orakel, du vinner nu endast om du inte blir utröstad.
-Orakel, rör vid en annan spelares hand som du vill blockera.
-Oraklet är kvar i Bybornas lag.
-Oraklet är nu den rollen, och vaknar tillsammans med dem.
-Oraklet har ett jämnt spelarnummer.
-Oraklet har ett udda spelarnummer.
-Oraklet vinner nu tillsammans med det laget, men är inte den rollen och vaknar inte tillsammans med dem.
-Placera en artefakt utan att titta på den med ansiktet ner framför en annan spelare.
-Placera en Sköldbricka på en annan spelares kort.
-Renfield, identifiera Vampyrerna och byt ut ditt märke mot Renfields märke.
-Samtliga spelare, ner med tummarna.
-Spelare 1, somna.
-Spelare 1, vakna.
-Spelare 10, somna.
-Spelare 10, vakna.
-Spelare 11, somna.
-Spelare 11, vakna.
-Spelare 12, somna.
-Spelare 12, vakna.
-Spelare 13, somna.
-Spelare 13, vakna.
-Spelare 14, somna.
-Spelare 14, vakna.
-Spelare 15, somna.
-Spelare 15, vakna.
-Spelare 16, somna.
-Spelare 16, vakna.
-Spelare 17, somna.
-Spelare 17, vakna.
-Spelare 18, somna.
-Spelare 18, vakna.
-Spelare 19, somna.
-Spelare 19, vakna.
-Spelare 2, somna.
-Spelare 2, vakna.
-Spelare 20, somna.
-Spelare 20, vakna.
-Spelare 3, somna.
-Spelare 3, vakna.
-Spelare 4, somna.
-Spelare 4, vakna.
-Spelare 5, somna.
-Spelare 5, vakna.
-Spelare 6, somna.
-Spelare 6, vakna.
-Spelare 7, somna.
-Spelare 7, vakna.
-Spelare 8, somna.
-Spelare 8, vakna.
-Spelare 9, somna.
-Spelare 9, vakna.
-Spelaren är nu en Utomjording oavsett vad som händer med deras kort.
-Spelaren får inte vakna eller utföra någon handling under natten oavsett vad deras roll är.
-Spelaren vinner nu om Utomjordingarna vinner oavsett om de själva blir utröstade och vad som händer med deras kort.
-Tillsammans får ni välja en spelare vars märke ni byter ut mot Vampyrernas märke.
-Titta på ditt eget kort.
-Titta på en annan spelares kort, samt ytterligare en annan spelares märke.
-Titta på en annan spelares kort.
-Titta på ett av mittenkorten.
-Titta sedan på kortet du stal.
-Titta sedan på märket du stal.
-Utomjordingar, dra tillbaka tummarna.
-Utomjordingar, fortsätt hålla ut tummarna så att Dubbelgångaren kan se.
-Utomjordingar, håll ut en tumme så att Borgmästaren kan se.
-Utomjordingar, och Dubbelgångaren om du såg ett av Utomjordingarnas kort, vakna och identifiera varandra.
-Utomjordingar, om minst en av er är granne med Kon, rör vid Kons hand.
-Utomjordingar, rör vid en annan spelares hand som ni vill göra till en medhjälpare.
-Utomjordingar, rör vid en annan spelares hand som ni vill göra till en Utomjording.
-Utomjordingar, somna.
-Utomjordingar, vakna och identifiera varandra.
-Vänd upp en annan spelares kort.
-Vampyrer, fortsätt peka på den spelare som ni har gett Vampyrernas märke.
-Vampyrer, peka på den spelare som ni har gett Vampyrernas märke.
-Vampyrer, sluta peka.
-Vampyrer, somna.
-Vampyrer, vakna och identifiera varandra.
-Varelsen, rör handen tillhörande spelaren närmast till höger eller vänster.
-Varulvar, fortsätt hålla ut tummen så att Dubbelgångaren kan se vem ni är.
-Varulvar, fortsätt hålla ut tummen.
-Varulvar, håll ut en tumme så att Lakejen kan se vem ni är.
-Varulvar, håll ut en tumme så att Underhuggaren kan se vem ni är.
-Varulvar, med undantag för Drömvargen, vakna och identifiera varandra.
-Varulvar, ner med tummarna.
-Varulvar, somna.
-Varulvar, vakna och identifiera varandra.
-Vill du tvinga fram en krusning i rum-tiden?
-Visa era kort för varandra.
-Vill du gå med i Utomjordingarnas lag?
-Vill du gå med i Vampyrernas lag?
-Vill du gå med i Varulvarnas lag?
-Profeten tillhör nu Varulvarna.
-Profeten tillhör nu Vampyrerna.
-Profeten tillhör nu Utomjordingarna.
-Profeten tillhör nu Garvarna.
-Profeten tillhör nu Garvargesällerna.
-
-Du får dock inte vakna för att iaktta någon av följande roller: {IdentityList:listExcludedRoles,or}.
-Du får titta på kort för spelare {ValueList:players}.
-Du får titta på kort som tillhör spelare {ValueList:players}.
-Gemensamt inom laget får ni titta på kort som tillhör spelare {ValueList:players}.
-Individuellt får ni titta på kort som tillhör spelare {ValueList:players}.
-Om du ser: {IdentityList:listDangerRoles,or} måste du sluta.
-Om du ser: {IdentityList:listDangerRoles,or}, måste du sluta, och tillhör då deras lag.
-Om kortet är: {IdentityList:listHiddenRoles,or}, vänd kortet tillbaka.
-Om rollen du såg var {IdentityList:listImmediateActionRoles,or}, utför dess handling nu.
-Spelare {ValueList:players} får inte prata förrän efter omröstningen.
-Spelare {ValueList:players} får under omröstningen använda båda händerna för dubbla röster.
-Spelare {ValueList:players} måste vända sig från bordet förrän efter omröstningen.
-Spelare {ValueList:players}, utan att vakna, {LocalizedValue:question}
-{IdentityList:listDetectableRoles,and}, håll ut en tumme så att Betraktaren kan se vem ni är.
-{IdentityList:listDetectableRoles,and}, om ni har tittat på eller flyttat kort, håll ut en tumme så att Auraläsaren kan se den.
-{Identity:instigator}, somna.
-{Identity:instigator}, vakna.
-Dubbelgångare, om du såg {Identity:copiedRole,definite}, vakna.
-Dubbelgångare, om du såg {Identity:instigator,definite}, vakna.
-*/
-
-/*
-A ripple has occurred in space-time.
-A ripple is now guaranteed to occur.
-Aliens, and the Doppelganger if you saw one of the Aliens’ cards, wake up and identify each other.
-Aliens, go to sleep.
-Aliens, hold out a thumb so the Leader can see.
-Aliens, if at least one of you is sitting next to the Cow, touch the Cow’s hand.
-Aliens, keep holding out your thumbs so the Doppelganger can see.
-Aliens, put your thumbs down.
-Aliens, touch another player’s hand that you want to turn into a helper.
-Aliens, touch another player’s hand that you want to turn into an Alien.
-Aliens, wake up and identify each other.
-All other players, hold out a hand in front of you.
-All other players, regardless of previous role and team, now have only one win condition: find the Oracle.
-All players, put your hands down.
-All players, put your thumbs down.
-Apprentice Assassin, go to sleep.
-Apprentice Assassin, wake up.
-Beholder, you may look at their cards.
-Check your markers without showing them to anyone else.
-Correct.
-Cow, and the Doppelganger if you saw the Cow, hold out a hand in front of you.
-Cow, hold out a hand in front of you.
-Cow, put your hand down.
-Do not wake up when your new role is called.
-Do nothing, just stare at each other until it gets awkward.
-Do you want to force a ripple in space-time?
-Doppelganger, go to sleep.
-Doppelganger, identify the Vampires and swap your marker for Mark of Renfield.
-Doppelganger, if you saw Nostradamus, the same win condition applies to you.
-Doppelganger, if you saw one of the Vampires, wake up together with them when they are called.
-Doppelganger, if you saw one of the Werewolves other than the Dream Wolf, wake up together with them when they are called.
-Doppelganger, if you saw one of the Werewolves, wake up together with them when they are called.
-Doppelganger, if you saw the Apprentice Assassin, wake up.
-Doppelganger, you may look at their cards.
-Dream Wolf, put your thumb down.
-Dream Wolf, stick out your thumb so the other Werewolves can see who you are.
-Give your cards to the nearest Alien to your left.
-Give your cards to the nearest Alien to your right.
-Groob and Zerb, and the Doppelganger if you saw one of Groob and Zerb’s cards, wake up and identify each other.
-Groob and Zerb, hold out both thumbs.
-Groob and Zerb, wake up and identify each other.
-Guess a number between one and ten.
-Identify each other.
-Identify the Assassin.
-If one of you is voted out, the other is voted out too.
-If there is no Assassin: Swap another player’s marker for the Mark of the Assassin.
-If there is only one Werewolf, you may look at one of the center cards.
-If you are not voted out and that team wins, you win too.
-If you do, you must give that card to yourself or to another player.
-If you saw the Dream Wolf, do not wake up, but follow that role’s instructions.
-If you want, you may also swap another player’s marker for a Mark of Clarity.
-Individually, you may look at both of your neighbors’ cards.
-Individually, you may look at eight cards from even-numbered players.
-Individually, you may look at eight cards from odd-numbered players.
-Individually, you may look at eight cards from other players.
-Individually, you may look at eight of the center cards.
-Individually, you may look at five cards from even-numbered players.
-Individually, you may look at five cards from odd-numbered players.
-Individually, you may look at five cards from other players.
-Individually, you may look at five of the center cards.
-Individually, you may look at four cards from even-numbered players.
-Individually, you may look at four cards from odd-numbered players.
-Individually, you may look at four cards from other players.
-Individually, you may look at four of the center cards.
-Individually, you may look at nine cards from even-numbered players.
-Individually, you may look at nine cards from odd-numbered players.
-Individually, you may look at nine cards from other players.
-Individually, you may look at nine of the center cards.
-Individually, you may look at one card from another player.
-Individually, you may look at one card from even-numbered players.
-Individually, you may look at one card from odd-numbered players.
-Individually, you may look at one of the center cards.
-Individually, you may look at one of your neighbors’ cards.
-Individually, you may look at seven cards from even-numbered players.
-Individually, you may look at seven cards from odd-numbered players.
-Individually, you may look at seven cards from other players.
-Individually, you may look at seven of the center cards.
-Individually, you may look at six cards from even-numbered players.
-Individually, you may look at six cards from odd-numbered players.
-Individually, you may look at six cards from other players.
-Individually, you may look at six of the center cards.
-Individually, you may look at three cards from even-numbered players.
-Individually, you may look at three cards from odd-numbered players.
-Individually, you may look at three cards from other players.
-Individually, you may look at three of the center cards.
-Individually, you may look at two cards from even-numbered players.
-Individually, you may look at two cards from odd-numbered players.
-Individually, you may look at two cards from other players.
-Individually, you may look at two of the center cards.
-Individually, you may look at your left neighbor’s card.
-Individually, you may look at your own card.
-Individually, you may look at your right neighbor’s card.
-It must not be the same player.
-Leader, if you see both Groob and Zerb, you win if neither of them is voted out.
-literal false literal true Look at another player’s card, plus another player’s marker.
-Look at another player’s card.
-Look at one of the center cards.
-Look at your own card.
-Masons, and the Doppelganger if you saw one of the Masons, wake up and identify each other.
-Masons, go to sleep.
-Masons, wake up and identify each other.
-No ripple is guaranteed, but one may still occur at random.
-Observe what the other players do.
-Oracle, touch another player’s hand that you want to block.
-Oracle, you now only win if you are not voted out.
-Other players, keep holding out your thumb.
-Place a Shield token on another player’s card.
-Place an artifact face-down in front of another player without looking at it.
-Player 1, go to sleep.
-Player 1, wake up.
-Player 10, go to sleep.
-Player 10, wake up.
-Player 11, go to sleep.
-Player 11, wake up.
-Player 12, go to sleep.
-Player 12, wake up.
-Player 13, go to sleep.
-Player 13, wake up.
-Player 14, go to sleep.
-Player 14, wake up.
-Player 15, go to sleep.
-Player 15, wake up.
-Player 16, go to sleep.
-Player 16, wake up.
-Player 17, go to sleep.
-Player 17, wake up.
-Player 18, go to sleep.
-Player 18, wake up.
-Player 19, go to sleep.
-Player 19, wake up.
-Player 2, go to sleep.
-Player 2, wake up.
-Player 20, go to sleep.
-Player 20, wake up.
-Player 3, go to sleep.
-Player 3, wake up.
-Player 4, go to sleep.
-Player 4, wake up.
-Player 5, go to sleep.
-Player 5, wake up.
-Player 6, go to sleep.
-Player 6, wake up.
-Player 7, go to sleep.
-Player 7, wake up.
-Player 8, go to sleep.
-Player 8, wake up.
-Player 9, go to sleep.
-Player 9, wake up.
-Renfield, identify the Vampires and swap your marker for Mark of Renfield.
-Show your cards to each other.
-Squire, you may look at their cards.
-State whether you have an even or odd player number.
-Swap another player’s marker for the Count’s marker.
-Swap another player’s marker for the Instigator’s marker.
-Swap another player’s marker for the Mark of the Assassin.
-Swap one of your neighbors’ markers for Mark of the Diseased.
-Swap the extra card in the center for any non-Werewolf player’s card.
-Swap the positions of two other players’ cards, without looking at either.
-Swap the positions of two other players’ markers, or two other players’ cards, without looking at either.
-Swap two other players’ markers for Cupid’s marker.
-Swap your card for one of the center cards without looking at it.
-Swap your marker for a Mark of Clarity.
-Tanner, hold out a thumb so the Apprentice Tanner can see who you are.
-Tanner, keep holding out your thumb so the Doppelganger can see who you are.
-Tanner, put your thumb down.
-That player is now an Alien regardless of what happens to their card.
-That player may not wake up or perform any action during the night, regardless of their role.
-That player now wins if the Aliens win, regardless of whether they themselves are voted out and what happens to their card.
-the Oracle has an even player number.
-the Oracle has an odd player number.
-the Oracle is now that role, and wakes up together with them.
-the Oracle now wins together with that team, but is not that role and does not wake up together with them.
-the Oracle remains on the Villagers’ team.
-Then look at the card you stole.
-Then look at the marker you stole.
-Then swap your own card for the card you looked at.
-Thing, touch the hand belonging to the players nearest to your right or left.
-Together as a team, you may look at both of your neighbors’ cards.
-Together as a team, you may look at eight cards from even-numbered players.
-Together as a team, you may look at eight cards from odd-numbered players.
-Together as a team, you may look at eight cards from other players.
-Together as a team, you may look at eight of the center cards.
-Together as a team, you may look at five cards from even-numbered players.
-Together as a team, you may look at five cards from odd-numbered players.
-Together as a team, you may look at five cards from other players.
-Together as a team, you may look at five of the center cards.
-Together as a team, you may look at four cards from even-numbered players.
-Together as a team, you may look at four cards from odd-numbered players.
-Together as a team, you may look at four cards from other players.
-Together as a team, you may look at four of the center cards.
-Together as a team, you may look at nine cards from even-numbered players.
-Together as a team, you may look at nine cards from odd-numbered players.
-Together as a team, you may look at nine cards from other players.
-Together as a team, you may look at nine of the center cards.
-Together as a team, you may look at one card from another player.
-Together as a team, you may look at one card from even-numbered players.
-Together as a team, you may look at one card from odd-numbered players.
-Together as a team, you may look at one of the center cards.
-Together as a team, you may look at one of your neighbors’ cards.
-Together as a team, you may look at seven cards from even-numbered players.
-Together as a team, you may look at seven cards from odd-numbered players.
-Together as a team, you may look at seven cards from other players.
-Together as a team, you may look at seven of the center cards.
-Together as a team, you may look at six cards from even-numbered players.
-Together as a team, you may look at six cards from odd-numbered players.
-Together as a team, you may look at six cards from other players.
-Together as a team, you may look at six of the center cards.
-Together as a team, you may look at three cards from even-numbered players.
-Together as a team, you may look at three cards from odd-numbered players.
-Together as a team, you may look at three cards from other players.
-Together as a team, you may look at three of the center cards.
-Together as a team, you may look at two cards from even-numbered players.
-Together as a team, you may look at two cards from odd-numbered players.
-Together as a team, you may look at two cards from other players.
-Together as a team, you may look at two of the center cards.
-Together as a team, you may look at your left neighbor’s card.
-Together as a team, you may look at your own card.
-Together as a team, you may look at your right neighbor’s card.
-Together, choose a player whose marker you swap for Bite of the Vampire.
-Turn another player’s card face up.
-Vampires, go to sleep.
-Vampires, keep pointing at the player you have given the Vampires’ marker.
-Vampires, point at the player you have given the Vampires’ marker.
-Vampires, stop pointing.
-Vampires, wake up and identify each other.
-Werewolves, except for the Dream Wolf, wake up and identify each other.
-Werewolves, go to sleep.
-Werewolves, hold out a thumb so the Minion can see who you are.
-Werewolves, hold out a thumb so the Squire can see who you are.
-Werewolves, keep holding out your thumb so the Doppelganger can see who you are.
-Werewolves, keep holding out your thumb.
-Werewolves, put your thumbs down.
-Werewolves, wake up and identify each other.
-When that role is called, wake up and perform its action.
-Whenever another role is told to wake up, you may wake up with them once during the night to observe who they are and what they do.
-Wrong.
-You are now the role you saw.
-You have only one minute left before you must vote.
-You may choose to look at one of the center cards.
-You may choose to move every player’s card one step to the left, to the right, or not at all.
-You may choose to steal another player’s card and replace it with your own.
-You may choose to steal another player’s marker and replace it with your own.
-You may look at another player’s card, or two of the center cards.
-You may look at another player’s card.
-You may look at both of your neighbors’ cards.
-You may look at eight cards from even-numbered players.
-You may look at eight cards from odd-numbered players.
-You may look at eight cards from other players.
-You may look at eight of the center cards.
-You may look at five cards from even-numbered players.
-You may look at five cards from odd-numbered players.
-You may look at five cards from other players.
-You may look at five of the center cards.
-You may look at four cards from even-numbered players.
-You may look at four cards from odd-numbered players.
-You may look at four cards from other players.
-You may look at four of the center cards.
-You may look at nine cards from even-numbered players.
-You may look at nine cards from odd-numbered players.
-You may look at nine cards from other players.
-You may look at nine of the center cards.
-You may look at one card from another player.
-You may look at one card from even-numbered players.
-You may look at one card from odd-numbered players.
-You may look at one of the center cards.
-You may look at one of your neighbors’ cards.
-You may look at one to three other players’ cards.
-You may look at one to two other players’ cards.
-You may look at seven cards from even-numbered players.
-You may look at seven cards from odd-numbered players.
-You may look at seven cards from other players.
-You may look at seven of the center cards.
-You may look at six cards from even-numbered players.
-You may look at six cards from odd-numbered players.
-You may look at six cards from other players.
-You may look at six of the center cards.
-You may look at three cards from even-numbered players.
-You may look at three cards from odd-numbered players.
-You may look at three cards from other players.
-You may look at three of the center cards.
-You may look at two cards from even-numbered players.
-You may look at two cards from odd-numbered players.
-You may look at two cards from other players.
-You may look at two of the center cards.
-You may look at your left neighbor’s card.
-You may look at your own card.
-You may look at your right neighbor’s card.
-You may turn over eight of the center cards.
-You may turn over five of the center cards.
-You may turn over four of the center cards.
-You may turn over nine of the center cards.
-You may turn over one of the center cards.
-You may turn over seven of the center cards.
-You may turn over six of the center cards.
-You may turn over three of the center cards.
-You may turn over two of the center cards.
-You must prevent the nearest four player to your left and nearest four player to your right from being voted out.
-You must prevent the nearest four player to your left and nearest player to your right from being voted out.
-You must prevent the nearest four player to your left and nearest three player to your right from being voted out.
-You must prevent the nearest four player to your left and nearest two player to your right from being voted out.
-You must prevent the nearest player to your left and nearest four player to your right from being voted out.
-You must prevent the nearest player to your left and nearest player to your right from being voted out.
-You must prevent the nearest player to your left and nearest three player to your right from being voted out.
-You must prevent the nearest player to your left and nearest two player to your right from being voted out.
-You must prevent the nearest three player to your left and nearest four player to your right from being voted out.
-You must prevent the nearest three player to your left and nearest player to your right from being voted out.
-You must prevent the nearest three player to your left and nearest three player to your right from being voted out.
-You must prevent the nearest three player to your left and nearest two player to your right from being voted out.
-You must prevent the nearest two player to your left and nearest four player to your right from being voted out.
-You must prevent the nearest two player to your left and nearest player to your right from being voted out.
-You must prevent the nearest two player to your left and nearest three player to your right from being voted out.
-You must prevent the nearest two player to your left and nearest two player to your right from being voted out.
-You must prevent the player nearest to your left from being voted out.
-You must prevent the player nearest to your right from being voted out.
-You need only to prevent yourself from being voted out.
-Your new card also becomes an Alien.
-Nostradamus now belongs to the Tanners.
-Nostradamus now belongs to the Apprentice Tanners.
-Nostradamus now belongs to the Werewolves.
-Nostradamus now belongs to the Vampires.
-Nostradamus now belongs to the Aliens.
-Do you want to join the Werewolves' team?
-Do you want to join the Vampires' team?
-Do you want to join the Aliens' team?
-
-Doppelganger, if you saw {Identity:copiedRole,definite}, wake up.
-Doppelganger, if you saw {Identity:instigator,definite}, wake up.
-However, you may not wake up to observe any of the following roles: {IdentityList:listExcludedRoles,or}.
-If the card is: {IdentityList:listHiddenRoles,or}, turn the card back face down.
-If the role you saw was {IdentityList:listImmediateActionRoles,or}, perform its action now.
-If you see: {IdentityList:listDangerRoles,or}, you must stop, and will join their team.
-If you see: {IdentityList:listDangerRoles,or}, you must stop.
-Individually, you may look at the card belonging to player {ValueList:players}.
-Individually, you may look at the cards belonging to players {ValueList:players}.
-Player {ValueList:players} may not speak until after the vote.
-Player {ValueList:players} may use both hands when voting, for double votes.
-Player {ValueList:players} must turn away from the table until after the vote.
-Player {ValueList:players}, without waking up, {LocalizedValue:question}
-Players {ValueList:players} may not speak until after the vote.
-Players {ValueList:players} may use both hands when voting, for double votes.
-Players {ValueList:players} must turn away from the table until after the vote.
-Players {ValueList:players}, without waking up, {LocalizedValue:question}
-Together as a team, you may look at the card belonging to player {ValueList:players}.
-Together as a team, you may look at the cards belonging to players {ValueList:players}.
-You may look at the card belonging to player {ValueList:players}.
-You may look at the cards belonging to players {ValueList:players}.
-{Identity:instigator}, go to sleep.
-{Identity:instigator}, wake up.
-{IdentityList:listDetectableRoles,and}, hold out a thumb so the Beholder can see who you are.
-{IdentityList:listDetectableRoles,and}, if you looked at or moved a card, hold out a thumb so the Aura Seer can see it.
-*/

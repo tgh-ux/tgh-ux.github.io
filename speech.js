@@ -10,6 +10,11 @@
  * "resume" / "stop" / "select this input value", plus the progress callbacks below. The engine boundary exists so the underlying engine
  * (currently the browser's Web Speech API) can be swapped later without touching anything outside this file - voice availability for some
  * languages (e.g. Swedish) is inconsistent across browsers, and that's expected to be the reason this gets revisited.
+ *
+ * A text segment's audio is sourced with this priority: one whole-sentence pre-recorded clip first (see _playClip, TTSManifest.lookup - the
+ * same lookup that predates splicing), then spliced pre-recorded clips grouped from Interpreter-provided clipParts atoms (see
+ * _playClipSequence, TTSManifest.lookupParts - which also decides how many atoms share one recording) if no whole-sentence recording
+ * exists, then synthesized speech as the final fallback. Whole-sentence-first rather than splice-first is deliberate - see _speakText.
  */
 
 const Speech = (() => {
@@ -109,6 +114,56 @@ const Speech = (() => {
 		};
 
 		audio.play();
+	}
+
+	/*
+	 * Plays an ordered list of pre-recorded clip URLs back-to-back as one spoken segment, chaining each clip's
+	 * onended into starting the next - mirrors _playClip's single-clip shape, but for spliced audio built from
+	 * several individually-recorded atoms (see Interpreter's clipParts / TTSManifest.lookupParts). Reuses
+	 * _activeAudio the same way _playClip does - whichever clip is currently playing within the sequence - so
+	 * pause()/resume()/_reset() keep working across a multi-clip segment with no changes of their own.
+	 *
+	 * If any clip in the sequence fails to play, the whole sequence aborts and falls back to synthesizing the
+	 * segment's full plain text from scratch (not just the remaining clips) - the same all-or-nothing rule
+	 * TTSManifest.lookupParts already applies at lookup time; a playback failure partway through is treated the
+	 * same way a lookup miss would have been, rather than risking a synthesized voice mid-splice.
+	 *
+	 *   urls       - the clip URLs to play in order, as returned by TTSManifest.lookupParts.
+	 *   value      - the segment's full plain text, kept only so a playback failure can fall back to speaking it.
+	 *   generation - session generation guard, as elsewhere.
+	 *   onDone     - invoked with no arguments once every clip finishes (or, on failure, once the TTS fallback finishes).
+	 */
+	function _playClipSequence(urls, value, generation, onDone) {
+		let index = 0;
+
+		const playNext = () => {
+			if (generation !== _generation) return;
+
+			if (index >= urls.length) {
+				onDone();
+				return;
+			}
+
+			const audio = new Audio(urls[index]);
+			_activeAudio = audio;
+			index++;
+
+			audio.onended = () => {
+				if (generation === _generation) {
+					_activeAudio = null;
+					playNext();
+				}
+			};
+			audio.onerror = () => {
+				console.warn("Spliced clip playback failed, falling back to speech synthesis:", urls[index - 1]);
+				_activeAudio = null;
+				if (generation === _generation) _speakTextAsUtterance(value, generation, onDone);
+			};
+
+			audio.play();
+		};
+
+		playNext();
 	}
 	
 	/*
@@ -220,7 +275,7 @@ const Speech = (() => {
 		if (segment.type === "text") {
 			_phase = "speaking";
 			callbacks.onSpeaking(segment.value);
-			_speakText(segment.value, generation, advance);
+			_speakText(segment, generation, advance);
 		} else if (segment.type === "pause") {
 			_startWait(segment.duration, generation, callbacks.onPause, advance);
 		} else if (segment.type === "input") {
@@ -324,15 +379,38 @@ const Speech = (() => {
 	 * Speaks a single text segment, calling onDone once speech actually finishes (or errors out). Always asynchronous, so the sequence walk
 	 * above stays a plain chain of callbacks regardless of segment type.
 	 *
-	 *   value      - the text to speak.
+	 * Three narration sources are tried in order, each falling through to the next: a single whole-sentence pre-recorded clip is tried
+	 * first (see _playClip, TTSManifest.lookup) - the same lookup that predates splicing, unconditional on which primitives produced the
+	 * text. Only when that misses does a segment with clipParts (automatic mode only - see Interpreter's _toSequenceFromAtoms) try spliced
+	 * clips, one per atom (see _playClipSequence, TTSManifest.lookupParts). Failing both, synthesized speech is the final fallback.
+	 *
+	 * Deliberately whole-sentence-first rather than splice-first: recording a sentence whole (when it only has a handful of possible
+	 * outcomes, e.g. a Value with 1-2 variants) gets better natural prosody than concatenated fragments, and this ordering means that
+	 * choice is made entirely by what gets recorded and added to the manifest, not by anything in code - a key doesn't need to be marked
+	 * "safe to splice" anywhere. Reusable fragments (role names, fixed suffixes like ", vakna.", "och"/"eller") only ever get spliced
+	 * together for sentences that were never recorded whole in the first place.
+	 *
+	 *   segment    - the text segment to speak: { type: "text", value[, clipParts] }, as produced by Interpreter.
 	 *   generation - session generation guard, as in _playTurn.
 	 *   onDone     - invoked with no arguments once speech ends, successfully or via error.
 	 */
-	function _speakText(value, generation, onDone) {
+	function _speakText(segment, generation, onDone) {
+		const { value, clipParts } = segment;
+
 		const clipUrl = TTSManifest.lookup(value);
 		if (clipUrl) {
 			_playClip(clipUrl, value, generation, onDone);
 			return;
+		}
+
+		if (clipParts && clipParts.length > 0) {
+			const urls = TTSManifest.lookupParts(clipParts);
+			if (urls) {
+				_playClipSequence(urls, value, generation, onDone);
+				return;
+			}
+			// Some atom in this segment has no recording yet either - fall through to synthesis rather than
+			// mixing recorded and synthesized audio within one sentence.
 		}
 
 		_speakTextAsUtterance(value, generation, onDone);

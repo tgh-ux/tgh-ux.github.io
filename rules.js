@@ -229,7 +229,7 @@ const Rules = (() => {
 				{ weight: Settings.getValue("oracle.even_odd"), data: { type: "oracle_announce_even_odd", defaultEvenOdd: Math.random() > 0.5 ? "even" : "odd" } },
 			];
 			
-			if (ctx.isTeamPresent("TEAM_ALIEN"))
+			if (ctx.isTeamPresent("TEAM_ALIEN") || ctx.isRolePresent("SYNTHETICALIEN"))
 				choices.push({ weight: Settings.getValue("oracle.force_ripple"), data: { type: "oracle_force_ripple", defaultRippleForce: false } });
 			
 			// Calculate hunt event
@@ -242,6 +242,8 @@ const Rules = (() => {
 			const availableTeams = [];
 			[ "TEAM_WEREWOLF", "TEAM_VAMPIRE", "TEAM_ALIEN" ].forEach((t) => { 
 				if (ctx.isTeamPresent(t))
+					availableTeams.push(t);
+				else if (t === "TEAM_ALIEN" && ctx.isRolePresent("SYNTHETICALIEN"))
 					availableTeams.push(t);
 			});
 			
@@ -352,8 +354,8 @@ const Rules = (() => {
 				{ weight: Settings.getValue("ripple.drunk"), data: { type: "ripple_role_action", role: "DRUNK", player: rndPlayers[0] } },
 				{ weight: Settings.getValue("ripple.muted"), data: { type: "ripple_mute", players: rndEffectPlayers, count: rndEffectPlayers.length } },
 				{ weight: Settings.getValue("ripple.rebuked"), data: { type: "ripple_rebuked", players: rndEffectPlayers, count: rndEffectPlayers.length } },
-				{ weight: Settings.getValue("ripple.view_player"), data: { type: "ripple_view_player", player: rndPlayers[0], players: rndPlayers.slice(-1), count: 1 } },
-				{ weight: Settings.getValue("ripple.dual_view_player"), data: { type: "ripple_view_player", player: rndPlayers[0], players: rndPlayers.slice(-2), count: 2 } },
+				{ weight: Settings.getValue("ripple.view_player"), data: { type: "ripple_view_player", count: 1, target: "player", restriction: "specific", player: rndPlayers[0], players: rndPlayers.slice(-1), count: 1 } },
+				{ weight: Settings.getValue("ripple.dual_view_player"), data: { type: "ripple_view_player", count: 2, target: "player", restriction: "specific", player: rndPlayers[0], players: rndPlayers.slice(-2), count: 2 } },
 				{ weight: Settings.getValue("ripple.double_vote"), data: { type: "ripple_double_vote", players: rndEffectPlayers, count: rndEffectPlayers.length } },
 			];
 			choices.push({ weight: Settings.getValue("ripple.none"), data: { type: "none" } });	// Ensure that this entry is always last so that the backup ripple can exclude it
@@ -527,7 +529,7 @@ const Rules = (() => {
 			action: "WEREWOLF_TEAM",
 			instigator: "TEAM_WEREWOLF",
 			condition: ctx => ctx.isAnyRolePresent("WEREWOLF", "ALPHAWOLF", "MYSTICWOLF"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), hasDreamWolf: ctx.isRolePresent("DREAMWOLF") })
+			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), hasDreamWolf: ctx.isRolePresent("DREAMWOLF") }),
 		},
 		{
 			action: "ALPHAWOLF",
@@ -537,7 +539,8 @@ const Rules = (() => {
 		{
 			action: "MYSTICWOLF",
 			instigator: "ROLE_MYSTICWOLF",
-			condition: ctx => ctx.isRolePresent("MYSTICWOLF")
+			condition: ctx => ctx.isRolePresent("MYSTICWOLF"),
+			resolveData: ctx => ({ type: "view_card", target: "player", restriction: "any", count: 1 }),
 		},
 		{
 			action: "MINION",
@@ -576,7 +579,8 @@ const Rules = (() => {
 		{
 			action: "APPRENTICESEER",
 			instigator: "ROLE_APPRENTICESEER",
-			condition: ctx => ctx.isRolePresent("APPRENTICESEER")
+			condition: ctx => ctx.isRolePresent("APPRENTICESEER"),
+			resolveData: ctx => ({ type: "view_card", target: "center", restriction: "any", count: 1 }),
 		},
 		{
 			action: "PARANORMALINVESTIGATOR",
@@ -782,7 +786,7 @@ const Rules = (() => {
 		{
 			action: "RIPPLE",
 			instigator: "INSTIGATOR_MISSING",
-			condition: ctx => ctx.isTeamPresent("TEAM_ALIEN"),
+			condition: ctx => ctx.isTeamPresent("TEAM_ALIEN") || ctx.isRolePresent("SYNTHETICALIEN"),
 			resolver: "RippleResolver",
 		},
 		{

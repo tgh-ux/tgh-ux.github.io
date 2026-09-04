@@ -80,7 +80,7 @@ const Settings = (() => {
 		evilTeamPresent: (context) => {
 			if (!context?.selectedRoles) return true; // no context supplied — fail open, see below
 			return [...context.selectedRoles.keys()].some(id =>
-				Roles.isTeam(id, "TEAM_WEREWOLF") || Roles.isTeam(id, "TEAM_VAMPIRE") || Roles.isTeam(id, "TEAM_ALIEN")
+				Roles.isTeam(id, "TEAM_WEREWOLF") || Roles.isTeam(id, "TEAM_VAMPIRE") || Roles.isTeam(id, "TEAM_ALIEN") || id === "SYNTHETICALIEN"
 			);
 		},
 		alienTeamPresent: (context) => {

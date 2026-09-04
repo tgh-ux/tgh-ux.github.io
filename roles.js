@@ -669,6 +669,12 @@ const Roles = (() => {
 	 *   - freezing the finished objects
 	 */
 	function _init() {
+		//TEMPORARY DISABLE COMPLETED ROLES WHILE RECORDING TTS
+		["ASSASSIN", "APPRENTICEASSASSIN", "BEHOLDER", "APPRENTICESEER", "EXPOSER", "SEER", "ALPHAWOLF", "CUPID", "INSTIGATOR", "REVEALER", "DRUNK", "TROUBLEMAKER", "VILLAGEIDIOT", "PICKPOCKET", "COUNT", "WITCH", "COPYCAT", "CURATOR", "PRIEST", "DISEASED", "MARKSMAN", "PARANORMALINVESTIGATOR", "INSOMNIAC", "ROBBER", "GREMLIN", "THING", "SENTINEL"].forEach((role) => {
+			ROLES[role].disabled = true;
+		});
+		
+		
 		_applyTags();
 		_applyTeams();
 		_applyPhases();

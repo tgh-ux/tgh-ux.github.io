@@ -26,6 +26,11 @@
  * {AutoKey:manualKey,autoKey} exists for content that needs to diverge between the two modes at a point deeper than a turn's own entry point
  * (_entryPointKey's PROMPT_AUTO_ fallback only ever fires once, before any resolving has started) - e.g. one arm of a Select needing an introductory
  * line for automatic playback that manual narration has no equivalent for.
+ *
+ * In automatic mode, a text segment additionally carries clipParts: an ordered breakdown of which localization sub-expressions produced it
+ * (see Localization.localizeWithAtoms and _toSequenceFromAtoms), letting Speech attempt spliced pre-recorded audio - e.g. a role's name clip
+ * plus a shared ", vakna." clip - instead of one recording per whole sentence, and falling back to synthesizing the segment's plain text
+ * whenever any part of it isn't recorded yet. This falls entirely out of how templates already resolve; no localization data changes.
  */
 
 const Interpreter = (() => {
@@ -293,11 +298,19 @@ const Interpreter = (() => {
 	 *   text      - fully template-resolved text, still containing CONTROL_MARKER sentinels for any Pause/Break/Input it used.
 	 *   sideTable - array of input-node data built up by _makeInputPrimitive during this same resolution pass, indexed by the marker's id; null
 	 *               in manual mode.
+	 *   atoms     - optional atom breakdown from Localization.localizeWithAtoms, for automatic-mode audio splicing (see
+	 *               _toSequenceFromAtoms). When present, this delegates entirely to that path instead - text/sideTable alone can't recover
+	 *               atom boundaries once they're merged into one flat string. null (the default, and always the case in manual mode) keeps
+	 *               today's plain text-splitting behavior unchanged.
 	 *
-	 * Returns the segment array: a mix of { type: "text", value }, { type: "pause", duration }, and (automatic mode only) input nodes as
-	 * built by _buildInputNode.
+	 * Returns the segment array: a mix of { type: "text", value[, clipParts] }, { type: "pause", duration }, and (automatic mode only) input
+	 * nodes as built by _buildInputNode. clipParts is only ever present when atoms was supplied - see _toSequenceFromAtoms.
 	 */
-	function _toSequence(text, sideTable) {
+	function _toSequence(text, sideTable, atoms = null) {
+		return atoms ? _toSequenceFromAtoms(atoms, sideTable) : _toSequenceFromText(text, sideTable);
+	}
+
+	function _toSequenceFromText(text, sideTable) {
 		const parts = text.split(CONTROL_MARKER);
 		const seq = [];
 
@@ -318,6 +331,100 @@ const Interpreter = (() => {
 		}
 
 		return seq;
+	}
+
+	/*
+	 * Same job as _toSequenceFromText - splitting a turn's resolved narration into text/pause/input segments - but driven directly by
+	 * Localization's atom list instead of the already-flattened text, so each resulting "text" segment can additionally carry clipParts:
+	 * the ordered sub-list of atoms that made it up. Speech uses clipParts to try playing individually pre-recorded clips spliced together
+	 * (e.g. a role-name clip plus a shared ", vakna." clip) before falling back to synthesizing the segment's plain text - see
+	 * TTSManifest.lookupParts / Speech._speakText. Only ever used in automatic mode; manual mode has no use for spliced audio and keeps
+	 * calling _toSequenceFromText via _toSequence's atoms=null default.
+	 *
+	 * A Pause/Break/Input marker is always emitted by its primitive as the *entire* content of one atom (see the module comment on
+	 * boundaries always landing on primitive-call edges - a marker primitive is never called with literal text glued directly against it
+	 * without at least the whitespace/punctuation that already separates every {...} usage in the authored strings), so each atom needs
+	 * checking against CONTROL_MARKER individually rather than needing a text-level split first.
+	 *
+	 * An individual atom can still contain an internal sentence boundary - most commonly a literal suffix like ", vakna." that closes out
+	 * one sentence with nothing else following it in its own {...} expression - so atoms are walked and split on sentence-ending
+	 * punctuation the same way _splitSentences does for flat text, just incrementally.
+	 *
+	 *   atoms     - ordered list of { text } chunks from Localization.localizeWithAtoms.
+	 *   sideTable - as in _toSequenceFromText.
+	 *
+	 * Returns the segment array in the same shape as _toSequenceFromText, with clipParts (an ordered, trimmed, non-empty, punctuation-only
+	 * entries excluded, list of { text } atoms reconstructing the segment) added to every "text" segment.
+	 */
+	function _toSequenceFromAtoms(atoms, sideTable) {
+		const seq = [];
+		let sentenceAtoms = [];
+		let sentenceText = "";
+
+		const flushSentence = () => {
+			if (sentenceText.trim() !== "") {
+				seq.push({
+					type: "text",
+					value: Localization.normalizeText(sentenceText),
+					clipParts: sentenceAtoms
+						.map(a => ({ text: a.text.trim() }))
+						.filter(a => /[\p{L}\p{N}]/u.test(a.text)), // drop bare punctuation/glue - nothing to speak, nothing to look up
+				});
+			}
+			sentenceAtoms = [];
+			sentenceText = "";
+		};
+
+		for (const atom of atoms) {
+			const markerMatch = CONTROL_MARKER.exec(atom.text);
+			if (markerMatch && markerMatch[0] === atom.text) {
+				flushSentence(); // a marker always ends whatever sentence was building up to it
+				const pauseDuration = markerMatch[1];
+				const inputId = markerMatch[2];
+
+				if (pauseDuration !== undefined)
+					seq.push({ type: "pause", duration: Number(pauseDuration) });
+				else if (inputId !== undefined)
+					seq.push(_buildInputNode(sideTable[Number(inputId)]));
+				// else: a Break matched - already flushed above, no segment of its own.
+				continue;
+			}
+
+			let remaining = atom.text;
+			while (remaining !== "") {
+				const boundary = _firstSentenceBoundary(remaining);
+				if (boundary === -1) {
+					sentenceAtoms.push({ text: remaining });
+					sentenceText += remaining;
+					break;
+				}
+
+				const head = remaining.slice(0, boundary);
+				sentenceAtoms.push({ text: head });
+				sentenceText += head;
+				flushSentence();
+				remaining = remaining.slice(boundary);
+			}
+		}
+		flushSentence();
+
+		return seq;
+	}
+
+	/*
+	 * Finds the first sentence-ending boundary in text (a '.', '?' or '!' - same punctuation _splitSentences treats as sentence-ending),
+	 * mirroring _splitSentences' own heuristic but returning a split *index* instead of an array, so _toSequenceFromAtoms can walk one
+	 * atom's text incrementally rather than needing the whole sentence already assembled.
+	 *
+	 * text - the (partial) atom text to scan.
+	 *
+	 * Returns the index right after the punctuation mark (i.e. text.slice(0, boundary) is the sentence-ending chunk, including its
+	 * punctuation but not yet trimmed of trailing whitespace - that happens later via Localization.normalizeText), or -1 if text contains
+	 * no sentence-ending punctuation at all.
+	 */
+	function _firstSentenceBoundary(text) {
+		const match = text.match(/[.?!]/);
+		return match ? match.index + 1 : -1;
 	}
 
 	/*
@@ -545,13 +652,15 @@ const Interpreter = (() => {
 	function _resolveAutomaticSequence(key, data) {
 		const sideTable = [];
 		const primitives = { ...PRIMITIVES, Input: _makeInputPrimitive("automatic", sideTable), AutoKey: _makeAutoKeyPrimitive("automatic") };
-		const resolved = Localization.localize(key, primitives, data, (type, k) => {
+		const { text, atoms } = Localization.localizeWithAtoms(key, primitives, data, (type, k) => {
 			if (type === "max_iterations")
 				throw new Error(`_resolveTemplate: max resolution iterations reached for '${key}'`);
 			console.warn(`Missing localization key: ${k}`);
 			return `UNDEF: ${k}`;
 		});
-		return _toSequence(resolved, sideTable);
+		// atoms is null only if resolution hit max_iterations above (which throws before returning) - so in
+		// practice it's always present here, but _toSequence's atoms=null fallback covers it defensively either way.
+		return _toSequence(text, sideTable, atoms);
 	}
 	
 	
@@ -636,6 +745,7 @@ const Interpreter = (() => {
 		resolveDeferredInput,
 		sequenceToText,
 		refreshPauseSettings,
+		PRIMITIVES
 	};
 
 })();
