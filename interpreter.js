@@ -138,6 +138,10 @@ const Interpreter = (() => {
 		},
 
 		// {ValueList:field[,join]} — field holds an array of display-ready values (e.g. player numbers). No per-item resolution, just joins.
+		// Each item is wrapped via Literal (see below) rather than embedded as raw text, so it gets its own {...} boundary the same way
+		// IdentityList's `{${id}}` role references do - without that, _joinList's plain `.join(", ")` for 3+ items would glue leading
+		// items together as one un-splittable run of literal text (e.g. "2, 5, " as a single atom), since nothing marks where one
+		// item's text ends and the next begins once they're already resolved strings sitting side by side.
 		ValueList: (data, field, join = "and") => {
 			const list = data[field];
 			if (!Array.isArray(list))
@@ -145,8 +149,14 @@ const Interpreter = (() => {
 			if (list.length === 0)
 				return "";
 
-			return _joinList(list.map(String), join);
+			return _joinList(list.map(v => `{Literal:${v}}`), join);
 		},
+
+		// {Literal:value} — returns `value` as-is (already display-ready, needs no lookup). Exists purely so a value can still get its
+		// own atom boundary during resolution (see ValueList above) even though there's no key to look up - _resolveTemplateCore only
+		// ever splits at a {...} match, so a bare value with nothing wrapping it would otherwise just merge into whatever literal text
+		// surrounds it.
+		Literal: (data, value) => String(value),
 
 		// {If:field,keyTrue[,keyFalse]} — insert `keyTrue` iff data[field] is truthy, else keyFalse if provided, or empty string. Accepts localization keys as well as string literals
 		If: (data, field, keyTrue, keyFalse) => {
@@ -745,7 +755,6 @@ const Interpreter = (() => {
 		resolveDeferredInput,
 		sequenceToText,
 		refreshPauseSettings,
-		PRIMITIVES
 	};
 
 })();

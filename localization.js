@@ -160,12 +160,12 @@ const Localization = (() => {
 			COMMON: "{Select:type,do_nothing,PROMPT_ALIEN_TEAM_ACTION_NOTHING,make_alien,PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN,make_alien_minion,PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION,show_team_cards,PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS,trade_team_cards,PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS,view_card_collective,PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE,view_card_individual,PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL}",
 		},
 		PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN: {
-			ENG: "All other players, hold out a hand in front of you. {TEAM_ALIEN_PLURAL}, touch another player's hand that you want to turn into an {TEAM_ALIEN}. {Pause:short} That player is now an {TEAM_ALIEN} regardless of what happens to their card. All players, put your hands down.",
-			SWE: "Alla andra spelare, håll ut en hand framför er. {TEAM_ALIEN_PLURAL}, rör vid en annan spelares hand som ni vill göra till en {TEAM_ALIEN}. {Pause:short} Spelaren är nu en {TEAM_ALIEN} oavsett vad som händer med deras kort. Alla spelare, ner med händerna.",
+			ENG: "All other players, hold out a hand in front of you. {TEAM_ALIEN_PLURAL}, touch another player's hand. {Pause:short} That player is now an {TEAM_ALIEN} regardless of what happens to their card. All players, put your hands down.",
+			SWE: "Alla andra spelare, håll ut en hand framför er. {TEAM_ALIEN_PLURAL}, rör vid en annan spelares hand. {Pause:short} Spelaren är nu en {TEAM_ALIEN} oavsett vad som händer med deras kort. Alla spelare, ner med händerna.",
 		},
 		PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION: {
-			ENG: "All other players, hold out a hand in front of you. {TEAM_ALIEN_PLURAL}, touch another player's hand that you want to turn into a helper. {Pause:short} That player now wins if {TEAM_ALIEN_PLURAL_DEFINITE} win, regardless of whether they themselves are voted out and what happens to their card. All players, put your hands down.",
-			SWE: "Alla andra spelare, håll ut en hand framför er. {TEAM_ALIEN_PLURAL}, rör vid en annan spelares hand som ni vill göra till en medhjälpare. {Pause:short} Spelaren vinner nu om {TEAM_ALIEN_PLURAL_DEFINITE} vinner oavsett om de själva blir utröstade och vad som händer med deras kort. Alla spelare, ner med händerna.",
+			ENG: "All other players, hold out a hand in front of you. {TEAM_ALIEN_PLURAL}, touch another player's hand. {Pause:short} That player now wins if {TEAM_ALIEN_PLURAL_DEFINITE} win, regardless of whether they themselves are voted out and what happens to their card. All players, put your hands down.",
+			SWE: "Alla andra spelare, håll ut en hand framför er. {TEAM_ALIEN_PLURAL}, rör vid en annan spelares hand. {Pause:short} Spelaren vinner nu om {TEAM_ALIEN_PLURAL_DEFINITE} vinner oavsett om de själva blir utröstade och vad som händer med deras kort. Alla spelare, ner med händerna.",
 		},
 		PROMPT_ALIEN_TEAM_ACTION_NOTHING: {
 			ENG: "Do nothing, just stare at each other until it gets awkward. {Pause:short}",
@@ -262,12 +262,12 @@ const Localization = (() => {
 			SWE: "Du behöver enbart förhindra att du själv blir utröstad.",
 		},
 		PROMPT_BLOB_OBJECTIVE_MULTI: {
-			ENG: "You must prevent the nearest {Select:blobLeft,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your left and nearest {Select:blobRight,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your right from being voted out.",
-			SWE: "Du måste förhindra att närmaste {Select:blobLeft,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till vänster och närmaste {Select:blobRight,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till höger blir utröstade.",
+			ENG: "You must prevent that you, the nearest {Select:blobLeft,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your left, and nearest {Select:blobRight,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your right from being voted out.",
+			SWE: "Du måste förhindra att du själv, närmaste {Select:blobLeft,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till vänster, och närmaste {Select:blobRight,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till höger blir utröstade.",
 		},
 		PROMPT_BLOB_OBJECTIVE_SINGLE: {
-			ENG: "You must prevent the player nearest to your {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT} from being voted out.",
-			SWE: "Du måste förhindra att spelaren närmast till {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT} blir utröstad.",
+			ENG: "You must prevent that you and the nearest player to your {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT} from being voted out.",
+			SWE: "Du måste förhindra att du själv och närmaste spelare till {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT} blir utröstade.",
 		},
 		PROMPT_BODYSNATCHER: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_BODYSNATCHER_ACTION} {PROMPT_SLEEP_CALL}",
@@ -782,8 +782,8 @@ const Localization = (() => {
 			SWE: "{ROLE_FEUDINGALIENS_PLURAL}, {If:hasDoppelganger,PROMPT_FEUDINGALIENS_DOPPELGANGER} vakna och identifiera varandra. {Pause:short} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_FEUDINGALIENS_DOPPELGANGER: {
-			ENG: "and {ROLE_DOPPELGANGER_DEFINITE} if you saw one of {ROLE_FEUDINGALIENS_PLURAL_DEFINITE_GENITIVE} cards,",
-			SWE: "och {ROLE_DOPPELGANGER_DEFINITE} om du såg ett av {ROLE_FEUDINGALIENS_PLURAL_DEFINITE_GENITIVE} kort,",
+			ENG: "and {ROLE_DOPPELGANGER_DEFINITE} if you saw one of their cards,",
+			SWE: "och {ROLE_DOPPELGANGER_DEFINITE} om du såg ett av deras kort,",
 		},
 		PROMPT_GREMLIN: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_GREMLIN_ACTION} {PROMPT_SLEEP_CALL}",
@@ -807,12 +807,12 @@ const Localization = (() => {
 			SWE: "Byt ut en annan spelares märke mot {ROLE_INSTIGATOR_DEFINITE_GENITIVE} märke. {Pause:short}",
 		},
 		PROMPT_LEADER: {
-			ENG: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, hold out a thumb so {ROLE_LEADER_DEFINITE} can see. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, put your thumbs down.",
-			SWE: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, håll ut en tumme så att {ROLE_LEADER_DEFINITE} kan se. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, ner med tummarna.",
+			ENG: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, hold out a thumb so {ROLE_LEADER_DEFINITE} can see who you are. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, put your thumbs down.",
+			SWE: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, håll ut en tumme så att {ROLE_LEADER_DEFINITE} kan se vem ni är. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, ner med tummarna.",
 		},
 		PROMPT_LEADER_DOPPELGANGER: {
-			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_ALIEN_PLURAL}, keep holding out your thumbs so {ROLE_DOPPELGANGER_DEFINITE} can see. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_ALIEN_PLURAL}, fortsätt hålla ut tummarna så att {ROLE_DOPPELGANGER_DEFINITE} kan se. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_ALIEN_PLURAL}, keep holding out your thumbs. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_ALIEN_PLURAL}, fortsätt hålla ut tummarna. {Pause:short} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
 		},
 		PROMPT_LEADER_FEUDINGALIENS: {
 			ENG: "{ROLE_FEUDINGALIENS_PLURAL}, hold out both thumbs. {ROLE_LEADER}, if you see both {ROLE_FEUDINGALIENS_DEFINITE}, you win if neither of them is voted out.",
@@ -1052,7 +1052,7 @@ const Localization = (() => {
 		},
 		PROMPT_RIPPLE_REBUKED: {
 			ENG: "{Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players} must turn away from the table until after the vote.",
-			SWE: "Spelare {ValueList:players} måste vända sig från bordet förrän efter omröstningen.",
+			SWE: "Spelare {ValueList:players} måste vända sig från bordet fram till efter omröstningen.",
 		},
 		PROMPT_RIPPLE_ROLE_ACTION: {
 			ENG: "Player {Value:player}, wake up. {PROMPT_DO_ROLE_ACTION} Player {Value:player}, go to sleep.",

@@ -539,6 +539,25 @@ const Speech = (() => {
 			_pendingInputSelect(value);
 	}
 
+	function debugPlay(files) {
+		if (!Array.isArray(files) || files.length === 0)
+			return;
+
+		_reset();
+
+		_active = true;
+
+		const generation = _generation;
+		const lang = Localization.getLanguage();
+		const urls = files.map(file => `TTS/${lang}/${file}`);
+
+		_playClipSequence(urls, "", generation, () => {
+			_active = false;
+			_phase = null;
+			_activeAudio = null;
+		});
+	}
+
 	return {
 		isSupported,
 		isActive,
@@ -548,6 +567,7 @@ const Speech = (() => {
 		resume,
 		stop,
 		selectInput,
+		debugPlay,
 	};
 
 })();
