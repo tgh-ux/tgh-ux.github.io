@@ -163,15 +163,18 @@ const Rules = (() => {
 			
 			// Add all evil teams, if present
 			[ "TEAM_WEREWOLF", "TEAM_VAMPIRE", "TEAM_ALIEN" ].forEach((t) => {
-				if (ctx.isTeamPresent(t)) choices.push({ weight: 1, data: { fallbackTeam: t + "_PLURAL_DEFINITE" } });
+				//if (ctx.isTeamPresent(t)) choices.push({ weight: 1, data: { fallbackTeam: t + "_PLURAL_DEFINITE" } });
+				if (ctx.isTeamPresent(t)) choices.push({ weight: 1, data: { fallbackTeam: t } });
 			});
 			// Add Tanner/Apprentice Tanner, if present
 			[ "TANNER", "APPRENTICETANNER" ].forEach((t) => {
 				if (ctx.isRolePresent(t))
-					choices.push({ weight: 1, data: { fallbackTeam: "ROLE_" + t + "_PLURAL_DEFINITE" } });
+					//choices.push({ weight: 1, data: { fallbackTeam: "ROLE_" + t + "_PLURAL_DEFINITE" } });
+					choices.push({ weight: 1, data: { fallbackTeam: "ROLE_" + t } });
 			});
 			// Add village team (always present, as it's Nostradamus default, and give it a 50% chance
-			choices.push({ weight: Math.max(choices.length, 1), data: { fallbackTeam: "TEAM_VILLAGE_PLURAL_DEFINITE" } });
+			//choices.push({ weight: Math.max(choices.length, 1), data: { fallbackTeam: "TEAM_VILLAGE_PLURAL_DEFINITE" } });
+			choices.push({ weight: Math.max(choices.length, 1), data: { fallbackTeam: "TEAM_VILLAGE" } });
 			
 			// Same candidate set that feeds the weighted fallback pick above, reshaped into {value,label} pairs for automatic narration's input
 			// options - i.e. "every team Nostradamus's card-viewing could plausibly reveal", not just the one chosen for the no-player case.

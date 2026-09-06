@@ -56,7 +56,7 @@ const Localization = (() => {
  *   <ID>, <ID>_PLURAL, <ID>_DEFINITE, <ID>_GENITIVE, and their combinations (e.g. ROLE_SEER_PLURAL_DEFINITE_GENITIVE). Every identity key is expected
  *   to have all applicable combinations defined here, since the interpreter constructs the key name rather than looking up a pre-built variant list.
  */
-	const LOCALIZATION_KEYS = {
+	let LOCALIZATION_KEYS = {
 		DIRECTION_LEFT: {
 			ENG: "left",
 			SWE: "vänster",
@@ -89,45 +89,13 @@ const Localization = (() => {
 			ENG: "or",
 			SWE: "eller",
 		},
-		NUM_EIGHT: {
-			ENG: "eight",
-			SWE: "åtta",
-		},
-		NUM_FIVE: {
-			ENG: "five",
-			SWE: "fem",
-		},
-		NUM_FOUR: {
-			ENG: "four",
-			SWE: "fyra",
-		},
-		NUM_NINE: {
-			ENG: "nine",
-			SWE: "nio",
-		},
-		NUM_ONE: {
-			ENG: "one",
-			SWE: "ett",
-		},
-		NUM_SEVEN: {
-			ENG: "seven",
-			SWE: "sju",
-		},
-		NUM_SIX: {
-			ENG: "six",
-			SWE: "sex",
-		},
-		NUM_THREE: {
-			ENG: "three",
-			SWE: "tre",
-		},
-		NUM_TWO: {
-			ENG: "two",
-			SWE: "två",
-		},
-		NUM_WORD: {
-			COMMON: "{Select:count,1,NUM_ONE,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,5,NUM_FIVE,6,NUM_SIX,7,NUM_SEVEN,8,NUM_EIGHT,9,NUM_NINE}",
-		},
+/*
+		Numbers, NUM_ONE, ... NUM_X, are added dynamically at init based on the NUMBER_DATA table. Additional, the init will add a special NUM_WORD key
+		that only contains a Select primitive for COMMON, that branches on the value of "count", and into the key for each number, e.g.:
+		{Select:count,1,NUM_ONE,2,NUM_TWO,...,X,NUM_X}
+		All of these keys can be used as desired as any resolution happens after initialization, but entries must exist in NUMBER_DATA for the
+		corresponding localization keys and languages for them to be added.
+*/
 		PHASE_DAY: {
 			ENG: "day role",
 			SWE: "dag",
@@ -477,8 +445,8 @@ const Localization = (() => {
 			SWE: "{PROMPT_BRIEF_HEADER} titta på en spelares kort.",
 		},
 		PROMPT_BRIEF_NOSTRADAMUS: {
-			ENG: "{PROMPT_BRIEF_HEADER} look at 1-3 cards.{If:hasDangerRoles,PROMPT_BRIEF_NOSTRADAMUS_WARNING} Announce team: {LocalizedValue:fallbackTeam}.",
-			SWE: "{PROMPT_BRIEF_HEADER} titta på 1-3 kort.{If:hasDangerRoles,PROMPT_BRIEF_NOSTRADAMUS_WARNING} Annonsera lag: {LocalizedValue:fallbackTeam}.",
+			ENG: "{PROMPT_BRIEF_HEADER} look at 1-3 cards.{If:hasDangerRoles,PROMPT_BRIEF_NOSTRADAMUS_WARNING} Announce team: {Identity:fallbackTeam}.",
+			SWE: "{PROMPT_BRIEF_HEADER} titta på 1-3 kort.{If:hasDangerRoles,PROMPT_BRIEF_NOSTRADAMUS_WARNING} Annonsera lag: {Identity:fallbackTeam}.",
 		},
 		PROMPT_BRIEF_NOSTRADAMUS_WARNING: {
 			ENG: " Warning on: {IdentityList:listDangerRoles,or}.",
@@ -770,6 +738,9 @@ const Localization = (() => {
 			ENG: "point to the player you think is worst at bluffing.",
 			SWE: "peka på den spelare som du tror är sämst på att bluffa.",
 		},
+		PROMPT_EMPTY: {
+			COMMON: "",
+		},
 		PROMPT_EXPOSER: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_EXPOSER_ACTION} {PROMPT_SLEEP_CALL}",
 		},
@@ -822,8 +793,6 @@ const Localization = (() => {
 			ENG: "{SPECIAL_LOVERS}, wake up and identify each other. If one of you is voted out, the other is voted out too. {Pause:short} {PROMPT_SLEEP_CALL}",
 			SWE: "{SPECIAL_LOVERS}, vakna och identifiera varandra. Om en av er röstas ut så kommer samtliga att röstas ut. {Pause:short} {PROMPT_SLEEP_CALL}",
 		},
-		PROMPT_LOVERS_ACTION: {
-		},
 		PROMPT_MARKSMAN: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_MARKSMAN_ACTION} {PROMPT_SLEEP_CALL}",
 		},
@@ -872,16 +841,20 @@ const Localization = (() => {
 			SWE: "Om du inte blir utröstad och det laget vinner så vinner även du. {If:hasDoppelganger,PROMPT_NOSTRADAMUS_DOPPELGANGER}",
 		},
 		PROMPT_NOSTRADAMUS_WARNING: {
-			ENG: "If you see: {IdentityList:listDangerRoles,or}, you must stop. {Input:nostradamusTeam,value,PROMPT_NOSTRADAMUS_WARNING_MANUAL,long,fallbackTeam,availableTeams,PROMPT_NOSTRADAMUS_WARNING_RESOLVED}",
-			SWE: "Om du ser: {IdentityList:listDangerRoles,or} måste du sluta. {Input:nostradamusTeam,value,PROMPT_NOSTRADAMUS_WARNING_MANUAL,long,fallbackTeam,availableTeams,PROMPT_NOSTRADAMUS_WARNING_RESOLVED}",
+			ENG: "If you see: {IdentityList:listDangerRoles,or}, you must stop. {AutoKey:PROMPT_EMPTY,PROMPT_NOSTRADAMUS_WARNING_AUTO_HINT} {Input:nostradamusTeam,value,PROMPT_NOSTRADAMUS_WARNING_MANUAL,long,fallbackTeam,availableTeams,PROMPT_NOSTRADAMUS_WARNING_RESOLVED}",
+			SWE: "Om du ser: {IdentityList:listDangerRoles,or} måste du sluta. {AutoKey:PROMPT_EMPTY,PROMPT_NOSTRADAMUS_WARNING_AUTO_HINT} {Input:nostradamusTeam,value,PROMPT_NOSTRADAMUS_WARNING_MANUAL,long,fallbackTeam,availableTeams,PROMPT_NOSTRADAMUS_WARNING_RESOLVED}",
+		},
+		PROMPT_NOSTRADAMUS_WARNING_AUTO_HINT: {
+			ENG: "Then select the team the last card you viewed belongs to.",
+			SWE: "Välj sedan laget det sista kortet du tittade på tillhörde.",
 		},
 		PROMPT_NOSTRADAMUS_WARNING_MANUAL: {
-			ENG: "<Narrator: announce which team {ROLE_NOSTRADAMUS_DEFINITE} now belongs to, or {LocalizedValue:fallbackTeam}>. {PROMPT_NOSTRADAMUS_SUFFIX}",
-			SWE: "<Berättare: annonsera vilket lag {ROLE_NOSTRADAMUS_DEFINITE} nu tillhör, eller {LocalizedValue:fallbackTeam}>. {PROMPT_NOSTRADAMUS_SUFFIX}",
+			ENG: "<Narrator: announce which team {ROLE_NOSTRADAMUS_DEFINITE} now belongs to, or {Identity:fallbackTeam,plural,definite}>. {PROMPT_NOSTRADAMUS_SUFFIX}",
+			SWE: "<Berättare: annonsera vilket lag {ROLE_NOSTRADAMUS_DEFINITE} nu tillhör, eller {Identity:fallbackTeam,plural,definite}>. {PROMPT_NOSTRADAMUS_SUFFIX}",
 		},
 		PROMPT_NOSTRADAMUS_WARNING_RESOLVED: {
-			ENG: "{ROLE_NOSTRADAMUS_DEFINITE} now belongs to {LocalizedValue:nostradamusTeam}. {PROMPT_NOSTRADAMUS_SUFFIX}",
-			SWE: "{ROLE_NOSTRADAMUS_DEFINITE} tillhör nu {LocalizedValue:nostradamusTeam}. {PROMPT_NOSTRADAMUS_SUFFIX}",
+			ENG: "{ROLE_NOSTRADAMUS_DEFINITE} now belongs to {Identity:nostradamusTeam,plural,definite}. {PROMPT_NOSTRADAMUS_SUFFIX}",
+			SWE: "{ROLE_NOSTRADAMUS_DEFINITE} tillhör nu {Identity:nostradamusTeam,plural,definite}. {PROMPT_NOSTRADAMUS_SUFFIX}",
 		},
 		PROMPT_ORACLE: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {Select:type,view_card,PROMPT_ORACLE_VIEW_CARD,oracle_change_team,PROMPT_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_ORACLE_BLOCK_ACTION,role_action,PROMPT_DO_ROLE_ACTION,oracle_announce_even_odd,PROMPT_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_ORACLE_HUNT,oracle_force_ripple,PROMPT_ORACLE_FORCE_RIPPLE} {PROMPT_SLEEP_CALL}",
@@ -4439,7 +4412,41 @@ const Localization = (() => {
 		},
 	};
 
-
+	// Table for numeric to key and language values, 
+	const NUMBER_DATA = {
+		FIELDS: ["key", "ENG", "SWE"],	// Identifies the field order, specifically the language of each column index
+		COUNT: 30, // Amount of numbers represented in the table
+		1:  ["ONE",         "one",         "ett"],
+		2:  ["TWO",         "two",         "två"],
+		3:  ["THREE",       "three",       "tre"],
+		4:  ["FOUR",        "four",        "fyra"],
+		5:  ["FIVE",        "five",        "fem"],
+		6:  ["SIX",         "six",         "sex"],
+		7:  ["SEVEN",       "seven",       "sju"],
+		8:  ["EIGHT",       "eight",       "åtta"],
+		9:  ["NINE",        "nine",        "nio"],
+		10: ["TEN",         "ten",         "tio"],
+		11: ["ELEVEN",      "eleven",      "elva"],
+		12: ["TWELVE",      "twelve",      "tolv"],
+		13: ["THIRTEEN",    "thirteen",    "tretton"],
+		14: ["FOURTEEN",    "fourteen",    "fjorton"],
+		15: ["FIFTEEN",     "fifteen",     "femton"],
+		16: ["SIXTEEN",     "sixteen",     "sexton"],
+		17: ["SEVENTEEN",   "seventeen",   "sjutton"],
+		18: ["EIGHTEEN",    "eighteen",    "arton"],
+		19: ["NINETEEN",    "nineteen",    "nitton"],
+		20: ["TWENTY",      "twenty",      "tjugo"],
+		21: ["TWENTY_ONE",  "twenty-one",  "tjugoett"],
+		22: ["TWENTY_TWO",  "twenty-two",  "tjugotvå"],
+		23: ["TWENTY_THREE","twenty-three","tjugotre"],
+		24: ["TWENTY_FOUR", "twenty-four", "tjugofyra"],
+		25: ["TWENTY_FIVE", "twenty-five", "tjugofem"],
+		26: ["TWENTY_SIX",  "twenty-six",  "tjugosex"],
+		27: ["TWENTY_SEVEN","twenty-seven","tjugosju"],
+		28: ["TWENTY_EIGHT","twenty-eight","tjugoåtta"],
+		29: ["TWENTY_NINE", "twenty-nine", "tjugonio"],
+		30: ["THIRTY",      "thirty",      "trettio"],
+	};
 
 	/* =========================
 	   Initialization
@@ -4447,6 +4454,37 @@ const Localization = (() => {
 
 	function _init() {
 		_loadLanguage();
+		_initNumbers();
+		_deepFreeze(NUMBER_DATA);
+	}
+	
+	function _initNumbers() {
+		const select = [];
+
+		for (let value = 1; value <= NUMBER_DATA.COUNT; value++) {
+			const [key, ENG, SWE] = NUMBER_DATA[value];
+			const localizationKey = `NUM_${key}`;
+
+			LOCALIZATION_KEYS[localizationKey] = { ENG, SWE, };
+
+			select.push(`${value},${localizationKey}`);
+		}
+
+		LOCALIZATION_KEYS.NUM_WORD = { COMMON: `{Select:count,${select.join(",")}}` };
+	}
+	
+	/*
+	 * Recursively locks obj and every nested plain-object value as immutable via Object.freeze; skips a value that's already frozen (so
+	 * re-freezing shared/repeated references is harmless). No return value - obj is frozen in place.
+	 */
+	function _deepFreeze(obj) {
+		Object.freeze(obj);
+
+		for (const value of Object.values(obj)) {
+			if (value && typeof value === "object" && !Object.isFrozen(value)) {
+				_deepFreeze(value);
+			}
+		}
 	}
 
 	_init();
@@ -4817,6 +4855,11 @@ const Localization = (() => {
 		return arg instanceof TemplateLiteral;
 	}
 
+	// Returns the frozen table of defined numbers with their numerical/lexical representations
+	function getNumberTable() {
+		return NUMBER_DATA;
+	}
+
 
 	return {
 		getLanguage,
@@ -4828,6 +4871,7 @@ const Localization = (() => {
 		localizeWithAtoms,
 		normalizeText,
 		setLanguage,
+		getNumberTable,
 	};
 	
 })();
