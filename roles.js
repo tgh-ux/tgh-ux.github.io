@@ -323,10 +323,8 @@ const Roles = (() => {
 		},
 		VILLAGER: {
 			minCount: 1,
-			//maxCount: 3,
-			maxCount: 10,
+			maxCount: 3,
 			icon: { x: 7, y: 0 },
-			//disabled: true,
 		},
 		WEREWOLF: {
 			minCount: 1,
