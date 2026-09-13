@@ -8,7 +8,8 @@
 	- Localization provides language services.
 	- Roles, Settings and Rules provide the game model.
 	- Interpreter bridges Rules and Localization.
-	- Speech plays back Interpreter's turn sequences as narration.
+	- AutoNarrator plays back Interpreter's turn sequences as spoken narration, as well as handles user input.
+	     TTSManifest and AudioAtlas handles pre-recorded clips, used by the spoken narration.
 	- GUI builds the interactive interface on top of the loaded modules.
 	GUI is deferred, loaded only after the other modules have been loaded
 	and the static page skeleton has been created.
@@ -26,8 +27,9 @@
 	<script src="settings.js"></script>
 	<script src="rules.js"></script>
 	<script src="interpreter.js"></script>
+	<script src="audioatlas.js"></script>
 	<script src="ttsmanifest.js"></script>
-	<script src="speech.js"></script>
+	<script src="autonarrator.js"></script>
 </head>
 <body>
 

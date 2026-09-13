@@ -3694,6 +3694,18 @@ const Localization = (() => {
 			ENG: "Wakes up and may look at a center card. If they do, they must give it to themselves or another player.",
 			SWE: "Vaknar och väljer om de vill titta på ett av de oanvända korten i mitten. Om ett kort inspekteras måste kortet bytas mot sitt eget eller någon annan spelares kort.",
 		},
+		UI_DAYTIMER_60S_WARNING: {
+			ENG: "One minute remaining.",
+			SWE: "En minut återstår.",
+		},
+		UI_DAYTIMER_30S_WARNING: {
+			ENG: "Thirty seconds remaining.",
+			SWE: "Trettio sekunder återstår.",
+		},
+		UI_DAYTIMER_EXPIRED: {
+			ENG: "Time is up. After the countdown, point to the player you want to eliminate. If two or more players receive the most votes, all will be eliminated. Five, four, three, two, one, vote.",
+			SWE: "Tiden är slut. Efter nedräkningen, peka på den spelare du vill rösta ut. Om två eller fler spelare får flest röster så kommer samtliga att röstas ut. Fem, fyra, tre, två, ett, rösta.",
+		},
 		UI_DAYTIMER_PAUSE: {
 			ENG: "Pause",
 			SWE: "Pausa",

@@ -1,5 +1,5 @@
 /*
- * Speech playback.
+ * Automatic TTS narration and input handling.
  *
  * Plays a game's raw turns (as produced by Rules, before localization) as spoken narration, reporting progress via callbacks. Each turn is resolved
  * into a sequence just before it plays - never ahead of time - via Interpreter.resolveTurn(turn, "automatic", _boundValues), so a value an
@@ -11,13 +11,15 @@
  * (currently the browser's Web Speech API) can be swapped later without touching anything outside this file - voice availability for some
  * languages (e.g. Swedish) is inconsistent across browsers, and that's expected to be the reason this gets revisited.
  *
- * A text segment's audio is sourced with this priority: one whole-sentence pre-recorded clip first (see _playClip, TTSManifest.lookup - the
- * same lookup that predates splicing), then spliced pre-recorded clips grouped from Interpreter-provided clipParts atoms (see
- * _playClipSequence, TTSManifest.lookupParts - which also decides how many atoms share one recording) if no whole-sentence recording
- * exists, then synthesized speech as the final fallback. Whole-sentence-first rather than splice-first is deliberate - see _speakText.
+ * A text segment's audio is sourced with this priority: one whole-sentence pre-recorded clip first (see _playClip, TTSManifest.lookup), then
+ * spliced pre-recorded clips grouped from Interpreter-provided clipParts atoms (see _playClipSequence, TTSManifest.lookupParts - which also
+ * decides how many atoms share one recording) if no whole-sentence recording exists, then synthesized speech as the final fallback.
+ * Whole-sentence-first rather than splice-first is deliberate - see _speakText. Every pre-recorded clip - narration or standalone announcement -
+ * plays through AudioAtlas by clip name; TTSManifest hands back those names, and this module never deals in URLs or individual audio files
+ * (see _playAtlasClip).
  */
 
-const Speech = (() => {
+const AutoNarrator = (() => {
 
 	/* =========================
 	   Data
@@ -29,7 +31,16 @@ const Speech = (() => {
 	 * never renders as a countdown. Intentionally not exposed as a "pause" segment type or a config option; it's playback pacing, not narration
 	 * content.
 	 */
-	const INTER_TURN_GAP_SECONDS = 3;
+	const INTER_TURN_GAP_SECONDS = 2;
+
+	/*
+	 * Silent gap inserted between two adjacent sentences within the same turn, whenever nothing else (an authored {Pause}, an input's wait, or
+	 * the end of the turn) already provides one. Applied uniformly regardless of how either sentence was voiced - clip, spliced clips, or
+	 * synthesis - so a default cadence exists without needing a _SILENCE entry for every clip that happens to end a sentence. Only clips
+	 * spliced together *within* one sentence need their own tuned pre/post entries; this gap covers everything else. Implemented the same way
+	 * as INTER_TURN_GAP_SECONDS - see there.
+	 */
+	const SENTENCE_GAP_SECONDS = 0.75;
 
 	/*
 	 * Bumped on every play()/stop(). Callbacks scheduled by a previous session (a pending setTimeout, a stray utterance.onend) capture the
@@ -40,24 +51,28 @@ const Speech = (() => {
 	let _active = false;
 	let _paused = false;
 	let _pendingTimer = null;
-	
+
 	/*
 	 * What's currently in flight, so pause()/resume() know what to actually do: "speaking" defers to the engine's own pause/resume, "waiting" is
 	 * handled entirely by this module (see _wait below). null means idle - nothing playing, so pause()/resume() have nothing to act on.
 	 */
 	let _phase = null;
-	
+
 	/*
 	 * Snapshot of an in-progress pause segment's countdown, kept only while _phase === "waiting". Its remainingMs is exactly what lets pause()
 	 * suspend the countdown and resume() pick it back up from the same point, rather than restarting or losing track of elapsed time.
 	 */
 	let _wait = null;
-	
+
 	/*
 	 * Set only while a pre-recorded clip is playing (mirrors _wait's "only set while waiting" convention) - lets pause()/resume()/_reset()
-	 * know a clip, not speechSynthesis, is the thing currently live during _phase === "speaking".
+	 * know a clip, not speechSynthesis, is the thing currently live during _phase === "speaking". Holds an AudioAtlas.play() handle
+	 * ({ pause(), play() }).
 	 */
 	let _activeAudio = null;
+
+	// Set while a standalone announcement clip is playing, independent of the narration session - see _playAnnouncementClip.
+	let _announcementAudio = null;
 
 	/*
 	 * Values bound by resolved input nodes, threaded forward into every subsequent turn's resolution - see Interpreter's boundValues merge.
@@ -88,84 +103,75 @@ const Speech = (() => {
 	   ========================= */
 
 	/*
-	 * Plays a pre-recorded clip in place of TTS for one text segment. Falls back to _speakTextAsUtterance on playback failure (a 404, a
-	 * decoding error, etc.) rather than leaving the turn stuck - a lookup miss and a playback failure both degrade to TTS, just at different
-	 * points (see _speakText for the miss case).
+	 * Plays clip `name` through AudioAtlas for the current language and returns its handle (pause()/play(), see AudioAtlas.play). The one place
+	 * this module talks to AudioAtlas - _playClip/_playClipSequence and _playAnnouncementClip each wrap it with their own state tracking
+	 * (_activeAudio vs _announcementAudio) and fallback handling, since those genuinely differ: a narration clip is tied to a session
+	 * generation and can fall back mid-sequence; an announcement is fire-and-forget and always falls back to speaking the same text. A missing
+	 * clip and a failed load are both just AudioAtlas.play's onError, so there's nothing to check beforehand - one error path covers both.
+	 */
+	function _playAtlasClip(name, onDone, onError) {
+		return AudioAtlas.play(name, Localization.getLanguage(), onDone, onError);
+	}
+
+	/*
+	 * Plays a pre-recorded clip in place of TTS for one text segment. Falls back to _speakTextAsUtterance on playback failure (a missing/
+	 * unloadable atlas entry, etc.) rather than leaving the turn stuck - a lookup miss and a playback failure both degrade to TTS, just at
+	 * different points (see _speakText for the miss case).
 	 *
-	 *   url        - the clip's audio URL, as returned by TTSManifest.lookup().
+	 *   name       - the clip's AudioAtlas name, as returned by TTSManifest.lookup().
 	 *   value      - the original text, kept only so a playback failure can still fall back to speaking it.
 	 *   generation - session generation guard, as elsewhere.
 	 *   onDone     - invoked with no arguments once the clip finishes (or, on failure, once the TTS fallback finishes).
 	 */
-	function _playClip(url, value, generation, onDone) {
-		const audio = new Audio(url);
-		_activeAudio = audio;
-
-		audio.onended = () => {
-			if (generation === _generation) {
-				_activeAudio = null;
-				onDone();
-			}
-		};
-		audio.onerror = () => {
-			console.warn("Clip playback failed, falling back to speech synthesis:", url);
+	function _playClip(name, value, generation, onDone) {
+		_activeAudio = _playAtlasClip(name, () => {
+			if (generation === _generation) { _activeAudio = null; onDone(); }
+		}, () => {
+			console.warn("Clip playback failed, falling back to speech synthesis:", name);
 			_activeAudio = null;
 			if (generation === _generation) _speakTextAsUtterance(value, generation, onDone);
-		};
-
-		audio.play();
+		});
 	}
 
 	/*
-	 * Plays an ordered list of pre-recorded clip URLs back-to-back as one spoken segment, chaining each clip's
-	 * onended into starting the next - mirrors _playClip's single-clip shape, but for spliced audio built from
-	 * several individually-recorded atoms (see Interpreter's clipParts / TTSManifest.lookupParts). Reuses
-	 * _activeAudio the same way _playClip does - whichever clip is currently playing within the sequence - so
-	 * pause()/resume()/_reset() keep working across a multi-clip segment with no changes of their own.
+	 * Plays an ordered list of pre-recorded clip names back-to-back as one spoken segment, chaining each clip's completion into starting the
+	 * next - mirrors _playClip's single-clip shape, but for spliced audio built from several individually-recorded atoms (see Interpreter's
+	 * clipParts / TTSManifest.lookupParts). Reuses _activeAudio the same way _playClip does - whichever clip is currently playing within the
+	 * sequence - so pause()/resume()/_reset() keep working across a multi-clip segment with no changes of their own.
 	 *
-	 * If any clip in the sequence fails to play, the whole sequence aborts and falls back to synthesizing the
-	 * segment's full plain text from scratch (not just the remaining clips) - the same all-or-nothing rule
-	 * TTSManifest.lookupParts already applies at lookup time; a playback failure partway through is treated the
-	 * same way a lookup miss would have been, rather than risking a synthesized voice mid-splice.
+	 * If any clip in the sequence fails to play, the whole sequence aborts and falls back to synthesizing the segment's full plain text from
+	 * scratch (not just the remaining clips) - the same all-or-nothing rule TTSManifest.lookupParts already applies at lookup time; a playback
+	 * failure partway through is treated the same way a lookup miss would have been, rather than risking a synthesized voice mid-splice.
 	 *
-	 *   urls       - the clip URLs to play in order, as returned by TTSManifest.lookupParts.
+	 *   names      - the clip names to play in order, as returned by TTSManifest.lookupParts.
 	 *   value      - the segment's full plain text, kept only so a playback failure can fall back to speaking it.
 	 *   generation - session generation guard, as elsewhere.
 	 *   onDone     - invoked with no arguments once every clip finishes (or, on failure, once the TTS fallback finishes).
 	 */
-	function _playClipSequence(urls, value, generation, onDone) {
+	function _playClipSequence(names, value, generation, onDone) {
 		let index = 0;
 
 		const playNext = () => {
 			if (generation !== _generation) return;
 
-			if (index >= urls.length) {
+			if (index >= names.length) {
 				onDone();
 				return;
 			}
 
-			const audio = new Audio(urls[index]);
-			_activeAudio = audio;
-			index++;
-
-			audio.onended = () => {
-				if (generation === _generation) {
-					_activeAudio = null;
-					playNext();
-				}
-			};
-			audio.onerror = () => {
-				console.warn("Spliced clip playback failed, falling back to speech synthesis:", urls[index - 1]);
+			const name = names[index++];
+			_activeAudio = _playAtlasClip(name, () => {
+				if (generation === _generation) { _activeAudio = null; playNext(); }
+			}, () => {
+				console.warn("Spliced clip playback failed, falling back to speech synthesis:", name);
 				_activeAudio = null;
 				if (generation === _generation) _speakTextAsUtterance(value, generation, onDone);
-			};
-
-			audio.play();
+			});
 		};
 
 		playNext();
 	}
-	
+
 	/*
 	 * Speaks a single text segment via the browser's speech synthesis engine. Split out from _speakText so both the lookup-miss path there
 	 * and the playback-failure fallback in _playClip can call the same code rather than maintaining two copies.
@@ -208,8 +214,6 @@ const Speech = (() => {
 
 		if (_activeAudio) {
 			_activeAudio.pause();
-			_activeAudio.onended = null;
-			_activeAudio.onerror = null;
 			_activeAudio = null;
 		}
 		window.speechSynthesis?.cancel();
@@ -275,7 +279,13 @@ const Speech = (() => {
 		if (segment.type === "text") {
 			_phase = "speaking";
 			callbacks.onSpeaking(segment.value);
-			_speakText(segment, generation, advance);
+			_speakText(segment, generation, () => {
+				const next = sequence[segIndex + 1];
+				if (next && next.type === "text")
+					_startWait(SENTENCE_GAP_SECONDS, generation, () => {}, advance);
+				else
+					advance();
+			});
 		} else if (segment.type === "pause") {
 			_startWait(segment.duration, generation, callbacks.onPause, advance);
 		} else if (segment.type === "input") {
@@ -344,7 +354,7 @@ const Speech = (() => {
 		onPause(_wait.remainingMs / 1000);
 		_scheduleWaitStep();
 	}
-	
+
 	/*
 	 * Schedules the next countdown step, unless paused - in which case resume() is what calls this again to pick the countdown back up. Operates entirely
 	 * on the shared _wait/_pendingTimer state.
@@ -374,15 +384,15 @@ const Speech = (() => {
 			_scheduleWaitStep();
 		}, stepMs);
 	}
-	
+
 	/*
 	 * Speaks a single text segment, calling onDone once speech actually finishes (or errors out). Always asynchronous, so the sequence walk
 	 * above stays a plain chain of callbacks regardless of segment type.
 	 *
 	 * Three narration sources are tried in order, each falling through to the next: a single whole-sentence pre-recorded clip is tried
-	 * first (see _playClip, TTSManifest.lookup) - the same lookup that predates splicing, unconditional on which primitives produced the
-	 * text. Only when that misses does a segment with clipParts (automatic mode only - see Interpreter's _toSequenceFromAtoms) try spliced
-	 * clips, one per atom (see _playClipSequence, TTSManifest.lookupParts). Failing both, synthesized speech is the final fallback.
+	 * first (see _playClip, TTSManifest.lookup), applied the same way regardless of which primitives produced the text. Only when that
+	 * misses does a segment with clipParts (automatic mode only - see Interpreter's _toSequenceFromAtoms) try spliced clips, one per atom
+	 * (see _playClipSequence, TTSManifest.lookupParts). Failing both, synthesized speech is the final fallback.
 	 *
 	 * Deliberately whole-sentence-first rather than splice-first: recording a sentence whole (when it only has a handful of possible
 	 * outcomes, e.g. a Value with 1-2 variants) gets better natural prosody than concatenated fragments, and this ordering means that
@@ -397,16 +407,16 @@ const Speech = (() => {
 	function _speakText(segment, generation, onDone) {
 		const { value, clipParts } = segment;
 
-		const clipUrl = TTSManifest.lookup(value);
-		if (clipUrl) {
-			_playClip(clipUrl, value, generation, onDone);
+		const name = TTSManifest.lookup(value);
+		if (name) {
+			_playClip(name, value, generation, onDone);
 			return;
 		}
 
 		if (clipParts && clipParts.length > 0) {
-			const urls = TTSManifest.lookupParts(clipParts);
-			if (urls) {
-				_playClipSequence(urls, value, generation, onDone);
+			const names = TTSManifest.lookupParts(clipParts);
+			if (names) {
+				_playClipSequence(names, value, generation, onDone);
 				return;
 			}
 			// Some atom in this segment has no recording yet either - fall through to synthesis rather than
@@ -437,6 +447,42 @@ const Speech = (() => {
 	function _langTag() {
 		return Localization.getLanguage() === "SWE" ? "sv-SE" : "en-US";
 	}
+
+	/*
+	 * Plays one standalone pre-recorded announcement clip, independent of the narration session (_activeAudio/generation - see
+	 * _announcementAudio). Falls back to synthesizing `value` if the clip is missing or fails to play.
+	 *
+	 *   name  - the clip's AudioAtlas name, as returned by TTSManifest.lookup().
+	 *   value - the original text, kept only so a playback failure can still fall back to speaking it.
+	 */
+	function _playAnnouncementClip(name, value) {
+		const handle = _playAtlasClip(name, () => {
+			if (_announcementAudio === handle) _announcementAudio = null;
+		}, () => {
+			console.warn("Announcement clip playback failed, falling back to speech synthesis:", name);
+			if (_announcementAudio === handle) _announcementAudio = null;
+			_speakAnnouncementText(value);
+		});
+		_announcementAudio = handle;
+	}
+
+	/* Speaks one standalone announcement independently of the normal narration session. */
+	function _speakAnnouncementText(value) {
+		if (!isSupported()) {
+			console.warn("Unable to play announcement: browser speech synthesis is not supported.");
+			return;
+		}
+
+		const utterance = new SpeechSynthesisUtterance(value);
+		utterance.lang = _langTag();
+
+		const voice = _pickVoice(utterance.lang);
+		if (voice) utterance.voice = voice;
+
+		window.speechSynthesis.speak(utterance);
+	}
+
+
 
 	/* =========================
 	   Public functions
@@ -520,7 +566,7 @@ const Speech = (() => {
 		_boundValues = {};
 		_playTurn(rawTurns, 0, _generation, { ..._NOOP_CALLBACKS, ...callbacks });
 	}
-	
+
 	/*
 	 * Stops any playback in progress and discards its position - the opposite of letting play() finish on its own. Does not invoke
 	 * onFinished(); a caller that stops already knows to reset its own state. No parameters, no return value.
@@ -539,8 +585,23 @@ const Speech = (() => {
 			_pendingInputSelect(value);
 	}
 
-	function debugPlay(files) {
-		if (!Array.isArray(files) || files.length === 0)
+	/*
+	 * Plays a standalone pre-recorded announcement (e.g. a day-timer warning), independent of any narration session in progress. Falls back to
+	 * speech synthesis if no recording exists or playback fails. No return value.
+	 */
+	function playAnnouncement(text) {
+		const name = TTSManifest.lookup(text);
+		if (name) {
+			_playAnnouncementClip(name, text);
+			return;
+		}
+
+		_speakAnnouncementText(text);
+	}
+
+	// Test function to check prosody of spliced clips. Takes an array of AudioAtlas clip names to play in sequence.
+	function debugPlay(names) {
+		if (!Array.isArray(names) || names.length === 0)
 			return;
 
 		_reset();
@@ -548,10 +609,8 @@ const Speech = (() => {
 		_active = true;
 
 		const generation = _generation;
-		const lang = Localization.getLanguage();
-		const urls = files.map(file => `TTS/${lang}/${file}`);
 
-		_playClipSequence(urls, "", generation, () => {
+		_playClipSequence(names, "", generation, () => {
 			_active = false;
 			_phase = null;
 			_activeAudio = null;
@@ -567,6 +626,7 @@ const Speech = (() => {
 		resume,
 		stop,
 		selectInput,
+		playAnnouncement,
 		debugPlay,
 	};
 

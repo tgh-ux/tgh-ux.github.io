@@ -747,7 +747,20 @@ const Interpreter = (() => {
 		return _resolveAutomaticSequence(deferred.key, { ...deferred.baseData, [deferred.field]: boundValue });
 	}
 
-
+	/*
+	 * Splits text into sentence strings using the exact same punctuation heuristic _toSequenceFromText /
+	 * _toSequenceFromAtoms already rely on internally (see _splitSentences) - exposed so a caller that needs
+	 * to reproduce those same boundaries against its own text (e.g. TTSManifest splitting a multi-sentence
+	 * manifest key into per-sentence entries) never risks drifting out of sync with a second, separately
+	 * maintained copy of the same heuristic.
+	 *
+	 * text - the text to split.
+	 *
+	 * Returns an array of trimmed, non-empty sentence strings - see _splitSentences.
+	 */
+	function splitSentences(text) {
+		return _splitSentences(text);
+	}
 
 	return {
 		renderAll,
@@ -755,6 +768,7 @@ const Interpreter = (() => {
 		resolveDeferredInput,
 		sequenceToText,
 		refreshPauseSettings,
+		splitSentences,
 	};
 
 })();

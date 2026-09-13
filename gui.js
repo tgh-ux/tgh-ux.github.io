@@ -33,7 +33,7 @@ let activeSelectionPointerId = null;
 
 /*
  * Prompt display and narration state. renderedTurns/rawTurns are two views of the same turns produced by updatePrompt(): rawTurns is what
- * Speech.play() takes, renderedTurns is the localized text shown in the output box. currentTurn/showSingleTurn control single-turn display and
+ * AutoNarrator.play() takes, renderedTurns is the localized text shown in the output box. currentTurn/showSingleTurn control single-turn display and
  * navigation.
  */
 let promptState = {
@@ -49,6 +49,13 @@ const DAY_TIMER_TICK_INTERVAL = 150;
 const DAY_TIMER_ADJUST_STEP = 30;
 // Default duration (seconds) the first time the page is ever opened
 const DAY_TIMER_DEFAULT_DURATION = 300;
+// Warning thresholds for the day timer, playing an announcement when each threshold is reached
+const DAY_TIMER_WARNINGS = [
+    { threshold: 60, text: "UI_DAYTIMER_60S_WARNING" },
+    { threshold: 30, text: "UI_DAYTIMER_30S_WARNING" },
+];
+// If a threshold has been crossed by more than this, skip instead of play
+const DAY_TIMER_WARNING_GRACE_SECONDS = 5;
 
 /*
  * Day timer state. state/duration/remaining/targetTimestamp track the timer's own lifecycle (see the Day Timer section); expanded/intervalId
@@ -61,6 +68,7 @@ let dayTimer = {
 	targetTimestamp: null,                  // wall-clock ms timestamp the timer reaches zero at, set only while running - avoids drift from tab throttling/backgrounding
 	expanded: false,                        // whether the expanded panel is open
 	intervalId: null,                       // handle for the redraw interval, only set while running
+	warnings: [],                           // warning thresholds remaining for audio playback, initialized when timer starts
 };
 
 // Tags to filter role selection by. Groups are AND'd together; tags within a group are OR'd
@@ -277,6 +285,7 @@ function loadDayTimer() {
 			if (remaining > 0) {
 				dayTimer.state = "running";
 				dayTimer.targetTimestamp = data.targetTimestamp;
+				initializeDayTimerWarnings(remaining);
 			} else {
 				// Timer would have already run out while the page was closed/reloaded
 				dayTimer.state = "stopped";
@@ -1599,7 +1608,7 @@ function updatePrompt(relevantErrors) {
 		resizePromptBox();
 	}
 
-	Speech.stop();
+	AutoNarrator.stop();
 	resetSpeechOverlay();
 	closeSpeechOverlay();
 
@@ -1705,7 +1714,7 @@ function updatePrompt(relevantErrors) {
 		openSpeechOverlay();
 		resetSpeechOverlay();
 
-		Speech.play(promptState.rawTurns, {
+		AutoNarrator.play(promptState.rawTurns, {
 			onSpeaking: clbkSpeechSpeaking,
 			onPause: clbkSpeechPause,
 			onTurnComplete: clbkSpeechTurnComplete,
@@ -1751,7 +1760,7 @@ function updatePrompt(relevantErrors) {
 	}
 
 	/*
-	 * Fires when an input node begins its wait. Renders one tappable button per option. Selecting one only records the choice (Speech.selectInput) - the
+	 * Fires when an input node begins its wait. Renders one tappable button per option. Selecting one only records the choice (AutoNarrator.selectInput) - the
 	 * wait always runs its full fixed duration regardless of whether or when a button gets pressed, so there's nothing else for this handler to gate.
 	 * The narration text from just before the input is left in place rather than cleared, since it's usually the instruction the wait is time for.
 	 */
@@ -1770,7 +1779,7 @@ function updatePrompt(relevantErrors) {
 			button.className = "speech-overlay-option";
 			button.textContent = option.label;
 			button.addEventListener("click", () => {
-				Speech.selectInput(option.value);
+				AutoNarrator.selectInput(option.value);
 				optionsContainer.querySelectorAll(".speech-overlay-option")
 					.forEach(b => b.classList.toggle("selected", b === button));
 			});
@@ -1788,7 +1797,7 @@ function updatePrompt(relevantErrors) {
 	 * choices for the user to pick from - has fully elapsed and a value has been bound (either the user's selection, or the input's own
 	 * default if nothing was picked in time). Only clears the option buttons and countdown styling here; field/value aren't used since this
 	 * module doesn't currently need to react to which field or value was bound - the narration that follows arrives through
-	 * clbkSpeechSpeaking/clbkSpeechPause like anything else. field/value match Speech.play()'s onInputResolved(field,value) callback shape.
+	 * clbkSpeechSpeaking/clbkSpeechPause like anything else. field/value match AutoNarrator.play()'s onInputResolved(field,value) callback shape.
 	 */
 	function clbkSpeechInputResolved(field, value) {
 		document.getElementById("speechOverlayOptions").replaceChildren();
@@ -1826,7 +1835,7 @@ function updatePrompt(relevantErrors) {
 
 	/*
 	 * Syncs the overlay's pause/stop buttons to the current Speech state: both disabled when nothing is active, and the pause button's
-	 * icon/label toggling between pause and resume depending on Speech.isPaused(). No parameters, no return value.
+	 * icon/label toggling between pause and resume depending on AutoNarrator.isPaused(). No parameters, no return value.
 	 */
 	function updateSpeechOverlayControls() {
 		const pauseBtn = document.getElementById("btn-speech-overlay-pause");
@@ -1834,8 +1843,8 @@ function updatePrompt(relevantErrors) {
 
 		if (!pauseBtn || !stopBtn) return;
 
-		const active = Speech.isActive();
-		const paused = Speech.isPaused();
+		const active = AutoNarrator.isActive();
+		const paused = AutoNarrator.isPaused();
 
 		pauseBtn.textContent = paused ? "▶" : "⏸";
 		pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
@@ -2153,6 +2162,9 @@ function formatDayTimerTime(totalSeconds) {
 function startDayTimer() {
 	if (dayTimer.state === "running" || dayTimer.remaining <= 0) return;
 
+    if (dayTimer.state === "stopped")
+        initializeDayTimerWarnings(dayTimer.remaining);
+
 	dayTimer.targetTimestamp = Date.now() + dayTimer.remaining * 1000;
 	dayTimer.state = "running";
 
@@ -2232,7 +2244,10 @@ function clearDayTimerInterval() {
 
 // Redraw callback while running. Also detects reaching zero, at which point the timer simply stops (staying at 00:00 until the narrator presses stop/reset)
 function tickDayTimer() {
-	if (getDayTimerRemainingSeconds() > 0) {
+	const remaining = getDayTimerRemainingSeconds();
+
+    if (remaining > 0) {
+		processDayTimerWarnings(remaining);
 		updateDayTimerUI();
 		return;
 	}
@@ -2244,6 +2259,8 @@ function tickDayTimer() {
 	clearDayTimerInterval();
 	updateDayTimerUI();
 	saveDayTimer();
+	
+	playDayTimerTimeUpAnnouncement();
 }
 
 // Refreshes the pill text, panel time, and toggle button label to match the current state
@@ -2294,6 +2311,33 @@ function updateDayTimerSpacer() {
 	});
 }
 
+// Initializes the day timer warning thresholds from the base table, only including entries that are at least initialSeconds in the future
+function initializeDayTimerWarnings(initialSeconds) {
+    dayTimer.warnings = DAY_TIMER_WARNINGS
+        .filter(warning => warning.threshold <= initialSeconds)
+        .sort((a, b) => b.threshold - a.threshold);
+}
+
+// Check time remaining against warning thresholds, discarding or playing the entries as appropriate
+function processDayTimerWarnings(remaining) {
+    while (dayTimer.warnings.length > 0) {
+        const warning = dayTimer.warnings[0];
+
+        if (remaining > warning.threshold)
+            return;
+
+        dayTimer.warnings.shift();
+
+        if (remaining >= warning.threshold - DAY_TIMER_WARNING_GRACE_SECONDS) {
+            AutoNarrator.playAnnouncement(Localization.localize(warning.text));
+        }
+    }
+}
+
+// Plays the time up announcement when the day timer expires
+function playDayTimerTimeUpAnnouncement() {
+	AutoNarrator.playAnnouncement(Localization.localize("UI_DAYTIMER_EXPIRED"));
+}
 
 
 
@@ -2307,19 +2351,19 @@ function onSpeechStartClicked() {
 }
 
 function onSpeechOverlayPauseClicked() {
-	if (!Speech.isActive())
+	if (!AutoNarrator.isActive())
 		return;
 
-	if (Speech.isPaused())
-		Speech.resume();
+	if (AutoNarrator.isPaused())
+		AutoNarrator.resume();
 	else
-		Speech.pause();
+		AutoNarrator.pause();
 
 	updateSpeechOverlayControls();
 }
 
 function onSpeechOverlayStopClicked() {
-	Speech.stop();
+	AutoNarrator.stop();
 
 	resetSpeechOverlay();
 	closeSpeechOverlay();
@@ -2658,7 +2702,8 @@ function initPanels() {
  */
 function initGUI() {
 	// Load language first so it's ready for component initialization, no dependency on anything
-	setGUILanguage(Localization.getLanguage());
+	const lang = Localization.getLanguage();
+	setGUILanguage(lang);
 
 	// Load configuration/stored values, no dependency
 	loadSelectedRoles();
@@ -2684,6 +2729,9 @@ function initGUI() {
 
 	// Update the GUI to apply non-default states
 	updateRolesUI();
+	
+	// Pre-fetch the TTS atlas file so that it's ready for use
+	AudioAtlas.preload(lang);
 }
 
 initGUI();
