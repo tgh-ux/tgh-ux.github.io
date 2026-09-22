@@ -19,7 +19,7 @@ const Localization = (() => {
 	// Persistent storage key for language selection
 	const LANGUAGE_STORE = "onuw_lang"
 	
-	// Safety limit preventing an infinite loop caused by cyclic template references. Increase as needed if deeper template resolution is required.
+	// Arbitrary safety limit preventing an infinite loop caused by cyclic template references
 	const MAX_ITERATIONS = 20;
 	
 	// Wrapper marking a template argument that was written as a quoted literal, as opposed to a bareword key reference - the two are otherwise
@@ -45,16 +45,16 @@ const Localization = (() => {
  *
  * Typically, every key is expected to have a usable entry (its own language field, or a COMMON fallback) for every language, in particular for
  * static content such as GUI strings. This isn't strictly enforced - Interpreter/Localization log and gracefully substitute a placeholder for any
- * key that resolves to nothing at all - but a language with no entry and no applicable COMMON fallback should be treated as a bug to fix, not a
- * silent gap. Some prompts require different grammatical helper keys for different forms in one language (e.g. one "card" vs two "cards") that
+ * key that resolves to nothing at all. A language with no entry and no applicable COMMON fallback should be treated as a bug to fix, rather than
+ * a silent gap. Some prompts require different grammatical helper keys for different forms in one language (e.g. one "card" vs two "cards") that
  * another language's phrasing sidesteps entirely - those keys are added only where the language actually needs them, and their absence in another
  * language's set is expected, not a gap. While not relevant for static content, this becomes very relevant with the templating implementation
  * used extensively in the prompts for script generation.
  *
  * Identity keys (roles and teams, e.g. ROLE_SEER, TEAM_WEREWOLF) follow a fixed suffix convention that Interpreter's Identity/RoleName primitives
- * build up from the raw ID + requested grammatical form(s):
- *   <ID>, <ID>_PLURAL, <ID>_DEFINITE, <ID>_GENITIVE, and their combinations (e.g. ROLE_SEER_PLURAL_DEFINITE_GENITIVE). Every identity key is expected
- *   to have all applicable combinations defined here, since the interpreter constructs the key name rather than looking up a pre-built variant list.
+ * build up from the raw ID + requested grammatical form(s): <ID>, <ID>_PLURAL, <ID>_DEFINITE, <ID>_GENITIVE, and their combinations (e.g.
+ * ROLE_SEER_PLURAL_DEFINITE_GENITIVE). Every identity key is expected to have all applicable combinations defined here, since the interpreter
+ * constructs the key name rather than looking up a pre-built variant list.
  */
 	let LOCALIZATION_KEYS = {
 		DIRECTION_LEFT: {
@@ -230,8 +230,8 @@ const Localization = (() => {
 			SWE: "Du behöver enbart förhindra att du själv blir utröstad.",
 		},
 		PROMPT_BLOB_OBJECTIVE_MULTI: {
-			ENG: "You must prevent that you, the nearest {Select:blobLeft,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your left, and nearest {Select:blobRight,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your right from being voted out.",
-			SWE: "Du måste förhindra att du själv, närmaste {Select:blobLeft,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till vänster, och närmaste {Select:blobRight,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,''} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till höger blir utröstade.",
+			ENG: "You must prevent that you, the nearest {Select:blobLeft,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,PROMPT_EMPTY} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your left, and nearest {Select:blobRight,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,PROMPT_EMPTY} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} to your right from being voted out.",
+			SWE: "Du måste förhindra att du själv, närmaste {Select:blobLeft,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,PROMPT_EMPTY} {Select:blobLeft,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till vänster, och närmaste {Select:blobRight,2,NUM_TWO,3,NUM_THREE,4,NUM_FOUR,*,PROMPT_EMPTY} {Select:blobRight,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} till höger blir utröstade.",
 		},
 		PROMPT_BLOB_OBJECTIVE_SINGLE: {
 			ENG: "You must prevent that you and the nearest player to your {Select:blobLeft,0,DIRECTION_RIGHT,1,DIRECTION_LEFT} from being voted out.",
@@ -265,8 +265,7 @@ const Localization = (() => {
 			SWE: "{TEAM_ALIEN_PLURAL}: identifiera varandra. {PROMPT_BRIEF_ALIEN_TEAM_ACTION}{If:hasCow,PROMPT_BRIEF_ALIEN_TEAM_COW}",
 		},
 		PROMPT_BRIEF_ALIEN_TEAM_ACTION: {
-			ENG: "{Select:type,do_nothing,PROMPT_BRIEF_ALIEN_NOTHING,make_alien,PROMPT_BRIEF_ALIEN_MAKE_ALIEN,make_alien_minion,PROMPT_BRIEF_ALIEN_MAKE_MINION,show_team_cards,PROMPT_BRIEF_ALIEN_SHOW,trade_team_cards,PROMPT_BRIEF_ALIEN_TRADE,view_card_collective,PROMPT_BRIEF_ALIEN_VIEW_COLLECTIVE,view_card_individual,PROMPT_BRIEF_ALIEN_VIEW_INDIVIDUAL}",
-			SWE: "{Select:type,do_nothing,PROMPT_BRIEF_ALIEN_NOTHING,make_alien,PROMPT_BRIEF_ALIEN_MAKE_ALIEN,make_alien_minion,PROMPT_BRIEF_ALIEN_MAKE_MINION,show_team_cards,PROMPT_BRIEF_ALIEN_SHOW,trade_team_cards,PROMPT_BRIEF_ALIEN_TRADE,view_card_collective,PROMPT_BRIEF_ALIEN_VIEW_COLLECTIVE,view_card_individual,PROMPT_BRIEF_ALIEN_VIEW_INDIVIDUAL}",
+			COMMON: "{Select:type,do_nothing,PROMPT_BRIEF_ALIEN_NOTHING,make_alien,PROMPT_BRIEF_ALIEN_MAKE_ALIEN,make_alien_minion,PROMPT_BRIEF_ALIEN_MAKE_MINION,show_team_cards,PROMPT_BRIEF_ALIEN_SHOW,trade_team_cards,PROMPT_BRIEF_ALIEN_TRADE,view_card_collective,PROMPT_BRIEF_ALIEN_VIEW_COLLECTIVE,view_card_individual,PROMPT_BRIEF_ALIEN_VIEW_INDIVIDUAL}",
 		},
 		PROMPT_BRIEF_ALIEN_TEAM_COW: {
 			ENG: " Cow: hold out your hand, neighbor touches it.",
@@ -373,8 +372,7 @@ const Localization = (() => {
 			SWE: "{PROMPT_BRIEF_HEADER} byt ditt kort mot ett mittenkort.",
 		},
 		PROMPT_BRIEF_EMPATH: {
-			ENG: "{PROMPT_BRIEF_HEADER} {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}: {LocalizedValue:question}",
-			SWE: "{PROMPT_BRIEF_HEADER} {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}: {LocalizedValue:question}",
+			COMMON: "{PROMPT_BRIEF_HEADER} {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}: {LocalizedValue:question}",
 		},
 		PROMPT_BRIEF_EXPOSER: {
 			ENG: "{PROMPT_BRIEF_HEADER} flip {Value:count} center {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL}.",
@@ -393,16 +391,13 @@ const Localization = (() => {
 			SWE: "{PROMPT_BRIEF_HEADER} byt plats på två märken eller kort.",
 		},
 		PROMPT_BRIEF_HEADER: {
-			ENG: "{If:copiedRole,PROMPT_BRIEF_HEADER_ECHO,PROMPT_BRIEF_HEADER_DIRECT}",
-			SWE: "{If:copiedRole,PROMPT_BRIEF_HEADER_ECHO,PROMPT_BRIEF_HEADER_DIRECT}",
+			COMMON: "{If:copiedRole,PROMPT_BRIEF_HEADER_ECHO,PROMPT_BRIEF_HEADER_DIRECT}",
 		},
 		PROMPT_BRIEF_HEADER_DIRECT: {
-			ENG: "{Identity:instigator}:",
-			SWE: "{Identity:instigator}:",
+			COMMON: "{Identity:instigator}:",
 		},
 		PROMPT_BRIEF_HEADER_ECHO: {
-			ENG: "{Identity:instigator} ({Identity:copiedRole}):",
-			SWE: "{Identity:instigator} ({Identity:copiedRole}):",
+			COMMON: "{Identity:instigator} ({Identity:copiedRole}):",
 		},
 		PROMPT_BRIEF_INSOMNIAC: {
 			ENG: "{PROMPT_BRIEF_HEADER} look at your own card.",
@@ -453,8 +448,7 @@ const Localization = (() => {
 			SWE: " Varning vid: {IdentityList:listDangerRoles,or}.",
 		},
 		PROMPT_BRIEF_ORACLE: {
-			ENG: "{PROMPT_BRIEF_HEADER} {Select:type,view_card,PROMPT_BRIEF_ORACLE_VIEW,oracle_change_team,PROMPT_BRIEF_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_BRIEF_ORACLE_BLOCK_ACTION,role_action,PROMPT_BRIEF_ORACLE_ROLE_ACTION,oracle_announce_even_odd,PROMPT_BRIEF_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_BRIEF_ORACLE_HUNT}",
-			SWE: "{PROMPT_BRIEF_HEADER} {Select:type,view_card,PROMPT_BRIEF_ORACLE_VIEW,oracle_change_team,PROMPT_BRIEF_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_BRIEF_ORACLE_BLOCK_ACTION,role_action,PROMPT_BRIEF_ORACLE_ROLE_ACTION,oracle_announce_even_odd,PROMPT_BRIEF_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_BRIEF_ORACLE_HUNT,oracle_force_ripple,PROMPT_BRIEF_ORACLE_FORCE_RIPPLE}",
+			COMMON: "{PROMPT_BRIEF_HEADER} {Select:type,view_card,PROMPT_BRIEF_ORACLE_VIEW,oracle_change_team,PROMPT_BRIEF_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_BRIEF_ORACLE_BLOCK_ACTION,role_action,PROMPT_BRIEF_ORACLE_ROLE_ACTION,oracle_announce_even_odd,PROMPT_BRIEF_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_BRIEF_ORACLE_HUNT,oracle_force_ripple,PROMPT_BRIEF_ORACLE_FORCE_RIPPLE}",
 		},
 		PROMPT_BRIEF_ORACLE_BLOCK_ACTION: {
 			ENG: "block a player's action.",
@@ -481,8 +475,7 @@ const Localization = (() => {
 			SWE: "<Fråga om spelaren vill tvinga fram en krusning (ja/nej)>.",
 		},
 		PROMPT_BRIEF_ORACLE_HUNT: {
-			ENG: "{Select:huntActive,true,PROMPT_BRIEF_ORACLE_HUNT_STARTED,false,PROMPT_BRIEF_ORACLE_HUNT_AVOIDED}",
-			SWE: "{Select:huntActive,true,PROMPT_BRIEF_ORACLE_HUNT_STARTED,false,PROMPT_BRIEF_ORACLE_HUNT_AVOIDED}",
+			COMMON: "{Select:huntActive,true,PROMPT_BRIEF_ORACLE_HUNT_STARTED,false,PROMPT_BRIEF_ORACLE_HUNT_AVOIDED}",
 		},
 		PROMPT_BRIEF_ORACLE_HUNT_AVOIDED: {
 			ENG: "hunt avoided — may wake once to observe all-seeing.{If:showExclusionWarning,PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE}",
@@ -557,8 +550,7 @@ const Localization = (() => {
 			SWE: "spelare {Value:player} agerar som {RoleName:role}.",
 		},
 		PROMPT_BRIEF_RIPPLE_SELECTOR: {
-			ENG: "{Select:type,ripple_timer,PROMPT_BRIEF_RIPPLE_TIMER,ripple_role_action,PROMPT_BRIEF_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_BRIEF_RIPPLE_MUTED,ripple_rebuked,PROMPT_BRIEF_RIPPLE_REBUKED,ripple_view_player,PROMPT_BRIEF_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_BRIEF_RIPPLE_DOUBLE_VOTE}",
-			SWE: "{Select:type,ripple_timer,PROMPT_BRIEF_RIPPLE_TIMER,ripple_role_action,PROMPT_BRIEF_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_BRIEF_RIPPLE_MUTED,ripple_rebuked,PROMPT_BRIEF_RIPPLE_REBUKED,ripple_view_player,PROMPT_BRIEF_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_BRIEF_RIPPLE_DOUBLE_VOTE}",
+			COMMON: "{Select:type,ripple_timer,PROMPT_BRIEF_RIPPLE_TIMER,ripple_role_action,PROMPT_BRIEF_RIPPLE_ROLE_ACTION,ripple_mute,PROMPT_BRIEF_RIPPLE_MUTED,ripple_rebuked,PROMPT_BRIEF_RIPPLE_REBUKED,ripple_view_player,PROMPT_BRIEF_RIPPLE_VIEW_PLAYER,ripple_double_vote,PROMPT_BRIEF_RIPPLE_DOUBLE_VOTE}",
 		},
 		PROMPT_BRIEF_RIPPLE_TIMER: {
 			ENG: "one minute left to discuss.",
@@ -609,8 +601,7 @@ const Localization = (() => {
 			SWE: "{TEAM_WEREWOLF_PLURAL}: identifiera varandra (ensam: titta på mittenkort).",
 		},
 		PROMPT_BRIEF_WEREWOLF_TEAM: {
-			ENG: "{If:hasDreamWolf,PROMPT_BRIEF_WEREWOLF_DREAMWOLF,PROMPT_BRIEF_WEREWOLF_STANDARD}",
-			SWE: "{If:hasDreamWolf,PROMPT_BRIEF_WEREWOLF_DREAMWOLF,PROMPT_BRIEF_WEREWOLF_STANDARD}",
+			COMMON: "{If:hasDreamWolf,PROMPT_BRIEF_WEREWOLF_DREAMWOLF,PROMPT_BRIEF_WEREWOLF_STANDARD}",
 		},
 		PROMPT_BRIEF_WITCH: {
 			ENG: "{PROMPT_BRIEF_HEADER} look at a center card, give it away if you want.",
@@ -634,8 +625,8 @@ const Localization = (() => {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_COUNT_ACTION} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_COUNT_ACTION: {
-			ENG: "Swap another player's marker for {ROLE_COUNT_DEFINITE_GENITIVE} marker. {Pause:short}",
-			SWE: "Byt ut en annan spelares märke mot {ROLE_COUNT_DEFINITE_GENITIVE} märke. {Pause:short}",
+			ENG: "Swap another player's marker for the {TOKEN_MARK_COUNT}. {Pause:short}",
+			SWE: "Byt ut en annan spelares märke mot {TOKEN_MARK_COUNT}. {Pause:short}",
 		},
 		PROMPT_CUPID: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_CUPID_ACTION} {PROMPT_SLEEP_CALL}",
@@ -740,6 +731,10 @@ const Localization = (() => {
 		},
 		PROMPT_EMPTY: {
 			COMMON: "",
+		},
+		PROMPT_EVEN: {
+			ENG: "even",
+			SWE: "jämnt",
 		},
 		PROMPT_EXPOSER: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_EXPOSER_ACTION} {PROMPT_SLEEP_CALL}",
@@ -856,6 +851,10 @@ const Localization = (() => {
 			ENG: "{ROLE_NOSTRADAMUS_DEFINITE} now belongs to {Identity:nostradamusTeam,plural,definite}. {PROMPT_NOSTRADAMUS_SUFFIX}",
 			SWE: "{ROLE_NOSTRADAMUS_DEFINITE} tillhör nu {Identity:nostradamusTeam,plural,definite}. {PROMPT_NOSTRADAMUS_SUFFIX}",
 		},
+		PROMPT_ODD: {
+			ENG: "odd",
+			SWE: "udda",
+		},
 		PROMPT_ORACLE: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {Select:type,view_card,PROMPT_ORACLE_VIEW_CARD,oracle_change_team,PROMPT_ORACLE_CHANGE_TEAM,oracle_block_action,PROMPT_ORACLE_BLOCK_ACTION,role_action,PROMPT_DO_ROLE_ACTION,oracle_announce_even_odd,PROMPT_ORACLE_EVEN_ODD,oracle_hunt,PROMPT_ORACLE_HUNT,oracle_force_ripple,PROMPT_ORACLE_FORCE_RIPPLE} {PROMPT_SLEEP_CALL}",
 		},
@@ -868,8 +867,7 @@ const Localization = (() => {
 			SWE: "Vill du gå med i {Identity:joinTeam,definite,genitive} lag? {Input:oracleJoinAccepted,choice,PROMPT_ORACLE_CHANGE_TEAM_MANUAL,short,defaultJoinAccepted,true,UI_YES,PROMPT_ORACLE_CHANGE_TEAM_ACCEPTED,false,UI_NO,PROMPT_ORACLE_CHANGE_TEAM_DECLINED}",
 		},
 		PROMPT_ORACLE_CHANGE_TEAM_ACCEPTED: {
-			ENG: "{Select:joinFull,true,PROMPT_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_ORACLE_CHANGE_TEAM_PARTIAL}",
-			SWE: "{Select:joinFull,true,PROMPT_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_ORACLE_CHANGE_TEAM_PARTIAL}",
+			COMMON: "{Select:joinFull,true,PROMPT_ORACLE_CHANGE_TEAM_FULL,false,PROMPT_ORACLE_CHANGE_TEAM_PARTIAL}",
 		},
 		PROMPT_ORACLE_CHANGE_TEAM_DECLINED: {
 			ENG: "{ROLE_ORACLE_DEFINITE} remains on {TEAM_VILLAGE_DEFINITE_GENITIVE} team.",
@@ -891,16 +889,16 @@ const Localization = (() => {
 			COMMON: "{AutoKey:PROMPT_ORACLE_EVEN_ODD_MANUAL,PROMPT_ORACLE_EVEN_ODD_AUTO}",
 		},
 		PROMPT_ORACLE_EVEN_ODD_AUTO: {
-			ENG: "State whether you have an even or odd player number. {Input:oracleEvenOdd,choice,PROMPT_ORACLE_EVEN_ODD_MANUAL,short,defaultEvenOdd,even,UI_EVEN,PROMPT_ORACLE_EVEN_ODD_RESULT,odd,UI_ODD,PROMPT_ORACLE_EVEN_ODD_RESULT}",
-			SWE: "Ange om du har ett jämnt eller udda spelarnummer. {Input:oracleEvenOdd,choice,PROMPT_ORACLE_EVEN_ODD_MANUAL,short,defaultEvenOdd,even,UI_EVEN,PROMPT_ORACLE_EVEN_ODD_RESULT,odd,UI_ODD,PROMPT_ORACLE_EVEN_ODD_RESULT}",
+			ENG: "State whether you have an even or odd player number. {Input:oracleEvenOdd,choice,PROMPT_ORACLE_EVEN_ODD_MANUAL,short,defaultEvenOdd,even,PROMPT_EVEN,PROMPT_ORACLE_EVEN_ODD_RESULT,odd,PROMPT_ODD,PROMPT_ORACLE_EVEN_ODD_RESULT}",
+			SWE: "Ange om du har ett jämnt eller udda spelarnummer. {Input:oracleEvenOdd,choice,PROMPT_ORACLE_EVEN_ODD_MANUAL,short,defaultEvenOdd,even,PROMPT_EVEN,PROMPT_ORACLE_EVEN_ODD_RESULT,odd,PROMPT_ODD,PROMPT_ORACLE_EVEN_ODD_RESULT}",
 		},
 		PROMPT_ORACLE_EVEN_ODD_MANUAL: {
 			ENG: "<Narrator: reveal whether {ROLE_ORACLE_DEFINITE} has an even or odd player number>.",
 			SWE: "<Berättare: avslöja om {ROLE_ORACLE_DEFINITE} har ett jämnt eller udda spelarnummer>.",
 		},
 		PROMPT_ORACLE_EVEN_ODD_RESULT: {
-			ENG: "{ROLE_ORACLE_DEFINITE} has an {Select:oracleEvenOdd,even,UI_EVEN,odd,UI_ODD} player number.",
-			SWE: "{ROLE_ORACLE_DEFINITE} har ett {Select:oracleEvenOdd,even,UI_EVEN,odd,UI_ODD} spelarnummer.",
+			ENG: "{ROLE_ORACLE_DEFINITE} has an {Select:oracleEvenOdd,even,PROMPT_EVEN,odd,PROMPT_ODD} player number.",
+			SWE: "{ROLE_ORACLE_DEFINITE} har ett {Select:oracleEvenOdd,even,PROMPT_EVEN,odd,PROMPT_ODD} spelarnummer.",
 		},
 		PROMPT_ORACLE_FORCE_RIPPLE: {
 			ENG: "Do you want to force a ripple in space-time? {Input:oracleForcedRipple,choice,PROMPT_ORACLE_FORCE_RIPPLE_MANUAL,short,defaultRippleForce,true,UI_YES,PROMPT_ORACLE_FORCE_RIPPLE_YES,false,UI_NO,PROMPT_ORACLE_FORCE_RIPPLE_NO}",
@@ -978,8 +976,7 @@ const Localization = (() => {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_RASCAL_ACTION} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_RASCAL_ACTION: {
-			ENG: "{PROMPT_DO_ROLE_ACTION}",
-			SWE: "{PROMPT_DO_ROLE_ACTION}",
+			COMMON: "{PROMPT_DO_ROLE_ACTION}",
 		},
 		PROMPT_RENFIELD: {
 			ENG: "{PROMPT_WAKE_CALL} {TEAM_VAMPIRE_PLURAL}, point at the player you have given {TEAM_VAMPIRE_DEFINITE_GENITIVE} marker. {ROLE_RENFIELD}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_RENFIELD_DOPPELGANGER} {TEAM_VAMPIRE_PLURAL}, stop pointing.",
@@ -1184,8 +1181,7 @@ const Localization = (() => {
 			SWE: "{ROLE_DOPPELGANGER}, om du såg {Identity:instigator,definite}, vakna.",
 		},
 		PROMPT_WEREWOLF_TEAM: {
-			ENG: "{If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF,PROMPT_WEREWOLF_TEAM_CORE_STANDARD}",
-			SWE: "{If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF,PROMPT_WEREWOLF_TEAM_CORE_STANDARD}",
+			COMMON: "{If:hasDreamWolf,PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF,PROMPT_WEREWOLF_TEAM_CORE_STANDARD}",
 		},
 		PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF: {
 			ENG: "{TEAM_WEREWOLF_PLURAL}, except for {ROLE_DREAMWOLF_DEFINITE}, wake up and identify each other. {ROLE_DREAMWOLF}, stick out your thumb so the other {TEAM_WEREWOLF_PLURAL} can see who you are. If there is only one {TEAM_WEREWOLF}, you may look at one of the center cards. {Pause:medium} {ROLE_DREAMWOLF}, put your thumb down. {TEAM_WEREWOLF_PLURAL}, go to sleep.",
@@ -3718,10 +3714,6 @@ const Localization = (() => {
 			ENG: "Stop",
 			SWE: "Stopp",
 		},
-		UI_EVEN: {
-			ENG: "even",
-			SWE: "jämnt"
-		},
 		UI_FILTER_COMPLEXITY: {
 			ENG: "Difficulty",
 			SWE: "Svårighet",
@@ -3799,10 +3791,6 @@ const Localization = (() => {
 		},
 		UI_NUM_9: {
 			COMMON: "9",
-		},
-		UI_ODD: {
-			ENG: "odd",
-			SWE: "udda"
 		},
 		UI_PLAYER_COUNT: {
 			ENG: "Number of players:",
@@ -3939,6 +3927,14 @@ const Localization = (() => {
 		UI_SETTING_NARRATION_PAUSE_SHORT: {
 			ENG: "Short pause (s)",
 			SWE: "Kort pauslängd (s)",
+		},
+		UI_SETTING_NARRATION_TIMER_EXPIRED: {
+			ENG: "Play day end instructions",
+			SWE: "Spela upp instruktioner vid dagens slut",
+		},
+		UI_SETTING_NARRATION_TIMER_WARNINGS: {
+			ENG: "Play warnings at 30s/60s remaining on timer",
+			SWE: "Spela upp varningar vid 30s/60s kvar",
 		},
 		UI_SETTING_ORACLE_BLOCK_ACTION: {
 			ENG: "Prevent another player from waking",
@@ -4424,7 +4420,7 @@ const Localization = (() => {
 		},
 	};
 
-	// Table for numeric to key and language values, 
+	// Table of numeric values with their key and per-language lexical forms, used as a source for automatic insertion of numeric localization keys
 	const NUMBER_DATA = {
 		FIELDS: ["key", "ENG", "SWE"],	// Identifies the field order, specifically the language of each column index
 		COUNT: 30, // Amount of numbers represented in the table
@@ -4468,6 +4464,7 @@ const Localization = (() => {
 		_loadLanguage();
 		_initNumbers();
 		_deepFreeze(NUMBER_DATA);
+		_deepFreeze(LOCALIZATION_KEYS);
 	}
 	
 	function _initNumbers() {
@@ -4502,19 +4499,27 @@ const Localization = (() => {
 	_init();
 
 
-
 	/* =========================
 	   Private functions
 	   ========================= */
 
-	// Persists the current language (LANG) to localStorage. No parameters, no return value.
+	// Persists the current language (LANG) to localStorage
 	function _saveLanguage() {
 		localStorage.setItem(LANGUAGE_STORE, LANG);
 	}
 
-	// Restores the persisted language into LANG, if one was saved; otherwise leaves LANG at its existing (default) value. No parameters,
+	// Restores the persisted language into LANG, if one was saved; otherwise leaves LANG at its existing (default) value
 	function _loadLanguage() {
 		LANG = localStorage.getItem(LANGUAGE_STORE) || LANG;
+	}
+
+	// Shared helper
+	function _parseExpressionCall(inner) {
+		const colonIndex = inner.indexOf(":");
+		const name = colonIndex === -1 ? inner : inner.slice(0, colonIndex);
+		const argStr = colonIndex === -1 ? "" : inner.slice(colonIndex + 1);
+		const args = argStr === "" ? [] : _splitTemplateArgs(argStr).map(_parseTemplateArg);
+		return { name, args };
 	}
 
 	/*
@@ -4523,7 +4528,7 @@ const Localization = (() => {
 	 * left in place; _parseTemplateArg still strips them. Unterminated quotes are not an error here - the trailing text is just returned
 	 * as-is and will fail the quote check in _parseTemplateArg, same as any other malformed argument.
 	 *
-	 * argStr - the raw argument text from a {Function:...} call, already isolated by _resolveTemplate.
+	 *   argStr - the raw argument text from a {Function:...} call, already isolated by _resolveTemplate.
 	 *
 	 * Returns an array of raw (untrimmed, still-quoted) argument substrings.
 	 */
@@ -4553,7 +4558,7 @@ const Localization = (() => {
 	/*
 	 * Converts one raw argument string from a template primitive call (e.g. the "true" in {Function:true}) into its typed value.
 	 *
-	 * value - the raw, comma-split argument text, not yet trimmed or unquoted.
+	 *   value - the raw, comma-split argument text, not yet trimmed or unquoted.
 	 *
 	 * Returns, in order of precedence: "" for an empty/whitespace-only argument; the literals true/false/null/undefined as their actual
 	 * typed values; a quoted string ('...' or "...") with its quotes stripped and wrapped in a class in order to ensure it is properly
@@ -4601,159 +4606,76 @@ const Localization = (() => {
 	}
 
 	/*
-	 * Iteratively resolves template expressions embedded within localized text.
+	 * Iteratively resolves template expressions embedded in text until none remain (or MAX_ITERATIONS is hit).
 	 *
-	 * Templates are entered into localized strings using the bracket {...} notation. Templates can by default substitute localized keys directly. If a function
-	 * table is provided, it can also call named primitives with arguments. Arguments are provided as comma separated values, prefixed by a colon.
-	 *
-	 * A name that matches an entry in funcs always takes priority over a plain localization key of the same name - {Break} calls
-	 * funcs.Break(data) even though "Break" isn't itself a real localization key, and would still do so even if it happened to be one.
-	 *
-	 * Template functions may themselves return templates, allowing complex narration to be assembled from small reusable components. Resolution continues until no
-	 * template expressions remain or the maximum iteration count is reached.
-	 *
-	 * Template syntax:
-	 *	{KEY}
-	 *		Inserts another localization key.
-	 *	{Function:arg1,arg2,...}
-	 *		Invokes a named function from the supplied function table, e.g. Interpreter.PRIMITIVES. Arguments are always passed as strings, converted to typed
-	 *      values first (e.g. "true" -> boolean true).
-	 *
-	 * An optional data argument and error function can also be provided for extra control over arguments and error handling.
-	 *
-	 *   text    - the text to resolve; typically starts as a single {KEY} (see localize()) but may already contain arbitrary text mixed
-	 *             with further {...} expressions once functions start returning their own templates.
-	 *   funcs   - optional function table (name -> (data, ...args) => string); a name absent from funcs falls back to a plain localization
-	 *             key lookup instead. null/undefined disables function calls entirely, treating every {name...} as a key lookup.
-	 *   data    - opaque value passed as the first argument to every function call; not otherwise inspected here.
-	 *   onError - (type, key, data) => string | undefined, called for "missing_key" (a plain key or function name resolved to nothing) or
-	 *             "max_iterations" (resolution didn't settle within MAX_ITERATIONS - very likely a cyclic reference). Defaults to
-	 *             _defaultTemplateError. See that function for the undefined-return convention on the "max_iterations" path.
-	 *
-	 * Returns the fully resolved, sentence-capitalized, whitespace-cleaned text (see _normalizeSentences/_trimExtraSpaces).
+	 * Segments distinguish text already resolved (final: true) from text that may still contain further
+	 * expressions to expand. Returns the fully resolved, sentence-capitalized and whitespace-cleaned text.
 	 */
 	function _resolveTemplate(text, funcs, data, onError) {
-		return _resolveTemplateCore(text, funcs, data, onError).text;
-	}
+		let segments = [ { text: String(text), final: false } ];
 
-	/*
-	 * Same resolution as _resolveTemplate, but keeps track of which substrings of the final result came from
-	 * which distinct {...} expression, all the way down through recursive expansion (a primitive returning
-	 * another key reference, that key's own COMMON entry containing further primitives, etc.) - so a caller
-	 * can treat each one as an individually addressable "atom" (e.g. for per-role/per-phrase pre-recorded audio
-	 * clips - see Interpreter's automatic-mode splicing) without any change to how localization strings are
-	 * authored.
-	 *
-	 * Instead of rewriting one string in place like _resolveTemplate did, this maintains an ordered list of
-	 * { text, final } chunks. Each pass scans every non-final chunk for {...} matches: a match's replacement
-	 * always becomes a *new* chunk of its own (marked final only once it itself contains no further {...}),
-	 * and any literal text immediately before/after/between matches within the same chunk is split off as its
-	 * own final chunk. Because a match can only ever occupy a contiguous span of exactly one chunk's text (a
-	 * replacement is never glued onto surrounding chunks), this converges on precisely the boundaries between
-	 * "text produced by resolving one {...} expression" and "text that was always literal" - e.g.
-	 * "{Identity:instigator}, vakna." first becomes one chunk (the Identity call spans the whole original
-	 * text), then on the next pass splits into [Identity's result (still unresolved), ", vakna." (already
-	 * final)], and finally the first chunk itself resolves down to a single leaf of plain text.
-	 *
-	 * Every leaf chunk ends up its own atom here - no attempt is made to guess which boundaries are "really"
-	 * static (e.g. a bareword {KEY} reference, which never varies with `data`) and pre-merge them with their
-	 * neighbors. An earlier version of this function tried exactly that, tracking a `dynamic` flag through the
-	 * resolution chain and merging unbroken runs of non-dynamic chunks - but that guess turned out to be both
-	 * unnecessary and occasionally wrong (a bareword role reference sitting inside an {If:...}/{Select:...}
-	 * branch has to be treated as dynamic too, since Localization can't tell "choosing between two whole
-	 * sentences" apart from "choosing a grammar word" - both are just a function call whose result gets
-	 * rescanned for more {...}). TTSManifest.lookupParts now makes that grouping decision instead, empirically,
-	 * by trying every way of joining adjacent atoms and checking what's actually recorded - which strictly
-	 * subsumes any merge this layer could have pre-computed (the same grouping is found whenever that combined
-	 * text is recorded) while staying free to fall back to finer atoms whenever a coarser one isn't recorded,
-	 * something a merge locked in here could never undo. So the simplest, most granular boundary is also the
-	 * most useful one: split at every distinct {...} expression, and let the manifest decide what to combine.
-	 *
-	 * Same parameter contract as _resolveTemplate/localize.
-	 *
-	 * Returns { text, atoms }. text is exactly what _resolveTemplate used to return (all chunks joined, then
-	 * sentence-capitalized/whitespace-cleaned as before). atoms is the ordered list of leaf chunks with empty
-	 * ones dropped (text kept raw/untrimmed otherwise - see the comment where atoms is built, below) - or null
-	 * if resolution hit MAX_ITERATIONS, since a cyclic reference makes the chunk boundaries themselves
-	 * unreliable; callers that don't need atoms should keep using _resolveTemplate/localize, which never
-	 * inspects this field.
-	 */
-	function _resolveTemplateCore(text, funcs, data, onError) {
-		let segments = [{ text, final: false }];
-
-		for (let i = 0; i < MAX_ITERATIONS; i++) {
+		for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
 			let changed = false;
 			const next = [];
 
-			for (const seg of segments) {
-				if (seg.final) { next.push(seg); continue; }
+			for (const segment of segments) {
+				if (segment.final) {
+					next.push(segment);
+					continue;
+				}
 
 				const regex = /\{(.*?)\}/g;
 				let lastIndex = 0;
 				let match;
 				let sawMatch = false;
 
-				while ((match = regex.exec(seg.text)) !== null) {
+				while ((match = regex.exec(segment.text)) !== null) {
 					sawMatch = true;
 					changed = true;
 
-					if (match.index > lastIndex)
-						next.push({ text: seg.text.slice(lastIndex, match.index), final: true });
-
-					const inner = match[1];
-					const colonIdx = inner.indexOf(":");
-					const name = colonIdx === -1 ? inner : inner.slice(0, colonIdx);
-					const argStr = colonIdx === -1 ? "" : inner.slice(colonIdx + 1);
-					const args = argStr === "" ? [] : _splitTemplateArgs(argStr).map(a => _parseTemplateArg(a));
-
-					let replacement;
-					if (funcs && typeof funcs[name] === "function")
-						replacement = funcs[name](data, ...args) ?? "";
-					else {
-						const key = getString(name);
-						replacement = key !== undefined ? key : onError("missing_key", name, data);
+					if (match.index > lastIndex) {
+						next.push({ text: segment.text.slice(lastIndex, match.index), final: true });
 					}
 
-					next.push({ text: String(replacement), final: false });
+					const { name, args } = _parseExpressionCall(match[1]);
+
+					if (funcs && typeof funcs[name] === "function") {
+						const result = funcs[name](data, ...args) ?? "";
+						next.push({ text: String(result), final: false });
+					} else {
+						const replacement = getString(name);
+						const resolved = replacement !== undefined ? replacement : onError("missing_key", name, data);
+						next.push({ text: String(resolved), final: false });
+					}
+
 					lastIndex = regex.lastIndex;
 				}
 
-				if (!sawMatch) { next.push({ ...seg, final: true }); continue; }
+				if (!sawMatch) {
+					next.push({ text: segment.text, final: true });
+					continue;
+				}
 
-				if (lastIndex < seg.text.length)
-					next.push({ text: seg.text.slice(lastIndex), final: true });
+				if (lastIndex < segment.text.length) {
+					next.push({ text: segment.text.slice(lastIndex), final: true });
+				}
 			}
 
 			segments = next;
 
-			if (!changed) break;
+			if (!changed)
+				break;
 
-			if (i === MAX_ITERATIONS - 1) {
-				const joined = segments.map(s => s.text).join("");
-				return { text: onError("max_iterations", text, data) ?? joined, atoms: null };
+			if (iteration === MAX_ITERATIONS - 1) {
+				const joined = segments.map(segment => segment.text).join("");
+
+				return _normalizeSentences(_trimExtraSpaces(onError("max_iterations", text, data) ?? joined));
 			}
 		}
 
-		const joined = segments.map(s => s.text).join("");
+		const joined = segments.map(segment => segment.text).join("");
 
-		// Every leaf chunk becomes its own atom, one per distinct {...} expression (or literal gap between
-		// them) - no attempt is made here to guess which ones are "really" static and could safely be merged.
-		// That decision is made later, empirically, by TTSManifest.lookupParts: it tries every way of grouping
-		// adjacent atoms and picks whichever full covering actually has recordings, which strictly subsumes
-		// any merge this layer could have pre-computed (it can reconstruct the same grouping whenever that
-		// combined text is recorded) while also staying free to fall back to finer atoms whenever a coarser
-		// grouping isn't recorded - something a merge performed here, once locked in, could never undo. Text
-		// is kept raw/untrimmed here (including whitespace-only atoms, e.g. the space IdentityList glues
-		// between two role names) so a caller reconstructing text from atoms gets the same spacing joined
-		// would; trimming/dropping whitespace is left to the caller, which needs different rules depending on
-		// what it's using atoms for (Interpreter trims per-atom only for clip lookup, not for the text it
-		// rebuilds - see _toSequenceFromAtoms).
-		const atoms = segments.map(s => ({ text: s.text })).filter(s => s.text.length > 0);
-
-		return {
-			text: _normalizeSentences(_trimExtraSpaces(joined)),
-			atoms,
-		};
+		return _normalizeSentences(_trimExtraSpaces(joined));
 	}
 
 	/*
@@ -4781,37 +4703,104 @@ const Localization = (() => {
 	 * Most callers should use localize(), which resolves both localization keys and any embedded template expressions.
 	 */
 
+
 	/*
-	 * Resolves key (and anything it expands into) to final narration text - the main entry point for localizing a key.
+	 * Parses one localization template into structural pieces without resolving any expressions.
 	 *
-	 *   key     - the localization key to resolve
-	 *   funcs   - optional list of functions/primitives that the resolver may use for more advanced resolution
-	 *   data    - optional data that gets passed to any primitive function call
-	 *   onError - optional custom error handler in cause errors are encountered during resolution
+	 * Literal text is split at sentence boundaries so every literal span receives the same stable (key,index)
+	 * addressing used by the narration/TTS layers. The actual localized text is retained here solely so final
+	 * rendering can retrieve it later; NarrationData stores only the span reference.
 	 *
-	 * Also see _resolveTemplate for the full parameter contracts (funcs/data/onError) and template syntax. Returns the resolved text.
+	 * Returns undefined when the key does not exist in the current language.
+	 */
+	function parseTemplate(key) {
+		const raw = getString(key);
+
+		if (raw === undefined || raw === null)
+			return undefined;
+
+		const nodes = [];
+		const regex = /\{(.*?)\}/g;
+
+		let lastIndex = 0;
+		let spanIndex = 0;
+		let match;
+
+		const addLiteralSpans = text => {
+			if (text === "")
+				return;
+
+			let remaining = text;
+
+			while (remaining !== "") {
+				const boundary = firstSentenceBoundary(remaining);
+				const spanText = boundary === -1 ? remaining : remaining.slice(0, boundary);
+
+				if (spanText !== "") {
+					nodes.push({ type: "span", key, index: spanIndex++, text: spanText });
+				}
+
+				if (boundary === -1)
+					break;
+
+				remaining = remaining.slice(boundary);
+			}
+		};
+
+		while ((match = regex.exec(raw)) !== null) {
+			addLiteralSpans(raw.slice(lastIndex, match.index));
+			const { name, args } = _parseExpressionCall(match[1]);
+			nodes.push({ type: "expression", name, args });
+			lastIndex = regex.lastIndex;
+		}
+
+		addLiteralSpans(raw.slice(lastIndex));
+
+		return nodes;
+	}
+
+	/*
+	 * Resolves an existing structural span reference back to the literal text currently stored in that
+	 * localization template. Used only by the final text-rendering pass; NarrationData itself never stores this text.
+	 *
+	 * ref must be { type: "span", key, index }. Returns undefined if the referenced span no longer exists.
+	 */
+	function getTemplateSpan(ref) {
+		if (!ref || ref.type !== "span") return undefined;
+
+		const nodes = parseTemplate(ref.key);
+		const span = nodes?.find(node => node.type === "span" && node.index === ref.index);
+		return span?.text;
+	}
+
+	/*
+	 * Resolves a localization key to final, fully-resolved native-language text - the ordinary text API for
+	 * non-narration callers (UI strings, etc). Structural narration instead goes through Localization.parseTemplate()
+	 * and Interpreter; NarrationData never calls this.
 	 */
 	function localize(key, funcs = null, data = null, onError = _defaultTemplateError) {
 		return _resolveTemplate(`{${key}}`, funcs, data, onError);
 	}
 
 	/*
-	 * Same as localize(), but also returns the atom breakdown described in _resolveTemplateCore - for callers
-	 * that need to know which parts of the resolved text came from which distinct template expression (e.g.
-	 * Interpreter's automatic-mode audio splicing). Plain localize() callers are unaffected; this is purely
-	 * additive.
+	 * Finds the position right after the first sentence-ending punctuation mark (., ?, or !) in text, or -1 if
+	 * none exists. Used by this module's own parseTemplate (via addLiteralSpans) and by Interpreter's
+	 * _splitRenderedParts, so the two stay in agreement on where sentences break.
 	 *
-	 * Returns { text, atoms } - see _resolveTemplateCore.
+	 * Unlike a full sentence splitter, this never trims surrounding whitespace - it only reports the boundary
+	 * position, since a caller here is often slicing one fragment of a sentence that continues into a following
+	 * {...} match, and trimming it would drop spacing the next fragment needs.
 	 */
-	function localizeWithAtoms(key, funcs = null, data = null, onError = _defaultTemplateError) {
-		return _resolveTemplateCore(`{${key}}`, funcs, data, onError);
+	function firstSentenceBoundary(text) {
+		const match = text.match(/[.?!]/);
+		return match ? match.index + 1 : -1;
 	}
 
 	/*
-	 * Applies the same sentence-capitalization/whitespace-cleanup localize() applies to its result, to a piece
-	 * of text a caller assembled itself outside the normal resolve loop. Used by Interpreter when it rebuilds
-	 * per-sentence text directly from localizeWithAtoms' atom list (see _toSequenceFromAtoms) rather than from
-	 * one already-cleaned flat string, so both paths end up looking identical to a reader/listener.
+	 * Applies the standard sentence capitalization and whitespace cleanup to text assembled by a caller.
+	 *
+	 * Kept as a public helper because Interpreter constructs rendered text from structural parts rather than
+	 * resolving one complete localization string at once.
 	 */
 	function normalizeText(text) {
 		return _normalizeSentences(_trimExtraSpaces(text));
@@ -4880,10 +4869,12 @@ const Localization = (() => {
 		hasKey,
 		isLiteral,
 		localize,
-		localizeWithAtoms,
 		normalizeText,
 		setLanguage,
 		getNumberTable,
+		firstSentenceBoundary,
+		parseTemplate,
+		getTemplateSpan
 	};
 	
 })();

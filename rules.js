@@ -125,7 +125,8 @@ const Rules = (() => {
 			
 			const questionID = Math.floor(_getCachedRandom(rngKey) * availableQuestions.length);
 			const question = availableQuestions[questionID];
-			const players = _getRandomPlayers(ctx.playerCount, rngKey, 1, 4);
+			const maxPlayers = Math.max(Math.min(Math.floor(ctx.playerCount * 0.3), 4), 1);	// Ensure Empath can't be confirmed by everyone in small games
+			const players = _getRandomPlayers(ctx.playerCount, rngKey, 1, maxPlayers);
 			
 			return { question: question, players: players, count: players.length };
 		},

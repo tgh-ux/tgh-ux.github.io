@@ -1,198 +1,267 @@
+/*
+ * Maps narration to pre-recorded clip names for automatic (spoken) narration - see AutoNarrator/AudioAtlas
+ * for how a clip name actually gets turned into audio; this module only decides *which* clip names a turn
+ * needs, or that none exist and the caller should fall back to synthesis.
+ *
+ * Lookup is always by structural ref, never by wording - see the `_map` comment below for what a ref is and
+ * where it comes from. `MANIFEST` below is this module's only real authored data; see its own comment for
+ * what needs an entry and how an entry is written.
+ */
+
 const TTSManifest = (() => {
-	
+
 	/* =========================
 	   Data
 	   ========================= */
 
+	// A slot in a `MANIFEST` entry's array - see the header above. The identity of the symbol is all that
+	// matters; the description is only ever read by a human looking at this file, never compared against.
+	const PLACEHOLDER = Symbol("this position is a {...} reference - looked up under its own key, not here");
+	const AGGREGATE = Symbol("MANIFEST aggregate");
+
+	// Helper function for aggregating multiple positions/clips into an aggregated clip covering the range
+	function aggregate(count, clip) {
+		return { [AGGREGATE]: true, clip, count };
+	}
+
+	// Helper function for aggregating multiple positions into one of several clips, depending on which key a
+	// dynamic branch resolves to. Branch is zero-based relative to this aggregate's range.
+	function conditionalAggregate(count, alternatives) {
+		return { [AGGREGATE]: true, count, alternatives };
+	}
+
 	/*
-	 * Map of sentences/atoms that can be represented by a pre-recorded clip. Atoms are assembled and 
-	 * tested against entries to find longest fit. The map contains the normalized strings as keys and a clip
-	 * name as value. It is filled at init, first by pre-defined entries (numbers, roles and teams), and then
-	 * by the contents of the manifest object. The manifest content will always overwrite any existing map
-	 * entries, so care needs to be taken for overlapping role/team entries.
+	 * Authored key -> clip definitions, evaluated and flattened during init into `_map`/`_templates`, the two
+	 * structures lookup actually uses.
+	 *
+	 * One entry per localization key that has literal wording of its own worth a clip decision. A key that's
+	 * pure structural routing - every one of its top-level pieces is itself a `{...}` reference, e.g. PROMPT_SEER,
+	 * whose own template is just three key references and connecting whitespace - needs no entry at all: there's
+	 * nothing here for an author to decide, and lookup never needs to "walk into" it, because by the time a part
+	 * reaches this module it already carries the ref of whichever key actually produced it, however deep the
+	 * chain of indirection went. So an entry only exists for a key like PROMPT_VIEW_CARD_PLAYER_ANY, which mixes
+	 * template references with its own literal " från " - or a role/team name, or a number, both of which are
+	 * populated automatically at init instead of authored here at all (see _initRoles/_initNumbers).
+	 *
+	 * Each entry maps one or more language-set keys - "|"-joined language codes, e.g. "SWE|ENG" or a single
+	 * "SWE" - to the array that applies for exactly those languages. Since lookup is entirely ref-based, a clip
+	 * name doesn't mean anything different per language - it's just the name AudioAtlas looks up within whichever
+	 * language's own atlas is currently loaded - so most entries only ever need ONE variant covering every
+	 * supported language at once (e.g. "SWE|ENG": [...]), and only the keys where the languages' actual wording
+	 * structurally diverges (say, English inserting a literal "the" that Swedish's template never needed a slot
+	 * for) need to be split into separate variants, one per group of languages that share a structure. There's no
+	 * single privileged "default" group the way Localization's COMMON works - every variant is just a
+	 * language-set claiming whichever languages belong to it, and _selectVariant picks whichever one covers the
+	 * language currently active (throwing if none do, or if more than one ambiguously does - see there).
+	 *
+	 * An entry's array is written by reading that key's own raw template left to right: a string names the clip
+	 * for that literal span; PLACEHOLDER marks a `{...}` reference (a bareword key or a primitive call, no
+	 * distinction needed - see _registerKey) and is never itself registered, since whatever ends up there will
+	 * carry its own ref back to whichever key actually produced it. A PLACEHOLDER's position in the array is
+	 * purely documentation for whoever's authoring this - it consumes no span index of the key it's declared
+	 * under, exactly mirroring how a `{...}` match never advances Localization's own literalIndex counter (see
+	 * there). Concretely, for PROMPT_VIEW_CARD_PLAYER_ANY's template -
+	 *   "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} från
+	 *    {Select:count,1,...SINGLE,*,...MULTI} {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL}"
+	 * - the array is [ PLACEHOLDER, PLACEHOLDER, "from", PLACEHOLDER, PLACEHOLDER ]: four template references
+	 * (whatever they each resolve to is looked up independently, under their own key's own entry) and exactly
+	 * one literal span of this key's own, " från ", at index 0 (the only index this key's own template ever
+	 * assigns, since every other piece is a reference elsewhere) - registered here as "from". No entry needs to
+	 * account for how many *parts* a `{...}` reference eventually produces - an IdentityList or ValueList run of
+	 * any length is still just a run of individually-refed parts once it reaches this module (see Interpreter's
+	 * IdentityList/ValueList primitives), each looked up on its own exactly like any other part; nothing here
+	 * needs to know it came from a list at all.
+	 *
+	 * Aggregation - collapsing a known run of clips into one better-prosody recording, e.g. the Doppelganger's
+	 * echoed wake call, or a fully single-clip sentence with no part-level breakdown at all - is authored as an
+	 * optional `groups` list alongside a key's `clips` (see _registerGroup for the exact shape). A group names a
+	 * contiguous range of that key's own array positions - including PLACEHOLDER ones - to collapse into one
+	 * clip; it's compiled at init time into a fixed, fully-resolved sequence of exact refs, so lookup never
+	 * matches on wording, only on refs, same as everything else here. This only works when every position in the
+	 * range is statically knowable ahead of time - a literal span, or a PLACEHOLDER standing for a bareword
+	 * {OTHER_KEY} reference (never a primitive call with arguments, whose target key depends on turn data). This
+	 * isn't a corner deliberately left uncut: a genuinely data-dependent position is exactly the case where
+	 * pre-aggregating would mean recording a combinatorial explosion of variants instead of splicing - the same
+	 * case an author would never choose to aggregate by hand either. See _registerGroup for what happens if a
+	 * group's range includes one anyway (a clear error at init, not a silent wrong splice).
+	 */
+	const MANIFEST = {
+		/*
+		These keys need per-language difference, not counting keys with aggregated clips. The remaining non-aggregated (and maybe some aggregated) keys can reuse structure for both Swedish and English
+		PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS
+		PROMPT_ALPHAWOLF_ACTION
+		PROMPT_RIPPLE_DOUBLE_VOTE
+		PROMPT_RIPPLE_MUTED
+		PROMPT_RIPPLE_REBUKED
+		PROMPT_VIEW_CARD_PLAYER_SPECIFIC
+		*/
+
+		UI_DAYTIMER_60S_WARNING:                        { "SWE|ENG": [ "timer_60s_warning" ] },
+		UI_DAYTIMER_30S_WARNING:                        { "SWE|ENG": [ "timer_30s_warning" ] },
+		UI_DAYTIMER_EXPIRED:                            { "SWE|ENG": [ aggregate(4, "timer_expired") ] },
+
+		GRAMMAR_CARD_SINGULAR:                          { "SWE|ENG": [ "card" ] },
+		GRAMMAR_CARD_PLURAL:                            { "SWE|ENG": [ "cards" ] },
+		GRAMMAR_PLAYER_SINGULAR:                        { "SWE|ENG": [ "player" ] },
+		GRAMMAR_PLAYER_PLURAL:                          { "SWE|ENG": [ "players" ] },
+		LIST_AND:                                       { "SWE|ENG": [ "list_and" ] },
+		LIST_OR:                                        { "SWE|ENG": [ "list_or" ] },
+
+		SPECIAL_ALL:                                    { "SWE|ENG": [ "identity_all_players" ] },
+		SPECIAL_LOVERS:                                 { "SWE|ENG": [ "identity_lovers" ] },
+
+		PROMPT_ALIEN_TEAM:                              { "SWE|ENG": [ PLACEHOLDER, "wake_and_identify", PLACEHOLDER, PLACEHOLDER, PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_ALIEN_TEAM_ACTION_NOTHING:               { "SWE|ENG": [ "alien_team_do_nothing" ] },
+		PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS:            { "SWE|ENG": [ "alien_team_show_cards" ] },
+		PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE: { "SWE|ENG": [ "view_card_prefix_together", PLACEHOLDER ] },
+		PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL: { "SWE|ENG": [ "view_card_prefix_individual", PLACEHOLDER ] },
+		PROMPT_APPRENTICEASSASSIN:                      { "SWE|ENG": [ PLACEHOLDER, "generic_wake", PLACEHOLDER, PLACEHOLDER, "generic_sleep", PLACEHOLDER ] },
+		PROMPT_AURASEER_DOPPELGANGER:                   { "SWE|ENG": [ PLACEHOLDER, "others_thumb_out", PLACEHOLDER ] },
+		PROMPT_BEHOLDER_DOPPELGANGER:                   { "SWE|ENG": [ PLACEHOLDER, "others_thumb_out", PLACEHOLDER, "shared_may_view_cards", PLACEHOLDER ] },
+		PROMPT_BLOB_OBJECTIVE_ALONE:                    { "SWE|ENG": [ "blob_solo" ] },
+		PROMPT_CHECK_MARKS_ACTION:                      { "SWE|ENG": [ "check_marks" ] },
+		PROMPT_COPYCAT_ACTION:                          { "SWE|ENG": [ "copycat_1", "doppelganger_2", "copycat_3" ] },
+		PROMPT_CURATOR_ACTION:                          { "SWE|ENG": [ "curator_1" ] },
+		PROMPT_DOPPELGANGER_ACTION:                     { "SWE|ENG": [ "doppelganger_1", "doppelganger_2", PLACEHOLDER ] },
+		PROMPT_DOPPELGANGER_IMMEDIATE_ACTION:           { "SWE|ENG": [ "doppelganger_3_prefix", PLACEHOLDER, "doppelganger_3_suffix" ] },
+		PROMPT_DOPPELGANGER_SUFFIX:                     { "SWE|ENG": [ "doppelganger_4_prefix", PLACEHOLDER, "doppelganger_4_suffix", PLACEHOLDER ] },
+		PROMPT_DRUNK_ACTION:                            { "SWE|ENG": [ "drunk_1" ] },
+		PROMPT_EMPATH_ACTION:                           { "SWE|ENG": [ "empath_1", PLACEHOLDER, PLACEHOLDER, "empath_2", PLACEHOLDER ] },
+		PROMPT_EMPATH_QUESTION_10:                      { "SWE|ENG": [ "empath_q_10" ] },
+		PROMPT_EMPATH_QUESTION_11:                      { "SWE|ENG": [ "empath_q_11" ] },
+		PROMPT_EMPATH_QUESTION_1:                       { "SWE|ENG": [ "empath_q_1" ] },
+		PROMPT_EMPATH_QUESTION_2:                       { "SWE|ENG": [ "empath_q_2" ] },
+		PROMPT_EMPATH_QUESTION_3:                       { "SWE|ENG": [ "empath_q_3" ] },
+		PROMPT_EMPATH_QUESTION_4:                       { "SWE|ENG": [ "empath_q_4" ] },
+		PROMPT_EMPATH_QUESTION_6:                       { "SWE|ENG": [ "empath_q_6" ] },
+		PROMPT_EMPATH_QUESTION_7:                       { "SWE|ENG": [ "empath_q_7" ] },
+		PROMPT_EMPATH_QUESTION_8:                       { "SWE|ENG": [ "empath_q_8" ] },
+		PROMPT_EMPATH_QUESTION_9:                       { "SWE|ENG": [ "empath_q_9" ] },
+		PROMPT_EXPOSER_ACTION:                          { "SWE|ENG": [ "exposer_1", PLACEHOLDER, "view_card_suffix_center" ] },
+		PROMPT_FEUDINGALIENS:                           { "SWE|ENG": [ PLACEHOLDER, PLACEHOLDER, "wake_and_identify", PLACEHOLDER ] },
+		PROMPT_GREMLIN_ACTION:                          { "SWE|ENG": [ "gremlin_1" ] },
+		PROMPT_INSOMNIAC_ACTION:                        { "SWE|ENG": [ "insomniac_1" ] },
+		PROMPT_LOVERS:                                  { "SWE|ENG": [ PLACEHOLDER, "wake_and_identify", "lovers_1", PLACEHOLDER ] },
+		PROMPT_MARKSMAN_ACTION:                         { "SWE|ENG": [ "marksman_1", "marksman_2" ] },
+		PROMPT_MASON:                                   { "SWE|ENG": [ PLACEHOLDER, PLACEHOLDER, "wake_and_identify", PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_NOSTRADAMUS_ACTION:                      { "SWE|ENG": [ "nostradamus_1", PLACEHOLDER ] },
+		PROMPT_NOSTRADAMUS_SUFFIX:                      { "SWE|ENG": [ "nostradamus_5", PLACEHOLDER ] },
+		PROMPT_NOSTRADAMUS_WARNING:                     { "SWE|ENG": [ "paranormalinvestigator_2", PLACEHOLDER, "nostradamus_3", PLACEHOLDER ] },
+		PROMPT_NOSTRADAMUS_WARNING_AUTO_HINT:           { "SWE|ENG": [ "nostradamus_auto" ] },
+		PROMPT_ORACLE_EVEN_ODD_AUTO:                    { "SWE|ENG": [ "oracle_even_odd" ] },
+		PROMPT_ORACLE_FORCE_RIPPLE:                     { "SWE|ENG": [ "oracle_force_ripple" ] },
+		PROMPT_ORACLE_FORCE_RIPPLE_NO:                  { "SWE|ENG": [ "oracle_force_ripple_no" ] },
+		PROMPT_ORACLE_FORCE_RIPPLE_YES:                 { "SWE|ENG": [ "oracle_force_ripple_yes" ] },
+		PROMPT_ORACLE_HUNT:                             { "SWE|ENG": [ "oracle_guess_1", PLACEHOLDER ] },
+		PROMPT_ORACLE_HUNT_AVOIDED:                     { "SWE|ENG": [ "oracle_guess_right_1", "oracle_guess_right_2", PLACEHOLDER ] },
+		PROMPT_ORACLE_HUNT_OMNISCIENCE:                 { "SWE|ENG": [ "oracle_guess_right_3", PLACEHOLDER ] },
+		PROMPT_PARANORMALINVESTIGATOR_ACTION:           { "SWE|ENG": [ "paranormalinvestigator_1", PLACEHOLDER ] },
+		PROMPT_PARANORMALINVESTIGATOR_WARNING:          { "SWE|ENG": [ "paranormalinvestigator_2", PLACEHOLDER, "paranormalinvestigator_3" ] },
+		PROMPT_PICKPOCKET_ACTION:                       { "SWE|ENG": [ "pickpocket_1", "pickpocket_2" ] },
+		PROMPT_RASCAL_ACTION:                           { "SWE|ENG": [ PLACEHOLDER ] },
+		PROMPT_REVEALER_ACTION:                         { "SWE|ENG": [ "revealer_1", PLACEHOLDER ] },
+		PROMPT_REVEALER_HIDDEN_ROLE:                    { "SWE|ENG": [ "revealer_2", PLACEHOLDER, "revealer_3" ] },
+		PROMPT_RIPPLE_CONTENT:                          { "SWE|ENG": [ "ripple", PLACEHOLDER ] },
+		PROMPT_RIPPLE_ROLE_ACTION:                      { "SWE|ENG": [ "player", PLACEHOLDER, "generic_wake", PLACEHOLDER, "player", PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_RIPPLE_TIMER:                            { "SWE|ENG": [ "ripple_timer" ] },
+		PROMPT_RIPPLE_VIEW_PLAYER:                      { "SWE|ENG": [ "player", PLACEHOLDER, "generic_wake", PLACEHOLDER, "player", PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_ROBBER_ACTION:                           { "SWE|ENG": [ "robber_1", "robber_2", "robber_3" ] },
+		PROMPT_SEER_ACTION:                             { "SWE|ENG": [ "seer_1" ] },
+		PROMPT_SLEEP_CALL:                              { "SWE|ENG": [ PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_SLEEP_CALL_DOPPELGANGER:                 { "SWE|ENG": [ PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_TROUBLEMAKER_ACTION:                     { "SWE|ENG": [ "troublemaker_1" ] },
+		PROMPT_VIEW_CARD:                               { "SWE|ENG": [ "view_card_prefix_solo", PLACEHOLDER ] },
+		PROMPT_VIEW_CARD_CENTER:                        { "SWE|ENG": [ PLACEHOLDER, "view_card_suffix_center" ] },
+		PROMPT_VIEW_CARD_NEIGHBOR_ANY:                  { "SWE|ENG": [ "view_card_suffix_any_neighbor" ] },
+		PROMPT_VIEW_CARD_NEIGHBOR_BOTH:                 { "SWE|ENG": [ "view_card_suffix_both_neighbors" ] },
+		PROMPT_VIEW_CARD_NEIGHBOR_LEFT:                 { "SWE|ENG": [ "view_card_suffix_left_neighbor" ] },
+		PROMPT_VIEW_CARD_NEIGHBOR_RIGHT:                { "SWE|ENG": [ "view_card_suffix_right_neighbor" ] },
+		PROMPT_VIEW_CARD_SELF:                          { "SWE|ENG": [ "view_card_suffix_own" ] },
+		PROMPT_VILLAGEIDIOT_ACTION:                     { "SWE|ENG": [ "villageidiot_1" ] },
+		PROMPT_WAKE_CALL:                               { "SWE|ENG": [ PLACEHOLDER, "generic_wake" ] },
+		PROMPT_WITCH_ACTION:                            { "SWE|ENG": [ "witch_1", "witch_2" ] },
+		PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN:            { SWE: [ "all_hands_out", aggregate(2, "alien_team_turncoat_1"), aggregate(3, "alien_team_turncoat_2a"), "all_hands_down" ] },
+		PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION:           { SWE: [ "all_hands_out", aggregate(2, "alien_team_turncoat_1"), aggregate(3, "alien_team_turncoat_2b"), "all_hands_down" ] },
+		PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS:           { SWE: [ conditionalAggregate(5, { DIRECTION_LEFT: "alien_team_shift_cards_left", DIRECTION_RIGHT: "alien_team_shift_cards_right" }) ] },
+		PROMPT_ALIEN_TEAM_COW:                          { SWE: [ PLACEHOLDER, PLACEHOLDER, "hand_out", aggregate(6, "alien_team_cow_1"), PLACEHOLDER, "hand_down" ] },
+		PROMPT_ALIEN_TEAM_COW_DOPPELGANGER:             { SWE: [ aggregate(4, "alien_team_cow_doppelganger") ] },
+		PROMPT_ALPHAWOLF_ACTION:                        { SWE: [ aggregate(2, "alphawolf_1") ] },
+		PROMPT_APPRENTICEASSASSIN_ACTION:               { SWE: [ aggregate(2, "apprenticeassassin_1"), aggregate(2, "apprenticeassassin_2"), PLACEHOLDER ] },
+		PROMPT_APPRENTICEASSASSIN_DOPPELGANGER:         { SWE: [ aggregate(2, "doppelganger_wake_prefix"), PLACEHOLDER, "generic_wake", PLACEHOLDER, PLACEHOLDER ] },
+		PROMPT_APPRENTICETANNER:                        { SWE: [ PLACEHOLDER, aggregate(4, "apprenticetanner_1"), PLACEHOLDER, PLACEHOLDER, PLACEHOLDER, "thumb_down" ] },
+		PROMPT_APPRENTICETANNER_DOPPELGANGER:           { SWE: [ PLACEHOLDER, aggregate(4, "apprenticetanner_doppelganger"), PLACEHOLDER ] },
+		PROMPT_ASSASSIN_ACTION:                         { SWE: [ aggregate(2, "assassin_1") ] },
+		PROMPT_AURASEER:                                { SWE: [ PLACEHOLDER, PLACEHOLDER, aggregate(3, "auraseer_1"), PLACEHOLDER, PLACEHOLDER, "all_thumbs_down" ] },
+		PROMPT_BEHOLDER:                                { SWE: [ PLACEHOLDER, PLACEHOLDER, aggregate(3, "beholder_1"), PLACEHOLDER, "shared_may_view_cards", PLACEHOLDER, PLACEHOLDER, "all_thumbs_down" ] },
+		PROMPT_BLOB_OBJECTIVE_MULTI:                    { SWE: [ "blob_multi_1", PLACEHOLDER, conditionalAggregate(2, { "GRAMMAR_PLAYER_SINGULAR,GRAMMAR_PLAYER_PLURAL": "blob_multi_2" }),PLACEHOLDER, conditionalAggregate(2, { "GRAMMAR_PLAYER_SINGULAR,GRAMMAR_PLAYER_PLURAL": "blob_multi_3" }) ] },
+		PROMPT_BLOB_OBJECTIVE_SINGLE:                   { SWE: [ conditionalAggregate(3, { DIRECTION_RIGHT: "blob_duo_right", DIRECTION_LEFT: "blob_duo_left", }) ] },
+		PROMPT_BODYSNATCHER_ACTION:                     { SWE: [ PLACEHOLDER, "bodysnatcher_1", aggregate(2, "bodysnatcher_2") ] },
+		PROMPT_COUNT_ACTION:                            { SWE: [ aggregate(2, "count_1") ] },
+		PROMPT_CUPID_ACTION:                            { SWE: [ aggregate(3, "cupid_1") ] },
+		PROMPT_DISEASED_ACTION:                         { SWE: [ aggregate(2, "diseased_1") ] },
+		PROMPT_DOPPELGANGER_DREAMWOLF_EXCLUSION:        { SWE: [ aggregate(5, "doppelganger_4_dreamwolf") ] },
+		PROMPT_EMPATH_QUESTION_5:                       { SWE: [ aggregate(2, "empath_q_5") ] },
+		PROMPT_FEUDINGALIENS_DOPPELGANGER:              { SWE: [ aggregate(3, "feudingaliens_doppelganger") ] },
+		PROMPT_INSTIGATOR_ACTION:                       { SWE: [ aggregate(3, "instigator_1") ] },
+		PROMPT_LEADER:                                  { SWE: [ PLACEHOLDER, aggregate(4, "leader_1"), PLACEHOLDER, PLACEHOLDER, PLACEHOLDER, aggregate(2, "leader_2") ] },
+		PROMPT_LEADER_DOPPELGANGER:                     { SWE: [ PLACEHOLDER, aggregate(2, "leader_doppelganger"), PLACEHOLDER ] },
+		PROMPT_LEADER_FEUDINGALIENS:                    { SWE: [ aggregate(2, "leader_feudingaliens_1"), aggregate(4, "leader_feudingaliens_2") ] },
+		PROMPT_MASON_DOPPELGANGER:                      { SWE: [ aggregate(4, "mason_doppelganger") ] },
+		PROMPT_MINION:                                  { SWE: [ PLACEHOLDER, aggregate(4, "minion_1"), PLACEHOLDER, PLACEHOLDER, aggregate(2, "minion_2") ] },
+		PROMPT_MINION_DOPPELGANGER:                     { SWE: [ PLACEHOLDER, aggregate(2, "minion_doppelganger"), PLACEHOLDER ] },
+		PROMPT_NOSTRADAMUS_DOPPELGANGER:                { SWE: [ aggregate(4, "nostradamus_doppelganger") ] },
+		PROMPT_NOSTRADAMUS_WARNING_RESOLVED:            { SWE: [ aggregate(2, "nostradamus_4"), PLACEHOLDER, PLACEHOLDER ] },
+		PROMPT_ORACLE_BLOCK_ACTION:                     { SWE: [ "all_hands_out", aggregate(2, "oracle_block_1"), "oracle_block_2" ] },
+		PROMPT_ORACLE_CHANGE_TEAM:                      { SWE: [ conditionalAggregate(3, { TEAM_WEREWOLF_DEFINITE_GENITIVE: "oracle_join_werewolves", TEAM_ALIEN_DEFINITE_GENITIVE: "oracle_join_aliens", TEAM_VAMPIRE_DEFINITE_GENITIVE: "oracle_join_vampires" }) ] },
+		PROMPT_ORACLE_CHANGE_TEAM_DECLINED:             { SWE: [ aggregate(4, "oracle_join_denied") ] },
+		PROMPT_ORACLE_CHANGE_TEAM_FULL:                 { SWE: [ aggregate(2, "oracle_join_full") ] },
+		PROMPT_ORACLE_CHANGE_TEAM_PARTIAL:              { SWE: [ aggregate(2, "oracle_join_partial") ] },
+		PROMPT_ORACLE_EVEN_ODD_RESULT:                  { SWE: [ conditionalAggregate(4, { PROMPT_EVEN: "oracle_even", PROMPT_ODD: "oracle_odd" }) ] },
+		PROMPT_ORACLE_HUNT_STARTED:                     { SWE: [ "oracle_guess_wrong_1", aggregate(2, "oracle_guess_wrong_2"), aggregate(2, "oracle_guess_wrong_3") ] },
+		PROMPT_PRIEST_ACTION:                           { SWE: [ aggregate(2, "priest_1"), aggregate(2, "priest_2") ] },
+		PROMPT_RENFIELD:                                { SWE: [ PLACEHOLDER, aggregate(4, "renfield_1"), PLACEHOLDER, PLACEHOLDER, PLACEHOLDER, PLACEHOLDER, aggregate(2, "renfield_3") ] },
+		PROMPT_RENFIELD_ACTION:                         { SWE: [ aggregate(4, "renfield_2") ] },
+		PROMPT_RENFIELD_DOPPELGANGER:                   { SWE: [ PLACEHOLDER, aggregate(4, "renfield_doppelganger"), PLACEHOLDER, PLACEHOLDER, PLACEHOLDER ] },
+		PROMPT_RIPPLE_DOUBLE_VOTE:                      { SWE: [ "player", PLACEHOLDER, "ripple_double_vote" ] },
+		PROMPT_RIPPLE_MUTED:                            { SWE: [ "player", PLACEHOLDER, "ripple_mute" ] },
+		PROMPT_RIPPLE_REBUKED:                          { SWE: [ "player", PLACEHOLDER, "ripple_rebuke" ] },
+		PROMPT_SENTINEL_ACTION:                         { SWE: [ aggregate(3, "sentinel_1"), "sentinel_2" ] },
+		PROMPT_SQUIRE:                                  { SWE: [ PLACEHOLDER, aggregate(4, "squire_1"), PLACEHOLDER, "shared_may_view_cards", PLACEHOLDER, PLACEHOLDER, aggregate(2, "minion_2") ] },
+		PROMPT_SQUIRE_DOPPELGANGER:                     { SWE: [ PLACEHOLDER, aggregate(2, "minion_doppelganger"), PLACEHOLDER, "shared_may_view_cards", PLACEHOLDER ] },
+		PROMPT_THING_ACTION:                            { SWE: [ "all_hands_out", aggregate(2, "thing_2") ] },
+		PROMPT_VAMPIRE_TEAM:                            { SWE: [ PLACEHOLDER, "wake_and_identify", aggregate(2, "vampire_team_1"), PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_VIEW_CARD_EVEN:                          { SWE: [ PLACEHOLDER, conditionalAggregate(2, { "GRAMMAR_CARD_SINGULAR,GRAMMAR_CARD_PLURAL": "view_card_suffix_even_players" }) ] },
+		PROMPT_VIEW_CARD_ODD:                           { SWE: [ PLACEHOLDER, conditionalAggregate(2, { "GRAMMAR_CARD_SINGULAR,GRAMMAR_CARD_PLURAL": "view_card_suffix_odd_players" }) ] },
+		PROMPT_VIEW_CARD_PLAYER_ANY:                    { SWE: [ PLACEHOLDER, conditionalAggregate(4, { "GRAMMAR_CARD_SINGULAR|PROMPT_VIEW_CARD_PLAYER_ANY_SINGLE|GRAMMAR_PLAYER_SINGULAR": "view_card_suffix_one_player", "GRAMMAR_CARD_PLURAL|PROMPT_VIEW_CARD_PLAYER_ANY_MULTI|GRAMMAR_PLAYER_PLURAL": "view_card_suffix_other_players", }) ] },
+		PROMPT_VIEW_CARD_PLAYER_SPECIFIC:               { SWE: [ conditionalAggregate(3, { "GRAMMAR_CARD_SINGULAR|GRAMMAR_PLAYER_SINGULAR": "view_card_playerlist_prefix", "GRAMMAR_CARD_PLURAL|GRAMMAR_PLAYER_PLURAL": "view_card_playerlist_prefix", }), PLACEHOLDER ] },
+		PROMPT_WAKE_CALL_DOPPELGANGER_ECHO:             { SWE: [ aggregate(2, "doppelganger_wake_prefix"), PLACEHOLDER, "generic_wake" ] },
+		PROMPT_WAKE_CALL_DOPPELGANGER_INLINE:           { SWE: [ aggregate(2, "doppelganger_wake_prefix"), PLACEHOLDER, "generic_wake" ] },
+		PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF:            { SWE: [ PLACEHOLDER, aggregate(2, "werewolf_team_dreamwolf_1"), "wake_and_identify", aggregate(4, "werewolf_team_dreamwolf_2"), aggregate(3, "werewolf_team_1"), PLACEHOLDER, "thumb_down", PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_WEREWOLF_TEAM_CORE_STANDARD:             { SWE: [ PLACEHOLDER, "wake_and_identify", aggregate(3, "werewolf_team_1"), PLACEHOLDER, "generic_sleep" ] },
+	};
+
+	/*
+	 * (key,index)/value ref -> clip name, flattened from `MANIFEST` plus role/number auto-registration - see
+	 * _init. Consulted first in lookup (via _coverParts) - a single part's own clip.
+	 *
+	 * A ref is the stable, language-independent address every part Interpreter hands this module already
+	 * carries (see Interpreter's _splitRenderedParts, and Localization's parseTemplate underneath it):
+	 * { type: "span", key, index } for text traced to a specific localization key's own template, or
+	 * { type: "value", value } for a raw number - regardless of how many {...} hops of Identity/Select/If/etc.
+	 * it took to resolve there. That means lookup is never about *wording* at all: two parts are the same lookup
+	 * iff they carry the same ref, full stop, whatever any language's text for that key currently says - see
+	 * localization.js's parseTemplate (specifically its addLiteralSpans helper) for exactly how span refs are
+	 * derived.
 	 */
 	let _map = null;
 
 	/*
-	 * Templates for manifest entries that contain dynamic ("hole") content - matched against a run of atoms
-	 * rather than looked up by a single normalized key, since the hole's own length isn't known until match
-	 * time (e.g. an IdentityList atom run, whose length depends on how many identities are in it). Populated
-	 * at init from any manifest entry whose value is an array (see _registerEntry / _parseTemplate). Each
-	 * entry is { segments, staticTexts }:
-	 *   segments    - the template's own literal/placeholder structure, in order: { type: "clip", clip } for
-	 *                 a static piece with its own recording, or { type: "hole" } for a placeholder.
-	 *   staticTexts - the normalized literal text belonging to each "clip" segment, in the same order those
-	 *                 segments appear in `segments` - precomputed once here so matching a span of atoms never
-	 *                 re-normalizes the same literal on every lookup attempt.
-	 * See _matchTemplateAt / _tryTemplates for how a template is matched against an atom span, and
-	 * lookupParts for where that plugs into the existing splice-cost search.
+	 * Exact-ref aggregation entries - { refs: [ref,...], clip }, compiled from authored groups (see
+	 * _registerGroup) - a whole run of parts collapsing to one better-prosody recording. Consulted alongside
+	 * _map in lookup (via _coverParts), always preferred over the equivalent individual clips when a full
+	 * match is found, since it always costs fewer total clips.
 	 */
 	let _templates = null;
-
-	// Marks a cut point within a manifest template's key string: "%Name%" is a hole (dynamic content, resolved
-	// recursively at lookup time - the name is a human label only, never inspected); "%%" (empty name) is a
-	// splice point - "two separate static recordings meet here", with nothing dynamic allowed at all. A splice
-	// point takes no slot in the clip-value array (unlike a hole, which needs HOLE there); if anything other
-	// than the two static recordings' own atoms ever lands in that gap, the template simply fails to match
-	// rather than absorbing it - see _matchTemplateAt.
-	const PLACEHOLDER_PATTERN = /%([^%]*)%/g;
-
-	// Sits in a template's clip-value array at every position its key string has a %Name% hole - a generic
-	// "nothing recorded here, something gets spliced in at lookup time" marker. Deliberately carries no
-	// information about *what* fills the hole (an identity, a number, a list of either) - the key string's
-	// %Name% already documents that for a human reader, and TTSManifest itself never needs to know; it just
-	// needs to know a position is a hole rather than a clip name. null rather than "" so it can never be
-	// confused with a (however unlikely) empty-string clip-name typo.
-	const HOLE = null;
-	
-	/*
-	Google Cloud TTS, Gemini 3.1 Flash TTS, Callirrhoe
-	Instruction prompt:
-	Read each line as an independent, calm statement. Maintain a professional, natural narrator tone with an even voice across all lines. Do not use an enthusiastic, dramatic, or list-like rising cadence. Ensure there is a distinct, clean pause between sentences so they do not blend together.
-	*/
-	
-	// Manual record of assembled atoms -> clip name translations, used to populate the _map library.
-	const manifest = {
-		SWE: {
-			"eller": "list_or",
-			"och": "list_and",
-			"spelare": "player",
-			
-			"Individuellt får ni titta på": "view_card_prefix_individual",
-			"Gemensamt inom laget får ni titta på": "view_card_prefix_together",
-			"Du får titta på": "view_card_prefix_solo",
-			"kort från andra spelare.": "view_card_suffix_other_players",
-			"kort från udda spelare.": "view_card_suffix_odd_players",
-			"kort från jämna spelare.": "view_card_suffix_even_players",
-			"av mittenkorten.": "view_card_suffix_center",
-			"ett kort från en annan spelare.": "view_card_suffix_one_player",
-			"båda grannars kort.": "view_card_suffix_both_neighbors",
-			"ditt eget kort.": "view_card_suffix_own",
-			"en grannes kort.": "view_card_suffix_any_neighbor",
-			"höger grannes kort.": "view_card_suffix_right_neighbor",
-			"vänster grannes kort.": "view_card_suffix_left_neighbor",
-			"kort som tillhör spelare": "view_card_playerlist_prefix",
-			
-			"Alla spelare": "all_players",
-			"Förälskade": "lovers",
-			", vakna.": "generic_wake",
-			", somna.": "generic_sleep",
-			", vakna och identifiera varandra.": "wake_and_identify",
-			"Dubbelgångare, om du såg": "doppelganger_wake_prefix",
-			", du får titta på deras kort.": "shared_may_view_cards",
-			"Alla spelare, ner med tummarna.": "all_thumbs_down",
-			"Övriga spelare, fortsätt hålla ut tummen.": "others_thumb_out",
-			"Alla andra spelare, håll ut en hand framför er.": "all_hands_out",
-			", ner med tummen.": "thumb_down",
-			", håll ut en hand framför dig.": "hand_out",
-			", ner med handen.": "hand_down",
-			"Alla spelare, ner med händerna.": "all_hands_down",
-			
-			"Om det bara finns en Varulv får du titta på ett av mittenkorten.": "werewolf_team_1",
-			", håll ut en tumme så att Betraktaren kan se vem ni är.": "beholder_1",
-			"Byt ut en annan spelares märke mot Lönnmördarens märke.": "assassin_1",
-			"Identifiera Lönnmördaren.": "apprenticeassassin_1",
-			"Om det inte finns någon Lönnmördare:": "apprenticeassassin_2",
-			", om ni har tittat på eller flyttat kort, håll ut en tumme så att Auraläsaren kan se den.": "auraseer_1",
-			", med undantag för Drömvargen": "werewolf_team_dreamwolf_1",
-			"Drömvarg, stick ut tummen så att andra Varulvar kan se vem du är.": "werewolf_team_dreamwolf_2",
-			"Garvare, håll ut en tumme så att Garvargesällen kan se vem du är.": "apprenticetanner_1",
-			"Garvare, fortsätt hålla ut tummen så att Dubbelgångaren kan se vem du är.": "apprenticetanner_doppelganger",
-			"Visa era kort för varandra.": "alien_team_show_cards",
-			"Ge era kort till närmaste Utomjording till höger om er.": "alien_team_shift_cards_right",
-			"Ge era kort till närmaste Utomjording till vänster om er.": "alien_team_shift_cards_left",
-			"Gör ingenting, stirra bara på varandra tills det blir pinsamt.": "alien_team_do_nothing",
-			", och Dubbelgångaren om du såg Kon": "alien_team_cow_doppelganger",
-			"Utomjordingar, om minst en av er är granne med Kon, rör vid Kons hand.": "alien_team_cow_1",
-			"Utomjordingar, rör vid en annan spelares hand.": "alien_team_turncoat_1",
-			"Spelaren är nu en Utomjording oavsett vad som händer med deras kort.": "alien_team_turncoat_2a",
-			"Spelaren vinner nu om Utomjordingarna vinner oavsett om de själva blir utröstade och vad som händer med deras kort.": "alien_team_turncoat_2b",
-			", och Dubbelgångaren om du såg en av Frimurarna": "mason_doppelganger",
-			", och Dubbelgångaren om du såg ett av deras kort": "feudingaliens_doppelganger",
-			
-			
-			
-			
-			
-			"Vampyrer, peka på den spelare som ni har gett Vampyrernas märke. %Identity%, identifiera Vampyrerna och byt ut ditt märke mot Renfields märke. Vampyrer, sluta peka.": [ "renfield_1", [ HOLE, "renfield_2", ], "renfield_3" ],
-			"Vampyrer, fortsätt peka på den spelare som ni har gett Vampyrernas märke.": "renfield_doppelganger",
-			
-			"Det har inträffat en krusning i rum-tiden. Ni har endast en minut på er innan ni måste rösta.": [ "ripple", "ripple_timer" ],
-			"Det har inträffat en krusning i rum-tiden. Spelare %PlayerList% får inte prata förrän efter omröstningen.": [ "ripple", [ "player", HOLE, "ripple_mute" ] ],
-			"Det har inträffat en krusning i rum-tiden. Spelare %PlayerList% måste vända sig från bordet fram till efter omröstningen.": [ "ripple", [ "player", HOLE, "ripple_rebuke" ] ],
-			"Det har inträffat en krusning i rum-tiden. Spelare %PlayerList% får under omröstningen använda båda händerna för dubbla röster.": [ "ripple", [ "player", HOLE, "ripple_double_vote" ] ],
-			"Det har inträffat en krusning i rum-tiden. Spelare %PlayerListAndAction%": [ "ripple", [ "player", HOLE ] ],
-			
-			"Varulvar, håll ut en tumme så att Underhuggaren kan se vem ni är. Varulvar, ner med tummarna.": [ "minion_1", "minion_2" ],
-			"Varulvar, håll ut en tumme så att Lakejen kan se vem ni är. Varulvar, ner med tummarna.": [ "squire_1", "minion_2" ],
-			"Varulvar, fortsätt hålla ut tummen.": "minion_doppelganger",
-			
-			"Utomjordingar, håll ut en tumme så att Borgmästaren kan se vem ni är. Groob och Zerb, håll ut båda tummarna. Borgmästare, om du ser både Groob och Zerb vinner du om ingen av dem röstas ut. Utomjordingar, fortsätt hålla ut tummarna. Utomjordingar, ner med tummarna.": [ "leader_1", "leader_feudingaliens_1", "leader_feudingaliens_2", "leader_doppelganger", "leader_2" ],
-			
-			"Iaktta vad de andra spelarna gör. Spelare %PlayerList%, utan att vakna, %EmpathQuestion%": [ "empath_1", ["player", HOLE, "empath_2", HOLE] ],
-			", visa tummen upp om du tror att du kommer vinna, eller tummen ner om du tror att du kommer förlora.": "empath_q_10",
-			", peka på den spelare som du tror är mest sannolik att redan ha glömt sin roll.": "empath_q_11",
-			", peka på en spelare som du tror kommer vinna.": "empath_q_1",
-			", peka på en spelare som du tror blir utröstad.": "empath_q_2",
-			", peka på den spelare som du litar mest på.": "empath_q_3",
-			", peka på den spelare som du litar minst på.": "empath_q_4",
-			", peka på en spelare som du tror är en av Byborna.": "empath_q_5",
-			", peka på den spelare som du tror kommer prata mest.": "empath_q_6",
-			", peka på den spelare som du tror kommer prata minst.": "empath_q_7",
-			", peka på den spelare som du tror är bäst på att bluffa.": "empath_q_8",
-			", peka på den spelare som du tror är sämst på att bluffa.": "empath_q_9",
-			
-			"Gissa ett tal mellan ett och tio. Fel. Orakel, du vinner nu endast om du inte blir utröstad. Övriga spelare, oberoende av tidigare roll- och lagtillhörighet har ni nu endast ett vinstvillkor: hitta Oraklet.": [ "oracle_guess_1", "oracle_guess_wrong_1", "oracle_guess_wrong_2", "oracle_guess_wrong_3" ],
-			"Gissa ett tal mellan ett och tio. Korrekt. När en annan roll blir tillsagd att vakna kan du en gång under natten vakna tillsammans med dem för att iaktta vem de är och vad de gör. Du får dock inte vakna för att iaktta någon av följande roller: %IdentityList%.": [ "oracle_guess_1", "oracle_guess_right_1", "oracle_guess_right_2", [ "oracle_guess_right_3", HOLE ] ],
-			"Ange om du har ett jämnt eller udda spelarnummer. Oraklet har ett jämnt spelarnummer.": [ "oracle_even_odd", "oracle_even" ],
-			"Ange om du har ett jämnt eller udda spelarnummer. Oraklet har ett udda spelarnummer.": [ "oracle_even_odd", "oracle_odd" ],
-			"Vill du tvinga fram en krusning i rum-tiden? En krusning är nu garanterad att inträffa.": [ "oracle_force_ripple", "oracle_force_ripple_yes", ],
-			"Vill du tvinga fram en krusning i rum-tiden? Ingen krusning är garanterad, men kan fortfarande inträffa slumpmässigt.": [ "oracle_force_ripple", "oracle_force_ripple_no" ],
-			"Alla andra spelare, håll ut en hand framför er. Orakel, rör vid en annan spelares hand som du vill blockera. Spelaren får inte vakna eller utföra någon handling under natten oavsett vad deras roll är.": [ "all_hands_out", "oracle_block_1", "oracle_block_2" ],
-			"Vill du gå med i Varulvarnas lag?": "oracle_join_werewolves",
-			"Vill du gå med i Utomjordingarnas lag?": "oracle_join_aliens",
-			"Vill du gå med i Vampyrernas lag?": "oracle_join_vampires",
-			"Oraklet är nu den rollen, och vaknar tillsammans med dem.": "oracle_join_full",
-			"Oraklet vinner nu tillsammans med det laget, men är inte den rollen och vaknar inte tillsammans med dem.": "oracle_join_partial",
-			"Oraklet är kvar i Bybornas lag.": "oracle_join_denied",
-			
-			"Du behöver enbart förhindra att du själv blir utröstad.": "blob_solo",
-			"Du måste förhindra att du själv och närmaste spelare till höger blir utröstade.": "blob_duo_right",
-			"Du måste förhindra att du själv och närmaste spelare till vänster blir utröstade.": "blob_duo_left",
-			"Du måste förhindra att du själv, närmaste %LeftCount% spelare till vänster, och närmaste %RightCount% spelare till höger blir utröstade.": [ "blob_multi_1", HOLE, "blob_multi_2", HOLE, "blob_multi_3" ],
-			
-			"Du får titta på en till tre andra spelares kort. Om du ser: %IdentityList%, måste du sluta. Välj sedan laget det sista kortet du tittade på tillhörde. Profeten tillhör nu %Identity%. Om du inte blir utröstad och det laget vinner så vinner även du. Dubbelgångare, om du såg Profeten gäller samma vinstvillkor för dig.": [ "nostradamus_1", [ "paranormalinvestigator_2", HOLE, "nostradamus_3" ], "nostradamus_auto", [ "nostradamus_4", HOLE ], "nostradamus_5", "nostradamus_doppelganger" ],
-			"Titta på en annan spelares kort. Du är nu rollen du såg. Om rollen du såg var %IdentityList%, utför dess handling nu. Om du såg en %TeamList%, vakna tillsammans med det laget när de ropas upp. Om du såg Drömvargen, vakna inte med Varulvarna men följ rollens instruktioner.": [ "doppelganger_1", "doppelganger_2", [ "doppelganger_3_prefix", HOLE, "doppelganger_3_suffix" ], [ "doppelganger_4_prefix", HOLE, "doppelganger_4_suffix" ], "doppelganger_4_dreamwolf" ],
-			"Titta på ett av mittenkorten. Du är nu rollen du såg. När rollen ropas upp, vakna och utför dess handling.": [ "copycat_1", "doppelganger_2", "copycat_3" ],
-			"Du får titta på en till två andra spelares kort. Om du ser: %IdentityList%, måste du sluta, och tillhör då deras lag.": [ "paranormalinvestigator_1", [ "paranormalinvestigator_2", HOLE, "paranormalinvestigator_3" ] ],
-			"Du kan välja att stjäla en annan spelares kort och ersätta det med ditt kort. Titta sedan på kortet du stal. Du ska inte vakna när din nya roll ropas upp.": [ "robber_1", "robber_2", "robber_3" ],
-			"Byt ut ditt märke mot ett rent märke. Om du vill får du även byta ut en annan spelares märke mot ett rent märke.": [ "priest_1", "priest_2" ],
-			"Titta på en annan spelares kort, samt ytterligare en annan spelares märke. Det får inte vara samma spelare.": [ "marksman_1", "marksman_2" ],
-			"Placera en Sköldbricka på en annan spelares kort. Andra spelare får varken titta på eller flytta kortet under natten.": [ "sentinel_1", "sentinel_2" ],
-			"Du kan välja att titta på ett av korten i mitten. Om du gör det måste du ge det kortet till dig själv eller en annan spelare.": [ "witch_1", "witch_2" ],
-			"Du kan välja att stjäla en annan spelares märke och ersätta det med ditt märke. Titta sedan på märket du stal.": [ "pickpocket_1", "pickpocket_2" ],
-			"Alla andra spelare, håll ut en hand framför er. Varelsen, rör handen tillhörande spelaren närmast till höger eller vänster.": [ "all_hands_out", "thing_2" ],
-			"Vänd upp en annan spelares kort. Om kortet är: %IdentityList%, vänd kortet tillbaka.": [ "revealer_1", [ "revealer_2", HOLE, "revealer_3" ] ],
-			"Du får vända %CardCount% av mittenkorten.": [ "exposer_1", HOLE, "view_card_suffix_center" ],
-			"Byt sedan ditt eget kort mot kortet du tittade på. Ditt nya kort är nu också en Utomjording.": [ "bodysnatcher_1", "bodysnatcher_2" ],
-			
-			"Tillsammans får ni välja en spelare vars märke ni byter ut mot Vampyrernas märke.": "vampire_team_1",
-			"Byt ut en annan spelares märke mot Grevens märke.": "count_1",
-			"Byt ut en av dina grannars märken mot den Smittades märke.": "diseased_1",
-			"Byt ut två andra spelares märken mot Amors märke.": "cupid_1",
-			"Byt ut en annan spelares märke mot Anstiftarens märke.": "instigator_1",
-			"Kontrollera era märken utan att visa dem för någon annan.": "check_marks",
-			"Om en av er röstas ut så kommer samtliga att röstas ut.": "lovers_1",
-			"Byt det extra kortet i mitten mot någon annan spelares kort som inte redan är Varulv.": "alphawolf_1",
-			"Du kan välja att flytta samtliga spelares kort ett steg åt vänster, åt höger, eller inte alls.": "villageidiot_1",
-			"Byt plats på två andra spelares märken eller två andra spelares kort, utan att titta på något av dem.": "gremlin_1",
-			"Byt plats på två andra spelares kort, utan att titta på något av dem.": "troublemaker_1",
-			"Du får titta på en annan spelares kort, eller två av mittenkorten.": "seer_1",
-			"Byt ditt kort mot ett av mittenkorten utan att se vad det är.": "drunk_1",
-			"Titta på ditt eget kort.": "insomniac_1",
-			"Placera en artefakt utan att titta på den med ansiktet ner framför en annan spelare.": "curator_1",
-		},
-	};
 
 
 	/* =========================
@@ -205,217 +274,55 @@ const TTSManifest = (() => {
 
 		const language = Localization.getLanguage();
 
-		_initTimerClips();
-		_initNumbers(language);
+		_initNumbers();
 		_initRoles();
-
-		const languageManifest = manifest[language];
-
-		if (!languageManifest) {
-			throw new Error(`TTSManifest: no manifest for language "${language}"`);
-		}
-
-		// Tracks every normalized key registered from `manifest` itself (never numbers/roles - those are
-		// documented to always be overwritten by manifest content, see the module comment) so a second entry
-		// landing on the same key can be validated against the first instead of silently shadowing it - see
-		// _checkCollision. Scoped to this init pass only; nothing here persists past _init returning.
-		const registered = new Map();
-
-		for (const [key, value] of Object.entries(languageManifest)) {
-			const sentenceKeys = Interpreter.splitSentences(key);
-
-			// A single-sentence entry's value is used as-is (a clip name, or one sentence's template array
-			// exactly today's shape). A multi-sentence entry's value must be an array with one slot per
-			// sentence, each slot independently either shape - see _registerEntry.
-			if (sentenceKeys.length > 1 && (!Array.isArray(value) || value.length !== sentenceKeys.length)) {
-				throw new Error(
-					`TTSManifest: entry "${key}" splits into ${sentenceKeys.length} sentences but its value ` +
-					`has ${Array.isArray(value) ? value.length : 1} slot(s) instead - expected exactly one per sentence`
-				);
-			}
-
-			const sentenceValues = sentenceKeys.length === 1 ? [value] : value;
-			sentenceKeys.forEach((sentenceText, idx) => _registerEntry(sentenceText, sentenceValues[idx], key, registered));
-		}
-	}
-
-	/*
-	 * Registers one sentence's worth of a manifest entry into _map or _templates - either a standalone
-	 * single-sentence entry, or one slot of a multi-sentence block that _init already split apart. Once
-	 * split, a block's sentence is handled completely indistinguishably from a standalone entry for that same
-	 * sentence text; nothing downstream (lookup/lookupParts) can tell the two apart, or needs to.
-	 *
-	 *   sentenceText - this sentence's own text (already isolated from any siblings by _init).
-	 *   value        - this sentence's value: a clip name string (flat entry), or an array (template entry -
-	 *                  see _parseTemplate for the array's own shape).
-	 *   sourceKey    - the original, unsplit manifest key - kept only for error messages.
-	 *   registered   - shared collision-tracking map for this whole _init pass, as described there.
-	 */
-	function _registerEntry(sentenceText, value, sourceKey, registered) {
-		const normalizedKey = _normalizeKey(sentenceText);
-
-		if (typeof value === "string") {
-			_checkCollision(normalizedKey, value, sourceKey, registered);
-			_map.set(normalizedKey, value);
-			return;
-		}
-
-		if (!Array.isArray(value)) {
-			throw new Error(`TTSManifest: entry "${sourceKey}" has an invalid value (expected a clip name string or a template array)`);
-		}
-
-		_templates.push(_parseTemplate(sentenceText, value, sourceKey));
-	}
-
-	/*
-	 * Checks a flat (no-hole) entry's normalized key against every other flat entry already registered this
-	 * init pass. Two entries landing on the same key with the same clip are a harmless duplicate - the same
-	 * sentence legitimately reused verbatim across different manifest blocks - and are silently accepted.
-	 * The same key with two *different* clips (e.g. two roles with an identical wake-continuation line, each
-	 * wanting its own recording) is an authoring ambiguity TTSManifest has no way to resolve on its own -
-	 * lookup() has nothing but the normalized text to go on, so it can only ever return one of the two. That's
-	 * a real, currently-open limitation rather than something this check can fix - but leaving it undetected
-	 * means whichever entry Object.entries() happens to iterate last wins silently, which is worse than
-	 * failing loudly at init.
-	 */
-	function _checkCollision(normalizedKey, clip, sourceKey, registered) {
-		const existing = registered.get(normalizedKey);
-
-		if (existing === undefined) {
-			registered.set(normalizedKey, { clip, sourceKey });
-			return;
-		}
-
-		if (existing.clip !== clip) {
-			throw new Error(
-				`TTSManifest: "${sourceKey}" and "${existing.sourceKey}" normalize to the same text but assign ` +
-				`different clips ("${clip}" vs "${existing.clip}") - give them distinct wording, point them at the ` +
-				`same clip, or (if they genuinely need to stay identical text with different recordings depending ` +
-				`on which role/turn is speaking) that needs context-scoped lookup, which this manifest format doesn't support yet.`
-			);
-		}
-		// Same key, same clip - already registered, nothing further to do.
-	}
-
-	/*
-	 * Parses one sentence's template entry. sentenceText contains zero or more "%Name%" placeholders (see
-	 * PLACEHOLDER_PATTERN); clipValues is the parallel array the author wrote against it, where each
-	 * placeholder's position holds HOLE and every other position holds a clip name. The %Name% itself is
-	 * purely a label for whoever's reading the manifest - it's never read back out of clipValues, and nothing
-	 * here checks it says the same thing twice or means anything in particular.
-	 *
-	 * Segments of sentenceText that normalize to nothing (pure punctuation/whitespace, or genuinely empty -
-	 * e.g. a hole sitting flush against the sentence's end, or against another hole) are dropped before
-	 * matching clipValues against them - they have nothing to speak and nothing to look up, mirroring how
-	 * Interpreter's own clipParts already drops punctuation-only atoms (see _toSequenceFromAtoms). This is
-	 * also why clipValues only ever needs one entry per *meaningful* segment, not one per raw split - e.g.
-	 * "Profeten tillhör nu %Identity%." needs only a two-entry array (one clip, one hole), since the
-	 * trailing "." contributes no third entry.
-	 *
-	 * Two placeholders with nothing meaningful between them are rejected here rather than left to fail
-	 * confusingly at match time - there is no way to know, from atoms alone, where the first hole ends and
-	 * the second begins.
-	 *
-	 *   sentenceText - this sentence's key text, containing its placeholders.
-	 *   clipValues   - the author's parallel value array.
-	 *   sourceKey    - the original, unsplit manifest key - kept only for error messages.
-	 *
-	 * Returns { segments, staticTexts } - see the _templates comment for their shape.
-	 */
-	function _parseTemplate(sentenceText, clipValues, sourceKey) {
-		const rawParts = [];
-		let lastIndex = 0;
-		let match;
-
-		PLACEHOLDER_PATTERN.lastIndex = 0;
-		while ((match = PLACEHOLDER_PATTERN.exec(sentenceText)) !== null) {
-			rawParts.push({ literal: sentenceText.slice(lastIndex, match.index) });
-			if (match[1] !== "") rawParts.push({ hole: true }); // non-empty name -> a real hole; empty ("%%") -> a splice point only, no entry needed
-			lastIndex = PLACEHOLDER_PATTERN.lastIndex;
-		}
-		rawParts.push({ literal: sentenceText.slice(lastIndex) });
-
-		const parts = rawParts.filter(p => p.hole || _normalizeKey(p.literal) !== "");
-
-		for (let i = 1; i < parts.length; i++) {
-			if (parts[i].hole && parts[i - 1].hole) {
-				throw new Error(`TTSManifest: entry "${sourceKey}" has two placeholders with no static text between them - there's no way to tell where one ends and the next begins`);
-			}
-		}
-
-		if (!parts.some(p => !p.hole)) {
-			throw new Error(`TTSManifest: entry "${sourceKey}" is nothing but a placeholder - a template needs at least one static piece to anchor a match against`);
-		}
-		if (clipValues.length !== parts.length) {
-			throw new Error(`TTSManifest: entry "${sourceKey}" has ${parts.length} meaningful segment(s) but ${clipValues.length} clip value(s)`);
-		}
-
-		const segments = [];
-		const staticTexts = [];
-
-		parts.forEach((part, i) => {
-			const clipValue = clipValues[i];
-
-			if (part.hole) {
-				if (clipValue !== HOLE) {
-					throw new Error(`TTSManifest: entry "${sourceKey}" - expected HOLE at position ${i} (this key segment is a %...% placeholder), got ${JSON.stringify(clipValue)}`);
-				}
-				segments.push({ type: "hole" });
-			} else {
-				if (typeof clipValue !== "string" || clipValue === "") {
-					throw new Error(`TTSManifest: entry "${sourceKey}" - expected a clip name at position ${i} (this key segment is static text), got ${JSON.stringify(clipValue)}`);
-				}
-				segments.push({ type: "clip", clip: clipValue });
-				staticTexts.push(_normalizeKey(part.literal));
-			}
-		});
-
-		return { segments, staticTexts };
-	}
-	
-	// Adds the day timer-related clips to the map as raw, normalized strings
-	function _initTimerClips() {
-		const SPECIAL_CLIPS = [
-			{ textKey: "UI_DAYTIMER_60S_WARNING", clip: "timer_60s_warning" },
-			{ textKey: "UI_DAYTIMER_30S_WARNING", clip: "timer_30s_warning" },
-			{ textKey: "UI_DAYTIMER_EXPIRED",     clip: "timer_expired" },
-		];
 		
-		for (const entry of SPECIAL_CLIPS) {
-			const text = Localization.localize(entry.textKey);
-			_map.set(_normalizeKey(text), entry.clip);
-		}
-	}
-	
-	// Adds numeric- and letter-form numbers to the map
-	function _initNumbers(language) {
-		const table = Localization.getNumberTable(); // The table of defined numbers, fetched from localization
-		const languageIndex = table.FIELDS.indexOf(language);
+		for (const [key, variants] of Object.entries(MANIFEST)) {
+			const entry = _selectVariant(key, variants, language);
 
-		if (languageIndex === -1) {
-			throw new Error(`TTSManifest: no number data for language "${language}"`);
+			if (entry !== undefined)
+				_registerKey(key, entry);
 		}
+		
+	}
+
+	_init();
+	
+	/*
+	 * Registers every defined number 1..COUNT twice: once by its raw digit string (the { type: "value" } ref
+	 * Interpreter's Value/Literal primitives produce) and once by its spelled-word key, e.g. NUM_ONE (an
+	 * ordinary leaf key {NUM_WORD} resolves to via a Select on `count` - see localization.js's _initNumbers).
+	 * Both forms exist for the same reason and cost nothing extra to cover: NUMBER_DATA already carries the
+	 * key name, so there's no language-specific text to look up for either registration.
+	 */
+	function _initNumbers() {
+		const table = Localization.getNumberTable();
 
 		for (let value = 1; value <= table.COUNT; value++) {
-			const row = table[value];
-			const word = row[languageIndex];
-			const clipName = `num_${value}`;
+			const [key] = table[value];
+			const clip = `num_${value}`;
 
-			_map.set(_normalizeKey(word), clipName);
-			_map.set(_normalizeKey(String(value)), clipName);
+			_map.set(_refKey({ type: "value", value: String(value) }), clip);
+			_map.set(_refKey({ type: "span", key: `NUM_${key}`, index: 0 }), clip);
 		}
 	}
-	
-	// Adds all grammatical forms for enabled roles and teams to the map
+
+	/*
+	 * Registers every grammatical form of every enabled role/team's name, straight from the key-naming
+	 * convention - no text lookup needed at all, since a role name's own leaf key always resolves to exactly
+	 * one span, index 0 (see the MANIFEST header comment). This is what makes role/number coverage
+	 * language-independent for free: nothing here depends on what any language's localization strings
+	 * actually say.
+	 */
 	function _initRoles() {
 		const forms = [
-			{ keySuffix: "",                          clipSuffix: ""   },
-			{ keySuffix: "_DEFINITE",                 clipSuffix: "_d"  },
-			{ keySuffix: "_PLURAL",                   clipSuffix: "_p"  },
-			{ keySuffix: "_GENITIVE",                 clipSuffix: "_g"  },
-			{ keySuffix: "_PLURAL_DEFINITE",          clipSuffix: "_p_d" },
-			{ keySuffix: "_DEFINITE_GENITIVE",        clipSuffix: "_d_g" },
-			{ keySuffix: "_PLURAL_GENITIVE",          clipSuffix: "_p_g" },
+			{ keySuffix: "",                          clipSuffix: ""      },
+			{ keySuffix: "_DEFINITE",                 clipSuffix: "_d"    },
+			{ keySuffix: "_PLURAL",                   clipSuffix: "_p"    },
+			{ keySuffix: "_GENITIVE",                 clipSuffix: "_g"    },
+			{ keySuffix: "_PLURAL_DEFINITE",          clipSuffix: "_p_d"  },
+			{ keySuffix: "_DEFINITE_GENITIVE",        clipSuffix: "_d_g"  },
+			{ keySuffix: "_PLURAL_GENITIVE",          clipSuffix: "_p_g"  },
 			{ keySuffix: "_PLURAL_DEFINITE_GENITIVE", clipSuffix: "_p_d_g" },
 		];
 
@@ -426,193 +333,433 @@ const TTSManifest = (() => {
 			const clipBase = baseKey.toLowerCase();
 
 			forms.forEach(({ keySuffix, clipSuffix }) => {
-				const locName = Localization.localize(baseKey + keySuffix);
-				const normalizedKey = _normalizeKey(locName);
-
-				if (!_map.has(normalizedKey)) {
-					_map.set(normalizedKey, clipBase + clipSuffix);
-				}
+				const refKey = _refKey({ type: "span", key: baseKey + keySuffix, index: 0 });
+				if (!_map.has(refKey))
+					_map.set(refKey, clipBase + clipSuffix);
 			});
 		}
 
-		// Roles take precedence over teams.
-		roles.forEach((role) => {
-			addForms(role.nameKey);
-			teams.add(role.team);
-		});
-
-		// Only add each team once, after all roles have been processed.
-		teams.forEach((team) => {
-			addForms(team);
-		});
-	}
-
-	_init();
-
-	/* =========================
-	   Private functions
-	   ========================= */
-
-	function _normalizeKey(text) {
-		return text
-			.normalize("NFC")               // guard against decomposed vs. precomposed å/ä/ö
-			.toLowerCase()
-			.replace(/[^\p{L}\p{N}]+/gu, " ")  // collapse everything else to a single separator
-			.trim();
+		// Roles take precedence over teams (addForms' _map.has guard means whichever is added first wins).
+		roles.forEach((role) => { addForms(role.nameKey); teams.add(role.team); });
+		teams.forEach((team) => addForms(team));
 	}
 
 	/*
-	 * Tries every registered template against atoms[j, i) - see _matchTemplateAt for how a single template's
-	 * match (including its holes' atom ranges) is located within the span. For each template that fits, every
-	 * hole is resolved recursively via lookupParts on just its own atom range - same all-or-nothing rule as
-	 * everywhere else: a template only counts as fitting if *every* one of its holes resolves. Among every
-	 * template that does fit, the cheapest (fewest total clips) is returned, so lookupParts' DP can compare it
-	 * on equal footing against a flat lookup() match for the same span.
+	 * Validates and compiles one MANIFEST entry (a single-language variant array, already picked by
+	 * _selectVariant) against the key's own template positions, then registers it into `_map`/`_templates`.
 	 *
-	 *   atoms - the full clipParts atom array for the sentence (as in lookupParts).
-	 *   j, i  - the span under consideration, as in lookupParts' DP.
-	 *
-	 * Returns { clips } for the cheapest fitting template, or null if no template fits (or every one that
-	 * matched structurally had a hole that couldn't itself be resolved).
+	 * Walks the array left to right, consuming one template position per plain item (a literal clip name for a
+	 * literal position, or PLACEHOLDER for a {...} reference) and `item.count` positions per aggregate/
+	 * conditionalAggregate item, recording each aggregate's range as a `groups` entry instead of slotting it
+	 * position-by-position. Once every position is accounted for, non-aggregated literal positions are
+	 * registered directly into `_map`, and each recorded group is compiled via _registerGroup/
+	 * _registerConditionalGroup. Throws on any mismatch between the entry and the key's actual template shape -
+	 * wrong item count, a literal position without a clip name, a PLACEHOLDER on a position that isn't a {...}
+	 * reference, or an aggregate spanning past the end of the array.
 	 */
-	function _tryTemplates(atoms, j, i) {
-		let best = null;
+	function _registerKey(key, entry) {
+		if (!Array.isArray(entry) || entry.length === 0)
+			throw new Error(`TTSManifest: entry "${key}" must be a non-empty MANIFEST array`);
 
-		for (const template of _templates) {
-			const matched = _matchTemplateAt(template, atoms, j, i);
-			if (matched === null) continue;
+		if (Localization.parseTemplate(key) === undefined)
+			throw new Error(`TTSManifest: entry "${key}" doesn't match any localization key`);
 
-			const clips = [];
-			let ok = true;
+		const positions = _templatePositions(key);
+		const slots = new Array(positions.length);
+		const groups = [];
+		let positionIndex = 0;
 
-			for (const piece of matched) {
-				if (piece.type === "clip") {
-					clips.push(piece.clip);
-					continue;
-				}
-
-				// piece.type === "hole" - an empty range (e.g. an IdentityList with zero entries) contributes
-				// no clips of its own rather than being a failure to resolve.
-				if (piece.from === piece.to) continue;
-
-				const holeClips = _coverAtoms(atoms.slice(piece.from, piece.to));
-				if (holeClips === null) { ok = false; break; }
-				clips.push(...holeClips);
+		for (const item of entry) {
+			if (Array.isArray(item)) {
+				throw new Error(`TTSManifest: entry "${key}" contains a bare nested array; use aggregate(count, "clip") or conditionalAggregate(count, {...})`);
 			}
 
-			if (!ok) continue;
-			if (best === null || clips.length < best.clips.length) best = { clips };
-		}
+			if (item && typeof item === "object" && item[AGGREGATE] === true) {
+				const isConditional = Object.prototype.hasOwnProperty.call(item, "alternatives");
 
-		return best;
-	}
+				if (!isConditional && (typeof item.clip !== "string" || item.clip === ""))
+					throw new Error(`TTSManifest: entry "${key}" aggregate must have a non-empty clip name`);
 
-	/*
-	 * Matches one template's segments against atoms[start, end), locating each hole's atom range by scanning
-	 * forward for the template's static ("clip") segments in order. A static segment's *first* matching run of
-	 * atoms, left to right, is treated as authoritative - manifest entries are hand-authored by someone who
-	 * knows the actual data, not adversarial input, so a static anchor that could in principle appear more
-	 * than once ahead doesn't need cleverer disambiguation than "earliest point wins".
-	 *
-	 * Returns an ordered list of { type: "clip", clip } | { type: "hole", from, to } covering the whole span
-	 * with nothing left over, or null if this template doesn't fit atoms[start, end) at all - a static segment
-	 * never found, or atoms left over that no hole was open to absorb.
-	 */
-	function _matchTemplateAt(template, atoms, start, end) {
-		const matched = [];
-		let pos = start;
-		let pendingHoleStart = null;
-		let staticIdx = 0;
+				if (!Number.isInteger(item.count) || item.count <= 0)
+					throw new Error(`TTSManifest: entry "${key}" aggregate must have a positive integer count`);
 
-		for (const segment of template.segments) {
-			if (segment.type === "hole") {
-				pendingHoleStart = pos;
+				if (isConditional) {
+					if (!item.alternatives || typeof item.alternatives !== "object" || Array.isArray(item.alternatives)) {
+						throw new Error(`TTSManifest: entry "${key}" conditional aggregate must have an alternatives object`);
+					}
+
+					if (Object.keys(item.alternatives).length === 0) {
+						throw new Error(`TTSManifest: entry "${key}" conditional aggregate must define at least one alternative`);
+					}
+				}
+
+				const start = positionIndex;
+				const end = start + item.count - 1;
+
+				if (end >= positions.length) {
+					throw new Error(`TTSManifest: entry "${key}" aggregate spans ${item.count} position(s) starting at ${start}, but its template has only ${positions.length} position(s)`);
+				}
+
+				if (isConditional) {
+					groups.push({ type: "conditional", range: [start, end], alternatives: item.alternatives });
+				} else {
+					groups.push({ type: "aggregate", range: [start, end], aggregate: item.clip });
+				}
+
+				positionIndex += item.count;
 				continue;
 			}
 
-			const staticText = template.staticTexts[staticIdx++];
-			const found = _findStaticRun(atoms, pos, end, staticText);
-			if (found === null) return null;
-
-			if (pendingHoleStart !== null) {
-				matched.push({ type: "hole", from: pendingHoleStart, to: found.start });
-				pendingHoleStart = null;
-			} else if (found.start !== pos) {
-				return null; // atoms sitting between two static segments with no hole open to claim them
+			if (positionIndex >= positions.length) {
+				throw new Error(`TTSManifest: entry "${key}" contains more authored positions than its template`);
 			}
 
-			matched.push({ type: "clip", clip: segment.clip });
-			pos = found.end;
+			slots[positionIndex] = item;
+			positionIndex++;
 		}
 
-		if (pendingHoleStart !== null) {
-			matched.push({ type: "hole", from: pendingHoleStart, to: end });
-		} else if (pos !== end) {
-			return null; // trailing atoms after the last segment with nothing to assign them to
+		if (positionIndex !== positions.length) {
+			throw new Error( `TTSManifest: entry "${key}" describes ${positionIndex} position(s) but its template has ${positions.length}`);
 		}
 
-		return matched;
+		const aggregated = new Array(positions.length).fill(false);
+
+		for (const group of groups) {
+			for (let i = group.range[0]; i <= group.range[1]; i++)
+				aggregated[i] = true;
+		}
+
+		for (let i = 0; i < positions.length; i++) {
+			if (aggregated[i])
+				continue;
+
+			const position = positions[i];
+			const slot = slots[i];
+
+			if (position.kind === "literal") {
+				if (typeof slot !== "string" || slot === "") {
+					throw new Error(`TTSManifest: entry "${key}" position ${i} is a literal span and must be a non-empty clip name string`);
+				}
+
+				_map.set(_refKey({ type: "span", key, index: position.index }), slot);
+			} else if (slot !== PLACEHOLDER) {
+				throw new Error(`TTSManifest: entry "${key}" position ${i} is a {...} reference and must be PLACEHOLDER`);
+			}
+		}
+
+		groups.forEach((group) => {
+			if (group.type === "conditional")
+				_registerConditionalGroup(key, positions, group);
+			else
+				_registerGroup(key, positions, group);
+		});
 	}
 
 	/*
-	 * Scans atoms[from, limit) for the first contiguous run of atoms whose joined, normalized text equals
-	 * staticText - the same "join with a single space, then normalize" reconstruction lookupParts itself uses,
-	 * so a run found here matches exactly what a human-written manifest entry for that phrase would.
-	 *
-	 * Returns { start, end } (end exclusive) of the matching run, or null if staticText never accumulates
-	 * within the given range.
+	 * Picks the one variant of a key's entry that covers the current language - see the MANIFEST header
+	 * comment for what a variant's language-set key means. Exactly one of a key's variants must cover any
+	 * given language to be valid. No key covering it means this key has never been authored for that language,
+	 * which is recoverable by falling back on browser synthesis and requires a graceful failure. More than one 
+	 * covering it is an authoring mistake (two variants both claiming the same language is ambiguous - which one
+	 * should win is never something to guess at, so both fail loudly at init.
 	 */
-	function _findStaticRun(atoms, from, limit, staticText) {
-		for (let start = from; start < limit; start++) {
-			let acc = "";
+	function _selectVariant(key, variants, language) {
+		const matches = Object.entries(variants).filter(([langSet]) => langSet.split("|").includes(language));
+		
+		if (matches.length === 0)
+			return undefined;
+		
+		if (matches.length > 1)
+			throw new Error(`TTSManifest: entry "${key}" has overlapping variants both covering language "${language}": ` + matches.map(([langSet]) => langSet).join(", "));
 
-			for (let end = start; end < limit; end++) {
-				acc = acc ? `${acc} ${atoms[end].text}` : atoms[end].text;
-				const normalized = _normalizeKey(acc);
+		return matches[0][1];
+	}
 
-				if (normalized === staticText) return { start, end: end + 1 };
-				if (normalized.length > staticText.length) break; // only grows from here - no point scanning further from this start
-			}
-		}
+	/*
+	 * Converts a structural narration reference into a stable Map key.
+	 *
+	 * TTSManifest never matches on rendered wording. It only matches the structural reference supplied by
+	 * Interpreter.renderContent().
+	 */
+	function _refKey(ref) {
+		if (!ref)
+			return null;
+
+		if (ref.type === "span")
+			return `span:${ref.key}:${ref.index}`;
+
+		if (ref.type === "value")
+			return `value:${String(ref.value)}`;
 
 		return null;
 	}
 
 	/*
-	 * Does the actual work lookupParts describes - the DP search over every (j,i) span, both flat lookup()
-	 * matches and template matches. No logging here: this is also called recursively by _tryTemplates to
-	 * resolve a candidate template's hole(s), and a hole failing to resolve for one candidate span among
-	 * many the outer DP tries is routine, recoverable exploration, not something worth reporting - only
-	 * the outermost call (see lookupParts) represents a genuine, consequential failure.
+	 * Converts a parsed localization template into the ordered positions an authored MANIFEST entry describes.
+	 *
+	 * Localization.parseTemplate() is the single source of truth for template structure. It has already split
+	 * literal text at sentence boundaries and assigned each literal span its stable (key,index) reference.
+	 *
+	 * Positions that do not correspond to independently recorded narration content are removed:
+	 *   - punctuation/whitespace-only spans
+	 *   - Pause, Break and Input expressions
+	 *
+	 * Remaining expressions are classified as:
+	 *   - static  - bare {KEY} references whose target is independent of turn data
+	 *   - dynamic - primitive calls whose target depends on turn data
 	 */
-	function _coverAtoms(atoms) {
-		const n = atoms.length;
-		if (n === 0) return [];
+	function _templatePositions(key) {
+		const template = Localization.parseTemplate(key);
 
-		const bestCost = new Array(n + 1).fill(Infinity);
-		const bestClips = new Array(n + 1).fill(null);
-		bestCost[0] = 0;
-		bestClips[0] = [];
+		if (template === undefined)
+			throw new Error(`TTSManifest: entry "${key}" doesn't match any localization key`);
 
-		for (let i = 1; i <= n; i++) {
-			for (let j = 0; j < i; j++) {
-				if (bestCost[j] === Infinity) continue;
+		const positions = [];
 
-				const clip = lookup(atoms.slice(j, i).map(a => a.text).join(" "));
-				if (clip !== null && bestCost[j] + 1 < bestCost[i]) {
-					bestCost[i] = bestCost[j] + 1;
-					bestClips[i] = [...bestClips[j], clip];
+		for (const node of template) {
+
+			if (node.type === "span") {
+				if (_isMeaningfulSpan(node.text)) {
+					positions.push({ kind: "literal", index: node.index });
 				}
 
-				const templateMatch = _tryTemplates(atoms, j, i);
-				if (templateMatch !== null && bestCost[j] + templateMatch.clips.length < bestCost[i]) {
-					bestCost[i] = bestCost[j] + templateMatch.clips.length;
-					bestClips[i] = [...bestClips[j], ...templateMatch.clips];
+				continue;
+			}
+
+			if (node.type === "expression" && (node.name === "Pause" || node.name === "Break" || node.name === "Input")) {
+				continue;
+			}
+
+			if (node.type === "expression") {
+				positions.push({ kind: node.args.length === 0 ? "static" : "dynamic", key: node.name });
+			}
+		}
+
+		return positions;
+	}
+
+	/*
+	 * Compiles one authored conditional group - { range: [startPos, endPos], alternatives } - into one
+	 * _templates entry per concrete combination of dynamic keys.
+	 *
+	 * Each key of `alternatives` encodes one concrete choice per dynamic position in the range, "|"-separated in
+	 * position order; a position with more than one possible target key lists them comma-separated within its
+	 * own segment (e.g. "GRAMMAR_CARD_SINGULAR,GRAMMAR_CARD_PLURAL|SOME_OTHER_KEY" - two alternatives for the
+	 * first dynamic position, one for the second). _cartesianProduct expands that into every real combination,
+	 * and _resolveGroupRefs resolves each combination to its exact refs, same as a plain (non-conditional)
+	 * group's static/literal positions - see there.
+	 */
+	function _registerConditionalGroup(key, positions, group) {
+		const [start, end] = group.range;
+		const alternatives = group.alternatives;
+
+		const dynamicCount = positions
+				.slice(start, end + 1)
+				.filter(position => position.kind === "dynamic")
+				.length;
+
+		for (const [encodedKeys, clip] of Object.entries(alternatives)) {
+			const positionKeyLists = encodedKeys.split("|").map(segment => segment.split(",").map(k => k.trim()));
+
+			if (positionKeyLists.length !== dynamicCount)
+				throw new Error( `TTSManifest: entry "${key}" conditional aggregate [${start}, ${end}] expects ${dynamicCount} dynamic key(s), but alternative "${encodedKeys}" provides ${positionKeyLists.length}`);
+
+			for (const dynamicKeys of _cartesianProduct(positionKeyLists)) {
+				const refs = _resolveGroupRefs(key, positions, start, end, dynamicKeys);
+				_templates.push({ refs, clip });
+			}
+		}
+	}
+
+	/*
+	 * Validates one authored group - { range: [startPos, endPos], aggregate: clipName } - then compiles it into
+	 * a single _templates entry via _resolveGroupRefs. The counterpart to _registerConditionalGroup: a plain
+	 * group collapses its range to exactly one clip name regardless of turn data, so there's no dynamicKeys to
+	 * supply and no data-dependent position is ever valid within it.
+	 */
+	function _registerGroup(key, positions, group) {
+		const [start, end] = group.range;
+
+		if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end >= positions.length)
+			throw new Error(`TTSManifest: entry "${key}" has a group with an invalid range [${start}, ${end}] for ${positions.length} slot(s)`);
+		if (typeof group.aggregate !== "string" || group.aggregate === "")
+			throw new Error(`TTSManifest: entry "${key}" has a group with no aggregate clip name`);
+
+		const refs = _resolveGroupRefs(key, positions, start, end);
+
+		_templates.push({ refs, clip: group.aggregate });
+	}
+
+	/*
+	 * True if a span has any letter/digit content worth its own clip - mirrors the exact filter Interpreter's
+	 * _splitRenderedParts already applies when building each sentence's source list, so a span this says is
+	 * "meaningless" here is guaranteed to never actually reach lookup as a part, and vice versa.
+	 */
+	function _isMeaningfulSpan(text) {
+		return /[\p{L}\p{N}]/u.test(text);
+	}
+
+	/*
+	 * All combinations of one item from each list, e.g. [["A","B"],["X"]] -> [["A","X"],["B","X"]]. Used by
+	 * _registerConditionalGroup to expand a conditional aggregate's comma-separated per-position alternatives
+	 * into one template per real combination.
+	 */
+	function _cartesianProduct(lists) {
+		return lists.reduce((combos, list) => combos.flatMap((combo) => list.map((item) => [...combo, item])), [[]]);
+	}
+
+	/*
+	 * Resolves one group's range - positions[start..end] - to the exact refs _templates needs, one call per
+	 * concrete template (a plain group has exactly one; a conditional group produces one per combination from
+	 * _registerConditionalGroup's cartesian expansion):
+	 *   - "literal" positions already have one (this key's own just-registered span ref).
+	 *   - "static" positions (a bareword {OTHER_KEY} reference) resolve to that key's own ref, recursively -
+	 *     but only if OTHER_KEY is itself a simple one-span leaf (no {...} of its own); otherwise a single
+	 *     group position could stand for more than one part at runtime, which this exact-ref mechanism can't
+	 *     represent (see the MANIFEST header comment on why aggregation is deliberately static-only).
+	 *   - "dynamic" positions (a primitive call with arguments) have no fixed ref to compile ahead of time on
+	 *     their own - which key they resolve to depends on turn data. A plain group (dynamicKeys === null) can
+	 *     never include one; a conditional group supplies the concrete target key for each dynamic position in
+	 *     the range via dynamicKeys, one entry per dynamic position in order, already picked out of one
+	 *     alternative by the caller.
+	 */
+	function _resolveGroupRefs(key, positions, start, end, dynamicKeys = null) {
+		const refs = [];
+		let dynamicIndex = 0;
+
+		for (let i = start; i <= end; i++) {
+			const position = positions[i];
+
+			if (position.kind === "literal") {
+				refs.push({ type: "span", key, index: position.index });
+				continue;
+			}
+
+			if (position.kind === "static") {
+				refs.push(..._expandStaticKey(key, i, position.key));
+				continue;
+			}
+
+			// Dynamic position.
+			if (dynamicKeys === null) {
+				throw new Error(`TTSManifest: entry "${key}" group [${start}, ${end}] includes slot ${i}, a data-dependent {...} reference - use conditionalAggregate(...) to provide an explicit alternative key`);
+			}
+
+			if (dynamicIndex >= dynamicKeys.length) {
+				throw new Error(`TTSManifest: entry "${key}" conditional aggregate has too few dynamic keys for the dynamic positions in range [${start}, ${end}]`);
+			}
+
+			const targetKey = dynamicKeys[dynamicIndex++];
+			refs.push(..._expandStaticKey(key, i, targetKey));
+		}
+
+		if (dynamicKeys !== null && dynamicIndex !== dynamicKeys.length) {
+			throw new Error(`TTSManifest: entry "${key}" conditional aggregate supplied ${dynamicKeys.length} dynamic key(s), but the range [${start}, ${end}] contains ${dynamicIndex} dynamic position(s)`);
+		}
+
+		return refs;
+	}
+
+	/*
+	 * Recursively expands a static ({OTHER_KEY}, no arguments) reference into the exact structural references
+	 * produced by that key.
+	 *
+	 * The template structure comes directly from Localization.parseTemplate() through _templatePositions(), so
+	 * TTSManifest no longer maintains a second copy of Localization's template parser.
+	 *
+	 * Expansion is only valid when every position is static or literal. A dynamic expression would depend on turn
+	 * data and therefore cannot be part of a precompiled aggregate.
+	 */
+	function _expandStaticKey(fromKey, slotIndex, targetKey, seen = new Set()) {
+		if (seen.has(targetKey)) {
+			throw new Error(`TTSManifest: entry "${fromKey}" slot ${slotIndex} - static reference cycle involving "${targetKey}"`);
+		}
+
+		if (Localization.parseTemplate(targetKey) === undefined) {
+			throw new Error(`TTSManifest: entry "${fromKey}" slot ${slotIndex} references unknown key "${targetKey}"`);
+		}
+
+		const refs = [];
+
+		for (const position of _templatePositions(targetKey)) {
+
+			if (position.kind === "literal") {
+				refs.push({ type: "span", key: targetKey, index: position.index });
+
+			} else if (position.kind === "static") {
+				refs.push(..._expandStaticKey(fromKey, slotIndex, position.key, new Set(seen).add(targetKey)));
+
+			} else {
+				throw new Error(`TTSManifest: entry "${fromKey}" slot ${slotIndex} references "${targetKey}", which contains a data-dependent {...} reference of its own - a group can't cover it`);
+			}
+		}
+
+		return refs;
+	}
+
+
+	/* =========================
+	   Private functions
+	   ========================= */
+
+	/*
+	 * Finds the fewest logical recordings needed to cover an entire rendered content unit.
+	 *
+	 * `parts` are the rendered source fragments returned by Interpreter.renderContent():
+	 *
+	 *     { text, ref }
+	 *
+	 * Only `ref` participates in matching. `text` is deliberately ignored.
+	 *
+	 * Individual recordings and authored aggregate recordings are considered together. A complete covering is
+	 * required; returning null tells AutoNarrator to synthesize the entire rendered unit instead.
+	 */
+	function _coverParts(parts) {
+		const n = parts.length;
+
+		const best = new Array(n + 1).fill(null);
+		best[0] = [];
+
+		for (let end = 1; end <= n; end++) {
+			// Try the individual recording for the final part.
+			if (best[end - 1] !== null) {
+				const clip = _map.get(_refKey(parts[end - 1]?.ref));
+
+				if (clip !== undefined) {
+					best[end] = [ ...best[end - 1], clip ];
+				}
+			}
+
+			// Try every aggregate whose final reference lands at this position.
+			for (const template of _templates) {
+				const length = template.refs.length;
+
+				const start = end - length;
+
+				if (start < 0 || best[start] === null) {
+					continue;
+				}
+
+				if (best[end] !== null && best[start].length + 1 >= best[end].length) {
+					continue;
+				}
+
+				let matches = true;
+
+				for (let i = 0; i < length; i++) {
+					if (_refKey(parts[start + i]?.ref) !== _refKey(template.refs[i])) {
+						matches = false;
+						break;
+					}
+				}
+
+				if (matches) {
+					best[end] = [ ...best[start], template.clip ];
 				}
 			}
 		}
 
-		return bestCost[n] === Infinity ? null : bestClips[n];
+		return best[n];
 	}
 
 
@@ -620,58 +767,33 @@ const TTSManifest = (() => {
 	   Public functions
 	   ========================= */
 
-	function lookup(text) {
-		return _map?.get(_normalizeKey(text)) ?? null;
-	}
-
 	/*
-	 * Looks up clips for an ordered list of atoms, for spliced automatic narration (see Interpreter's
-	 * clipParts - a segment broken into individually-recordable pieces, e.g. a role's name plus a shared fixed
-	 * suffix like ", vakna."). Rather than requiring every atom to have its own individual recording, this
-	 * tries every way of grouping adjacent atoms into contiguous runs and picks whichever full covering of the
-	 * atom list needs the fewest recordings (fewest splice seams) - so a group of atoms that were only split
-	 * apart because two different template expressions happened to produce them (e.g. a bareword role reference
-	 * sitting next to a literal phrase, both reached through an {If:...}/{Select:...} branch that Localization
-	 * has to treat as unpredictable) still plays as one natural recording, as long as *that* recording exists.
-	 * Which atoms end up grouped together is decided purely by what's actually in the manifest, not by
-	 * anything about how the text was resolved - recording a combined phrase and adding it here is enough to
-	 * start using it, with no other change required. Groups are looked up by joining their atoms' text with a
-	 * single space before normalizing; since lookup()'s normalization already collapses all punctuation and
-	 * whitespace runs to one separator, this reconstructs the same key a human-written manifest entry for that
-	 * phrase would normalize to, regardless of the atoms' original punctuation.
+	 * Attempts to find recordings covering every part of one rendered content unit.
 	 *
-	 * This is a small dynamic program (classic minimum-segments word-break): bestCost[i] is the fewest clips
-	 * needed to cover atoms[0..i), built up by trying every earlier split point j and checking whether
-	 * atoms[j..i) joined has a recording. For the handful of atoms a sentence realistically has, this is at
-	 * most a few hundred cheap lookups - negligible next to actually playing audio.
-	 *
-	 * All-or-nothing still applies at the *whole segment* level: if no combination of groupings can cover
-	 * every atom (some atom has no recording even entirely on its own), this returns null so the caller falls
-	 * back to synthesizing the whole segment's plain text rather than mixing recorded and synthesized audio -
-	 * same rule as before, just evaluated over a larger search space now. On that failure, every atom that
-	 * has no recording even by itself is logged (the same diagnostic value the atom-by-atom version had),
-	 * since those are exactly the ones a covering partition could never route around.
-	 *
-	 * atoms - ordered list of { text } chunks, e.g. a text segment's clipParts.
-	 *
-	 * Returns an array of clips, one per chosen group, in order; or null if no full covering exists.
+	 * The returned names are logical clip names. TTSManifest does not inspect or resolve those names; AudioAtlas
+	 * owns the mapping from logical clip names to physical audio.
 	 */
-	function lookupParts(atoms) {
-		const names = _coverAtoms(atoms);
-		if (names === null) {
-			for (const atom of atoms) {
-				if (lookup(atom.text) === null)
-					console.log(`[TTSManifest] no recording for atom: ${JSON.stringify(atom.text)}`);
+	function lookup(parts) {
+		if (!Array.isArray(parts) || parts.length === 0)
+			return null;
+
+		const clips = _coverParts(parts);
+
+		if (clips === null) {
+			for (const part of parts) {
+				const refKey = _refKey(part?.ref);
+
+				if (!_map.has(refKey)) {
+					console.log(`[TTSManifest] no recording for structural reference: ${refKey ?? "unattributed"}`);
+				}
 			}
 		}
-		return names;
+
+		return clips;
 	}
 
 
-
-    return {
+	return {
 		lookup,
-		lookupParts,
 	};
-	
 })();

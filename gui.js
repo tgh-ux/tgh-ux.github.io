@@ -32,13 +32,16 @@ const VALIDATION_RENDERERS = {
 let activeSelectionPointerId = null;
 
 /*
- * Prompt display and narration state. renderedTurns/rawTurns are two views of the same turns produced by updatePrompt(): rawTurns is what
- * AutoNarrator.play() takes, renderedTurns is the localized text shown in the output box. currentTurn/showSingleTurn control single-turn display and
- * navigation.
+ * Prompt display and narration state.
+ *
+ * narrationData is the single structural representation produced from Rules.buildPrompt() by Interpreter.compileAll().
+ * The GUI decides how that data is presented: manual text is rendered on demand, while automatic narration passes
+ * the same data to AutoNarrator.
+ *
+ * currentTurn/showSingleTurn control manual single-turn display and navigation.
  */
 let promptState = {
-	renderedTurns: [],
-	rawTurns: [],
+	narrationData: [],
 	currentTurn: 0,
 	showSingleTurn: false,
 };
@@ -51,8 +54,8 @@ const DAY_TIMER_ADJUST_STEP = 30;
 const DAY_TIMER_DEFAULT_DURATION = 300;
 // Warning thresholds for the day timer, playing an announcement when each threshold is reached
 const DAY_TIMER_WARNINGS = [
-    { threshold: 60, text: "UI_DAYTIMER_60S_WARNING" },
-    { threshold: 30, text: "UI_DAYTIMER_30S_WARNING" },
+    { threshold: 60, text: "UI_DAYTIMER_60S_WARNING", playSetting: "narration.play_timer_warnings" },
+    { threshold: 30, text: "UI_DAYTIMER_30S_WARNING", playSetting: "narration.play_timer_warnings" },
 ];
 // If a threshold has been crossed by more than this, skip instead of play
 const DAY_TIMER_WARNING_GRACE_SECONDS = 5;
@@ -1579,10 +1582,10 @@ function setTagFilterTileState(tile, isSelected) {
 
 /* =========================
    Game script & narration
-   
-   Turns produced by Rules.buildPrompt() are one dataset with two parallel presentations: a plain text script (rendered into the output box, see
-   "Text script" below) and spoken narration played back through Speech (see "Speech narration" below). Both read from promptState, which
-   updatePrompt() below is the sole writer of.
+
+   Rules.buildPrompt() produces structured turns. Interpreter.compileAll() converts those turns into the single
+   structural narration dataset stored in promptState. The GUI chooses the presentation: manual text is rendered
+   through Interpreter on demand, while automatic narration is delegated to AutoNarrator.
    ========================= */
 
 /*
@@ -1598,8 +1601,7 @@ function setTagFilterTileState(tile, isSelected) {
  */
 function updatePrompt(relevantErrors) {
 	function _showPromptUnavailable(message) {
-		promptState.renderedTurns = [];
-		promptState.rawTurns = [];
+		promptState.narrationData = [];
 		setCurrentTurn(0, false);
 
 		document.getElementById("promptOutput").value = message;
@@ -1626,8 +1628,7 @@ function updatePrompt(relevantErrors) {
 			return;
 		}
 
-		promptState.renderedTurns = Interpreter.renderAll(turns);
-		promptState.rawTurns = turns;
+		promptState.narrationData = Interpreter.compileAll(turns);
 		setCurrentTurn(promptState.currentTurn); // preserve current turn, clamped to a valid index
 
 	} catch (error) {
@@ -1647,41 +1648,50 @@ function updatePrompt(relevantErrors) {
 	 */
 	function updatePromptNavigation() {
 		const label = document.getElementById("promptCounter");
+		const turnCount = promptState.narrationData.length;
+
 		if (promptState.showSingleTurn) {
-			label.textContent = (promptState.renderedTurns.length > 0) ? `${promptState.currentTurn + 1} / ${promptState.renderedTurns.length}` : "-";
+			label.textContent = turnCount > 0 ? `${promptState.currentTurn + 1} / ${turnCount}` : "-";
 		} else {
 			label.textContent = "-";
 		}
 
 		document.getElementById("promptFirst").disabled = !promptState.showSingleTurn || promptState.currentTurn <= 0;
 		document.getElementById("promptPrevious").disabled = !promptState.showSingleTurn || promptState.currentTurn <= 0;
-		document.getElementById("promptNext").disabled = !promptState.showSingleTurn || promptState.currentTurn >= promptState.renderedTurns.length - 1;
-		document.getElementById("promptLast").disabled = !promptState.showSingleTurn || promptState.currentTurn >= promptState.renderedTurns.length - 1;
+		document.getElementById("promptNext").disabled = !promptState.showSingleTurn || promptState.currentTurn >= promptState.narrationData.length - 1;
+		document.getElementById("promptLast").disabled = !promptState.showSingleTurn || promptState.currentTurn >= promptState.narrationData.length - 1;
 	}
 
 	/*
 	 * Sets the current turn shown in the script output, clamped to a valid index.
-	 *   value    - the target turn index; clamped to [0, promptState.renderedTurns.length - 1].
+	 *   value    - the target turn index; clamped to [0, promptState.narrationData.length - 1].
 	 *   rerender - if true (default), immediately calls renderPrompt(); pass false when the caller will render separately (or not at all).
 	 */
 	function setCurrentTurn(value, rerender = true) {
-		promptState.currentTurn = Math.max(Math.min(value, promptState.renderedTurns.length - 1), 0);
+		const lastTurn = promptState.narrationData.length - 1;
+		promptState.currentTurn = Math.max(Math.min(value, lastTurn), 0);
 
 		if (rerender)
 			renderPrompt();
 	}
 
 	/*
-	 * Writes the current script text into the output box - either the full script, or just promptState.currentTurn's turn if
-	 * showSingleTurn is set - then refreshes navigation and box sizing. No parameters, no return value.
+	 * Renders the current narration data into the plain-text script view.
+	 *
+	 * The GUI does not retain a pre-rendered copy of the text. It asks Interpreter to render the requested turn(s)
+	 * whenever the output needs refreshing.
+	 *
+	 * Manual narration currently uses the verbose presentation. A future GUI control can switch this call to "brief"
+	 * without changing the stored narration data.
 	 */
 	function renderPrompt() {
 		const outputBox = document.getElementById("promptOutput");
 
 		if (!promptState.showSingleTurn) {
-			outputBox.value = promptState.renderedTurns.map(t => Interpreter.sequenceToText(t.sequence)).join("\n\n");
+			outputBox.value = promptState.narrationData.map(narration => Interpreter.renderText(narration, "verbose")).join("\n\n");
 		} else {
-			outputBox.value = promptState.renderedTurns[promptState.currentTurn] ? Interpreter.sequenceToText(promptState.renderedTurns[promptState.currentTurn].sequence) : "";
+			const narration = promptState.narrationData[promptState.currentTurn];
+			outputBox.value = narration ? Interpreter.renderText(narration, "verbose") : "";
 		}
 
 		updatePromptNavigation();
@@ -1700,29 +1710,32 @@ function updatePrompt(relevantErrors) {
 	   ========================= */
 
 	/*
-	 * Plays promptState.rawTurns as narration. Turn boundaries are preserved (not flattened) so Speech can report per-turn progress back to
-	 * clbkSpeechTurnComplete below. All engine-specific detail (voices, pacing, what "playing" even means) lives in Speech - this just hands it data and
-	 * a few progress callbacks.
+	 * Plays promptState.narrationData as automatic narration.
+	 *
+	 * The same structural data used by the manual script view is passed to AutoNarrator. It resolves each turn only
+	 * when playback reaches it, allowing values bound by earlier inputs to affect later turns.
 	 */
 	function speakPrompt() {
 		Interpreter.refreshPauseSettings();
 		setCurrentTurn(0);
 
-		if (promptState.rawTurns.length === 0)
+		if (promptState.narrationData.length === 0) {
 			return;
+		}
 
 		openSpeechOverlay();
 		resetSpeechOverlay();
 
-		AutoNarrator.play(promptState.rawTurns, {
-			onSpeaking: clbkSpeechSpeaking,
-			onPause: clbkSpeechPause,
-			onTurnComplete: clbkSpeechTurnComplete,
-			onFinished: clbkSpeechFinished,
-			onInputStart: clbkSpeechInputStart,
-			onInputCountdown: clbkSpeechInputCountdown,
-			onInputResolved: clbkSpeechInputResolved,
-		});
+		AutoNarrator.play(promptState.narrationData, {
+				onSpeaking: clbkSpeechSpeaking,
+				onPause: clbkSpeechPause,
+				onTurnComplete: clbkSpeechTurnComplete,
+				onFinished: clbkSpeechFinished,
+				onInputStart: clbkSpeechInputStart,
+				onInputCountdown: clbkSpeechInputCountdown,
+				onInputResolved: clbkSpeechInputResolved,
+			}
+		);
 
 		updateSpeechOverlayControls();
 	}
@@ -2314,7 +2327,7 @@ function updateDayTimerSpacer() {
 // Initializes the day timer warning thresholds from the base table, only including entries that are at least initialSeconds in the future
 function initializeDayTimerWarnings(initialSeconds) {
     dayTimer.warnings = DAY_TIMER_WARNINGS
-        .filter(warning => warning.threshold <= initialSeconds)
+        .filter(warning => (warning.threshold <= initialSeconds) && Settings.getValue(warning.playSetting))
         .sort((a, b) => b.threshold - a.threshold);
 }
 
@@ -2329,14 +2342,15 @@ function processDayTimerWarnings(remaining) {
         dayTimer.warnings.shift();
 
         if (remaining >= warning.threshold - DAY_TIMER_WARNING_GRACE_SECONDS) {
-            AutoNarrator.playAnnouncement(Localization.localize(warning.text));
+            AutoNarrator.playAnnouncement(warning.text);
         }
     }
 }
 
 // Plays the time up announcement when the day timer expires
 function playDayTimerTimeUpAnnouncement() {
-	AutoNarrator.playAnnouncement(Localization.localize("UI_DAYTIMER_EXPIRED"));
+	if (Settings.getValue("narration.play_timer_expired"))
+		AutoNarrator.playAnnouncement("UI_DAYTIMER_EXPIRED");
 }
 
 
@@ -2557,7 +2571,7 @@ function onNavigationButtonClicked(e) {
 			newTurn = promptState.currentTurn + 1;
 			break;
 		case "last":
-			newTurn = promptState.renderedTurns.length - 1;
+			newTurn = promptState.narrationData.length - 1;
 			break;
 	}
 
@@ -2731,7 +2745,7 @@ function initGUI() {
 	updateRolesUI();
 	
 	// Pre-fetch the TTS atlas file so that it's ready for use
-	AudioAtlas.preload(lang);
+	AudioAtlas.preload();
 }
 
 initGUI();

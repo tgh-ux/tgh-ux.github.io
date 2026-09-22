@@ -161,6 +161,18 @@ const Settings = (() => {
 					textKey: "UI_SETTING_NARRATION_PAUSE_SCALE",
 					defaultValue: 1.0,
 				},
+				{
+					type: "toggle",
+					id: "play_timer_warnings",
+					textKey: "UI_SETTING_NARRATION_TIMER_WARNINGS",
+					defaultValue: true,
+				},
+				{
+					type: "toggle",
+					id: "play_timer_expired",
+					textKey: "UI_SETTING_NARRATION_TIMER_EXPIRED",
+					defaultValue: true,
+				},
 			]
 		},
 		{
