@@ -1,17 +1,39 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true, Position = 0)]
-    [string]$CsvFile = "files.csv",
-
-    [Parameter(Mandatory = $true, Position = 1)]
+    [Parameter(Position = 0)]
     [string]$OutputWav = "atlas.wav",
 
-    [Parameter(Mandatory = $true, Position = 2)]
+    [Parameter(Position = 1)]
     [string]$OutputTable = "atlas.js"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+
+
+# Key patterns that receive a "type" field in the JavaScript output.
+# Patterns are regular expressions.
+$KeyTypes = @(
+    [PSCustomObject]@{
+        Pattern = '^role_'
+        Type    = 'identity'
+    }
+    [PSCustomObject]@{
+        Pattern = '^team_'
+        Type    = 'identity'
+    }
+    [PSCustomObject]@{
+        Pattern = '^identity_'
+        Type    = 'identity'
+    }
+    [PSCustomObject]@{
+        Pattern = '^num_\d+$'
+        Type    = 'num'
+    }
+)
+
+
 
 
 function Read-UInt16LE {
@@ -182,82 +204,29 @@ function Write-UInt32LE {
 
 
 # ---------------------------------------------------------------------------
-# Read input CSV
+# Find input WAV files
 # ---------------------------------------------------------------------------
 
-if (-not (Test-Path -LiteralPath $CsvFile -PathType Leaf)) {
-    throw "CSV file not found: $CsvFile"
-}
+$currentDirectory = [System.IO.Path]::GetFullPath((Get-Location))
 
-$csvLines = @(
-    Get-Content -LiteralPath $CsvFile |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+$resolvedInputs = @(
+    Get-ChildItem -LiteralPath $currentDirectory -Filter '*.wav' -File |
+        Where-Object {
+            -not [System.IO.Path]::GetFileName(
+                $_.FullName
+            ).Equals(
+                [System.IO.Path]::GetFileName($OutputWav),
+                [StringComparison]::OrdinalIgnoreCase
+            )
+        } |
+        Sort-Object Name |
+        ForEach-Object {
+            $_.FullName
+        }
 )
 
-if ($csvLines.Count -eq 0) {
-    throw "CSV file is empty."
-}
-
-# Support either:
-#
-#   File
-#   foo.wav
-#   bar.wav
-#
-# or a completely headerless CSV:
-#
-#   foo.wav
-#   bar.wav
-#
-# If there is a "File" header, Import-Csv is used. Otherwise the first
-# column of every line is treated as the filename.
-
-$firstLine = $csvLines[0].Trim()
-
-$inputFiles = @()
-
-if ($firstLine -match '^(?i:"?File"?)\s*(,|$)') {
-    $rows = Import-Csv -LiteralPath $CsvFile
-
-    foreach ($row in $rows) {
-        $value = $row.File
-
-        if (-not [string]::IsNullOrWhiteSpace($value)) {
-            $inputFiles += $value.Trim()
-        }
-    }
-}
-else {
-    foreach ($line in $csvLines) {
-        # Take the first CSV field.
-        $fields = $line | ConvertFrom-Csv -Header File
-
-        if (-not [string]::IsNullOrWhiteSpace($fields.File)) {
-            $inputFiles += $fields.File.Trim()
-        }
-    }
-}
-
-if ($inputFiles.Count -eq 0) {
-    throw "No input WAV files were found in '$CsvFile'."
-}
-
-
-# Resolve paths relative to the current working directory.
-$resolvedInputs = @()
-
-foreach ($file in $inputFiles) {
-    $path = $file
-
-    if (-not [System.IO.Path]::IsPathRooted($path)) {
-        $path = Join-Path (Get-Location) $path
-    }
-
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "Input WAV file not found: $file"
-    }
-
-    $resolvedInputs += [System.IO.Path]::GetFullPath($path)
+if ($resolvedInputs.Count -eq 0) {
+    throw "No WAV files were found in '$currentDirectory'."
 }
 
 
@@ -398,12 +367,7 @@ try {
     [double]$currentOffset = 0.0
 
     foreach ($info in $wavFiles) {
-        $inputName = [System.IO.Path]::GetFileNameWithoutExtension($info.Path)
-
-        # JavaScript string escaping.
-        $jsKey = $inputName.Replace('\', '\\').Replace('"', '\"')
-        $atlasName = [System.IO.Path]::GetFileNameWithoutExtension($OutputWav)
-        $atlasName = $atlasName.Replace('\', '\\').Replace('"', '\"')
+		$inputName = [System.IO.Path]::GetFileNameWithoutExtension($info.Path)
 
         $startOffset = $currentOffset
         $endOffset = $currentOffset + $info.Duration
@@ -442,7 +406,6 @@ try {
 
         $toc += [PSCustomObject]@{
             Key   = $inputName
-            Atlas = $atlasName
             Start = $startOffset
             End   = $endOffset
         }
@@ -488,11 +451,30 @@ Write-Host "Creating: $outputTablePath"
 $lines = @()
 
 foreach ($entry in $toc) {
-    $lines += ('"{0}": {{ atlas: "{1}", start: {2:F3}, end: {3:F3} }},' -f `
-        $entry.Key.Replace('\', '\\').Replace('"', '\"'),
-        $entry.Atlas,
-        $entry.Start,
-        $entry.End)
+    $key = $entry.Key.Replace('\', '\\').Replace('"', '\"')
+
+    $type = $null
+
+    foreach ($rule in $KeyTypes) {
+        if ($entry.Key -match $rule.Pattern) {
+            $type = $rule.Type
+            break
+        }
+    }
+
+    if ($null -ne $type) {
+        $lines += ('"{0}": {{ start: {1:F3}, end: {2:F3}, type: "{3}" }},' -f `
+            $key,
+            $entry.Start,
+            $entry.End,
+            $type)
+    }
+    else {
+        $lines += ('"{0}": {{ start: {1:F3}, end: {2:F3} }},' -f `
+            $key,
+            $entry.Start,
+            $entry.End)
+    }
 }
 
 [System.IO.File]::WriteAllLines(
