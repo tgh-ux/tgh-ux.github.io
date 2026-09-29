@@ -242,6 +242,33 @@ const Interpreter = (() => {
 
 		throw new Error(`Input: unrecognized kind '${kind}'`);
 	}
+	
+	/*
+	 * Compiles the automatic representation of an FakeInput primitive as an Input node.
+	 *
+	 * Produces a standard Input node, the main difference being that the input is discarded, and no branching takes place.
+	 */
+	function _compileFakeInput(args, data, mode, stack) {
+		const [duration, manualKey, continuationKey, ...labels] = args;
+
+		if (mode !== "automatic")
+			return _compileKey(manualKey, data, mode, stack);
+
+		const node = {
+			type: "input",
+			timeoutSeconds: _resolveDuration(duration),
+			options: labels.map(label => ({
+				value: label,
+				label: _compileDescriptor(_branchDescriptor(label), data, "automatic", stack)
+			})),
+			continuation: {
+				type: "fixed",
+				key: continuationKey
+			},
+		};
+
+		return [node];
+	}
 
 
 	/* =========================
@@ -345,6 +372,12 @@ const Interpreter = (() => {
 
 			throw new Error(`Select: no matching arm for field '${field}'='${value}' (and no '*' catch-all provided)`);
 		},
+		//{Random:branch,branch,...,branch} - selects a random branch in the list, a localization key or literal, using either data.rndSeed or a rolled random value
+		Random: (data, ...arms) => {
+			const r = data.rndSeed ?? Math.random();
+			const i = Math.floor(r * arms.length);
+			return _branchDescriptor(arms[i]);
+		},
 		/*
 		 * {Pause:level|seconds} — narration-timing marker, not narration content. `level` is one of PAUSE_LEVELS' keys (a shared vocabulary
 		 * for "how long does this kind of action take", so pause lengths stay consistent across roles and are tunable in one place rather than
@@ -423,6 +456,9 @@ const Interpreter = (() => {
 
 		if (expression.name === "Input")
 			return _compileInput(expression.args, data, mode, stack);
+		
+		if (expression.name === "FakeInput")
+			return _compileFakeInput(expression.args, data, mode, stack);
 
 		const handler = EXPRESSION_HANDLERS[expression.name];
 
@@ -664,6 +700,8 @@ const Interpreter = (() => {
 
 			key = branch.key;
 		} else if (continuation.type === "value") {
+			key = continuation.key;
+		} else if (continuation.type === "fixed") {
 			key = continuation.key;
 		} else {
 			throw new Error(`Input: unrecognized continuation type '${continuation.type}'`);

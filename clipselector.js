@@ -1,14 +1,23 @@
 /*
- * Maps narration to pre-recorded clip names for automatic (spoken) narration - see AutoNarrator/AudioAtlas
- * for how a clip name actually gets turned into audio; this module only decides *which* clip names a turn
- * needs, or that none exist and the caller should fall back to synthesis.
+ * Maps narration to pre-recorded clip names for automatic (spoken) narration - see ClipPlayback for how a clip
+ * name actually gets turned into audio; this module only decides *which* clip names a turn needs, or that none
+ * exist and the caller should fall back to synthesis.
+ *
+ * Pure decision layer - no I/O, no audio, no knowledge of whether a clip it names actually exists in the atlas.
+ * Not called directly outside ClipPlayback.resolve() - that's the only place that composes this module with
+ * physical-clip existence checks, and the only module that should ever import this one. This module deciding
+ * *which* names are needed and ClipPlayback deciding whether they *exist* stay separate concerns on purpose:
+ * an author changing which clip covers a phrase, and a repack changing what's actually recorded, are different
+ * kinds of change with different failure modes, and conflating them would mean an atlas gap looks identical to
+ * an authoring mistake instead of being flagged as what it actually is.
  *
  * Lookup is always by structural ref, never by wording - see the `_map` comment below for what a ref is and
- * where it comes from. `MANIFEST` below is this module's only real authored data; see its own comment for
- * what needs an entry and how an entry is written.
+ * where it comes from. `MANIFEST` below is this module's primary authored data; see its own comment for what
+ * needs an entry and how an entry is written. `ANNOUNCEMENT_CLIPS` is secondary authored data specifically 
+ * for simple, plain clips, without the more advanced functionality of the main manifest.
  */
 
-const TTSManifest = (() => {
+const ClipSelector = (() => {
 
 	/* =========================
 	   Data
@@ -16,17 +25,17 @@ const TTSManifest = (() => {
 
 	// A slot in a `MANIFEST` entry's array - see the header above. The identity of the symbol is all that
 	// matters; the description is only ever read by a human looking at this file, never compared against.
-	const PLACEHOLDER = Symbol("this position is a {...} reference - looked up under its own key, not here");
+	const REF = Symbol("position occupied by a {...} reference");
 	const AGGREGATE = Symbol("MANIFEST aggregate");
 
 	// Helper function for aggregating multiple positions/clips into an aggregated clip covering the range
-	function aggregate(count, clip) {
+	function agg(count, clip) {
 		return { [AGGREGATE]: true, clip, count };
 	}
 
 	// Helper function for aggregating multiple positions into one of several clips, depending on which key a
 	// dynamic branch resolves to. Branch is zero-based relative to this aggregate's range.
-	function conditionalAggregate(count, alternatives) {
+	function c_agg(count, alternatives) {
 		return { [AGGREGATE]: true, count, alternatives };
 	}
 
@@ -45,7 +54,7 @@ const TTSManifest = (() => {
 	 *
 	 * Each entry maps one or more language-set keys - "|"-joined language codes, e.g. "SWE|ENG" or a single
 	 * "SWE" - to the array that applies for exactly those languages. Since lookup is entirely ref-based, a clip
-	 * name doesn't mean anything different per language - it's just the name AudioAtlas looks up within whichever
+	 * name doesn't mean anything different per language - it's just the name ClipPlayback looks up within whichever
 	 * language's own atlas is currently loaded - so most entries only ever need ONE variant covering every
 	 * supported language at once (e.g. "SWE|ENG": [...]), and only the keys where the languages' actual wording
 	 * structurally diverges (say, English inserting a literal "the" that Swedish's template never needed a slot
@@ -55,15 +64,15 @@ const TTSManifest = (() => {
 	 * language currently active (throwing if none do, or if more than one ambiguously does - see there).
 	 *
 	 * An entry's array is written by reading that key's own raw template left to right: a string names the clip
-	 * for that literal span; PLACEHOLDER marks a `{...}` reference (a bareword key or a primitive call, no
-	 * distinction needed - see _registerKey) and is never itself registered, since whatever ends up there will
-	 * carry its own ref back to whichever key actually produced it. A PLACEHOLDER's position in the array is
-	 * purely documentation for whoever's authoring this - it consumes no span index of the key it's declared
-	 * under, exactly mirroring how a `{...}` match never advances Localization's own literalIndex counter (see
-	 * there). Concretely, for PROMPT_VIEW_CARD_PLAYER_ANY's template -
+	 * for that literal span; REF marks a `{...}` reference (a bareword key or a primitive call, no distinction
+	 * needed - see _registerKey) and is never itself registered, since whatever ends up there will carry its own
+	 * ref back to whichever key actually produced it. A REF's position in the array is purely documentation for
+	 * whoever's authoring this - it consumes no span index of the key it's declared under, exactly mirroring how
+	 * a `{...}` match never advances Localization's own literalIndex counter (see there). Concretely, for
+	 * PROMPT_VIEW_CARD_PLAYER_ANY's template -
 	 *   "{NUM_WORD} {Select:count,1,GRAMMAR_CARD_SINGULAR,*,GRAMMAR_CARD_PLURAL} från
 	 *    {Select:count,1,...SINGLE,*,...MULTI} {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL}"
-	 * - the array is [ PLACEHOLDER, PLACEHOLDER, "from", PLACEHOLDER, PLACEHOLDER ]: four template references
+	 * - the array is [ REF, REF, "from", REF, REF ]: four template references
 	 * (whatever they each resolve to is looked up independently, under their own key's own entry) and exactly
 	 * one literal span of this key's own, " från ", at index 0 (the only index this key's own template ever
 	 * assigns, since every other piece is a reference elsewhere) - registered here as "from". No entry needs to
@@ -75,31 +84,17 @@ const TTSManifest = (() => {
 	 * Aggregation - collapsing a known run of clips into one better-prosody recording, e.g. the Doppelganger's
 	 * echoed wake call, or a fully single-clip sentence with no part-level breakdown at all - is authored as an
 	 * optional `groups` list alongside a key's `clips` (see _registerGroup for the exact shape). A group names a
-	 * contiguous range of that key's own array positions - including PLACEHOLDER ones - to collapse into one
-	 * clip; it's compiled at init time into a fixed, fully-resolved sequence of exact refs, so lookup never
-	 * matches on wording, only on refs, same as everything else here. This only works when every position in the
-	 * range is statically knowable ahead of time - a literal span, or a PLACEHOLDER standing for a bareword
-	 * {OTHER_KEY} reference (never a primitive call with arguments, whose target key depends on turn data). This
-	 * isn't a corner deliberately left uncut: a genuinely data-dependent position is exactly the case where
-	 * pre-aggregating would mean recording a combinatorial explosion of variants instead of splicing - the same
-	 * case an author would never choose to aggregate by hand either. See _registerGroup for what happens if a
-	 * group's range includes one anyway (a clear error at init, not a silent wrong splice).
+	 * contiguous range of that key's own array positions - including REF ones - to collapse into one clip; it's
+	 * compiled at init time into a fixed, fully-resolved sequence of exact refs, so lookup never matches on wording,
+	 * only on refs, same as everything else here. This only works when every position in the range is statically
+	 * knowable ahead of time - a literal span, or a REF standing for a bareword {OTHER_KEY} reference (never a
+	 * primitive call with arguments, whose target key depends on turn data). This isn't a corner deliberately left
+	 * uncut: a genuinely data-dependent position is exactly the case where pre-aggregating would mean recording a
+	 * combinatorial explosion of variants instead of splicing - the same case an author would never choose to
+	 * aggregate by hand either. See _registerGroup for what happens if a group's range includes one anyway (a clear
+	 * error at init, not a silent wrong splice).
 	 */
 	const MANIFEST = {
-		/*
-		These keys need per-language difference, not counting keys with aggregated clips. The remaining non-aggregated (and maybe some aggregated) keys can reuse structure for both Swedish and English
-		PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS
-		PROMPT_ALPHAWOLF_ACTION
-		PROMPT_RIPPLE_DOUBLE_VOTE
-		PROMPT_RIPPLE_MUTED
-		PROMPT_RIPPLE_REBUKED
-		PROMPT_VIEW_CARD_PLAYER_SPECIFIC
-		*/
-
-		UI_DAYTIMER_60S_WARNING:                        { "SWE|ENG": [ "timer_60s_warning" ] },
-		UI_DAYTIMER_30S_WARNING:                        { "SWE|ENG": [ "timer_30s_warning" ] },
-		UI_DAYTIMER_EXPIRED:                            { "SWE|ENG": [ aggregate(4, "timer_expired") ] },
-
 		GRAMMAR_CARD_SINGULAR:                          { "SWE|ENG": [ "card" ] },
 		GRAMMAR_CARD_PLURAL:                            { "SWE|ENG": [ "cards" ] },
 		GRAMMAR_PLAYER_SINGULAR:                        { "SWE|ENG": [ "player" ] },
@@ -110,134 +105,148 @@ const TTSManifest = (() => {
 		SPECIAL_ALL:                                    { "SWE|ENG": [ "identity_all_players" ] },
 		SPECIAL_LOVERS:                                 { "SWE|ENG": [ "identity_lovers" ] },
 
-		PROMPT_ALIEN_TEAM:                              { "SWE|ENG": [ PLACEHOLDER, "wake_and_identify", PLACEHOLDER, PLACEHOLDER, PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_ALIEN_TEAM:                              { "SWE|ENG": [ REF, "wake_and_identify", REF, REF, REF, "generic_sleep" ] },
+		PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN:            { "SWE|ENG": [ "all_hands_out", agg(2, "alien_team_turncoat_1"), agg(3, "alien_team_turncoat_2a"), "all_hands_down" ] },
+		PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION:           { "SWE|ENG": [ "all_hands_out", agg(2, "alien_team_turncoat_1"), agg(3, "alien_team_turncoat_2b"), "all_hands_down" ] },
 		PROMPT_ALIEN_TEAM_ACTION_NOTHING:               { "SWE|ENG": [ "alien_team_do_nothing" ] },
 		PROMPT_ALIEN_TEAM_ACTION_SHOW_CARDS:            { "SWE|ENG": [ "alien_team_show_cards" ] },
-		PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE: { "SWE|ENG": [ "view_card_prefix_together", PLACEHOLDER ] },
-		PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL: { "SWE|ENG": [ "view_card_prefix_individual", PLACEHOLDER ] },
-		PROMPT_APPRENTICEASSASSIN:                      { "SWE|ENG": [ PLACEHOLDER, "generic_wake", PLACEHOLDER, PLACEHOLDER, "generic_sleep", PLACEHOLDER ] },
-		PROMPT_AURASEER_DOPPELGANGER:                   { "SWE|ENG": [ PLACEHOLDER, "others_thumb_out", PLACEHOLDER ] },
-		PROMPT_BEHOLDER_DOPPELGANGER:                   { "SWE|ENG": [ PLACEHOLDER, "others_thumb_out", PLACEHOLDER, "shared_may_view_cards", PLACEHOLDER ] },
+		PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_COLLECTIVE: { "SWE|ENG": [ "view_card_prefix_together", REF ] },
+		PROMPT_ALIEN_TEAM_ACTION_VIEW_CARDS_INDIVIDUAL: { "SWE|ENG": [ "view_card_prefix_individual", REF ] },
+		PROMPT_ALIEN_TEAM_COW:                          { "SWE|ENG": [ REF, REF, "hand_out", agg(6, "alien_team_cow_1"), REF, "hand_down" ] },
+		PROMPT_ALIEN_TEAM_COW_DOPPELGANGER:             { "SWE|ENG": [ agg(4, "alien_team_cow_doppelganger") ] },
+		PROMPT_APPRENTICEASSASSIN:                      { "SWE|ENG": [ REF, "generic_wake", REF, REF, "generic_sleep", REF ] },
+		PROMPT_APPRENTICEASSASSIN_ACTION:               { "SWE|ENG": [ agg(2, "apprenticeassassin_1"), agg(2, "apprenticeassassin_2"), REF ] },
+		PROMPT_APPRENTICEASSASSIN_DOPPELGANGER:         { "SWE|ENG": [ agg(2, "doppelganger_wake_prefix"), REF, "generic_wake", REF, REF ] },
+		PROMPT_APPRENTICETANNER:                        { "SWE|ENG": [ REF, agg(4, "apprenticetanner_1"), REF, REF, REF, "thumb_down" ] },
+		PROMPT_APPRENTICETANNER_DOPPELGANGER:           { "SWE|ENG": [ REF, agg(4, "apprenticetanner_doppelganger"), REF ] },
+		PROMPT_ASSASSIN_ACTION:                         { "SWE|ENG": [ agg(2, "assassin_1") ] },
+		PROMPT_AURASEER:                                { "SWE|ENG": [ REF, REF, agg(3, "auraseer_1"), REF, REF, "all_thumbs_down" ] },
+		PROMPT_AURASEER_DOPPELGANGER:                   { "SWE|ENG": [ REF, "others_thumb_out", REF ] },
+		PROMPT_BEHOLDER:                                { "SWE|ENG": [ REF, REF, agg(3, "beholder_1"), REF, "shared_may_view_cards", REF, REF, "all_thumbs_down" ] },
+		PROMPT_BEHOLDER_DOPPELGANGER:                   { "SWE|ENG": [ REF, "others_thumb_out", REF, "shared_may_view_cards", REF ] },
 		PROMPT_BLOB_OBJECTIVE_ALONE:                    { "SWE|ENG": [ "blob_solo" ] },
+		PROMPT_BLOB_OBJECTIVE_SINGLE:                   { "SWE|ENG": [ c_agg(3, { DIRECTION_RIGHT: "blob_duo_right", DIRECTION_LEFT: "blob_duo_left", }) ] },
+		PROMPT_BODYSNATCHER_ACTION:                     { "SWE|ENG": [ REF, "bodysnatcher_1", agg(2, "bodysnatcher_2") ] },
 		PROMPT_CHECK_MARKS_ACTION:                      { "SWE|ENG": [ "check_marks" ] },
 		PROMPT_COPYCAT_ACTION:                          { "SWE|ENG": [ "copycat_1", "doppelganger_2", "copycat_3" ] },
+		PROMPT_COUNT_ACTION:                            { "SWE|ENG": [ agg(2, "count_1") ] },
+		PROMPT_CUPID_ACTION:                            { "SWE|ENG": [ agg(2, "cupid_1") ] },
 		PROMPT_CURATOR_ACTION:                          { "SWE|ENG": [ "curator_1" ] },
-		PROMPT_DOPPELGANGER_ACTION:                     { "SWE|ENG": [ "doppelganger_1", "doppelganger_2", PLACEHOLDER ] },
-		PROMPT_DOPPELGANGER_IMMEDIATE_ACTION:           { "SWE|ENG": [ "doppelganger_3_prefix", PLACEHOLDER, "doppelganger_3_suffix" ] },
-		PROMPT_DOPPELGANGER_SUFFIX:                     { "SWE|ENG": [ "doppelganger_4_prefix", PLACEHOLDER, "doppelganger_4_suffix", PLACEHOLDER ] },
+		PROMPT_DISEASED_ACTION:                         { "SWE|ENG": [ agg(2, "diseased_1") ] },
+		PROMPT_DOPPELGANGER_ACTION:                     { "SWE|ENG": [ "doppelganger_1", "doppelganger_2", REF ] },
+		PROMPT_DOPPELGANGER_DREAMWOLF_EXCLUSION:        { "SWE|ENG": [ agg(5, "doppelganger_4_dreamwolf") ] },
+		PROMPT_DOPPELGANGER_IMMEDIATE_ACTION:           { "SWE|ENG": [ "doppelganger_3_prefix", REF, "doppelganger_3_suffix" ] },
+		PROMPT_DOPPELGANGER_SUFFIX:                     { "SWE|ENG": [ "doppelganger_4_prefix", REF, "doppelganger_4_suffix", REF ] },
 		PROMPT_DRUNK_ACTION:                            { "SWE|ENG": [ "drunk_1" ] },
-		PROMPT_EMPATH_ACTION:                           { "SWE|ENG": [ "empath_1", PLACEHOLDER, PLACEHOLDER, "empath_2", PLACEHOLDER ] },
+		PROMPT_EMPATH_ACTION:                           { "SWE|ENG": [ "empath_1", REF, REF, "empath_2", REF ] },
 		PROMPT_EMPATH_QUESTION_10:                      { "SWE|ENG": [ "empath_q_10" ] },
 		PROMPT_EMPATH_QUESTION_11:                      { "SWE|ENG": [ "empath_q_11" ] },
 		PROMPT_EMPATH_QUESTION_1:                       { "SWE|ENG": [ "empath_q_1" ] },
 		PROMPT_EMPATH_QUESTION_2:                       { "SWE|ENG": [ "empath_q_2" ] },
 		PROMPT_EMPATH_QUESTION_3:                       { "SWE|ENG": [ "empath_q_3" ] },
 		PROMPT_EMPATH_QUESTION_4:                       { "SWE|ENG": [ "empath_q_4" ] },
+		PROMPT_EMPATH_QUESTION_5:                       { "SWE|ENG": [ agg(2, "empath_q_5") ] },
 		PROMPT_EMPATH_QUESTION_6:                       { "SWE|ENG": [ "empath_q_6" ] },
 		PROMPT_EMPATH_QUESTION_7:                       { "SWE|ENG": [ "empath_q_7" ] },
 		PROMPT_EMPATH_QUESTION_8:                       { "SWE|ENG": [ "empath_q_8" ] },
 		PROMPT_EMPATH_QUESTION_9:                       { "SWE|ENG": [ "empath_q_9" ] },
-		PROMPT_EXPOSER_ACTION:                          { "SWE|ENG": [ "exposer_1", PLACEHOLDER, "view_card_suffix_center" ] },
-		PROMPT_FEUDINGALIENS:                           { "SWE|ENG": [ PLACEHOLDER, PLACEHOLDER, "wake_and_identify", PLACEHOLDER ] },
+		PROMPT_EXPOSER_ACTION:                          { "SWE|ENG": [ "exposer_1", REF, "view_card_suffix_center" ] },
+		PROMPT_FEUDINGALIENS:                           { "SWE|ENG": [ REF, REF, "wake_and_identify", REF ] },
+		PROMPT_FEUDINGALIENS_DOPPELGANGER:              { "SWE|ENG": [ agg(3, "feudingaliens_doppelganger") ] },
 		PROMPT_GREMLIN_ACTION:                          { "SWE|ENG": [ "gremlin_1" ] },
 		PROMPT_INSOMNIAC_ACTION:                        { "SWE|ENG": [ "insomniac_1" ] },
-		PROMPT_LOVERS:                                  { "SWE|ENG": [ PLACEHOLDER, "wake_and_identify", "lovers_1", PLACEHOLDER ] },
+		PROMPT_INSTIGATOR_ACTION:                       { "SWE|ENG": [ agg(2, "instigator_1") ] },
+		PROMPT_LEADER:                                  { "SWE|ENG": [ REF, agg(4, "leader_1"), REF, REF, REF, agg(2, "leader_2") ] },
+		PROMPT_LEADER_DOPPELGANGER:                     { "SWE|ENG": [ REF, agg(2, "leader_doppelganger"), REF ] },
+		PROMPT_LEADER_FEUDINGALIENS:                    { "SWE|ENG": [ agg(2, "leader_feudingaliens_1"), agg(4, "leader_feudingaliens_2") ] },
+		PROMPT_LOVERS:                                  { "SWE|ENG": [ REF, "wake_and_identify", "lovers_1", REF ] },
 		PROMPT_MARKSMAN_ACTION:                         { "SWE|ENG": [ "marksman_1", "marksman_2" ] },
-		PROMPT_MASON:                                   { "SWE|ENG": [ PLACEHOLDER, PLACEHOLDER, "wake_and_identify", PLACEHOLDER, "generic_sleep" ] },
-		PROMPT_NOSTRADAMUS_ACTION:                      { "SWE|ENG": [ "nostradamus_1", PLACEHOLDER ] },
-		PROMPT_NOSTRADAMUS_SUFFIX:                      { "SWE|ENG": [ "nostradamus_5", PLACEHOLDER ] },
-		PROMPT_NOSTRADAMUS_WARNING:                     { "SWE|ENG": [ "paranormalinvestigator_2", PLACEHOLDER, "nostradamus_3", PLACEHOLDER ] },
+		PROMPT_MASON:                                   { "SWE|ENG": [ REF, REF, "wake_and_identify", REF, "generic_sleep" ] },
+		PROMPT_MASON_DOPPELGANGER:                      { "SWE|ENG": [ agg(4, "mason_doppelganger") ] },
+		PROMPT_MINION:                                  { "SWE|ENG": [ REF, agg(4, "minion_1"), REF, REF, agg(2, "minion_2") ] },
+		PROMPT_MINION_DOPPELGANGER:                     { "SWE|ENG": [ REF, agg(2, "minion_doppelganger"), REF ] },
+		PROMPT_NOSTRADAMUS_ACTION:                      { "SWE|ENG": [ "nostradamus_1", REF ] },
+		PROMPT_NOSTRADAMUS_DOPPELGANGER:                { "SWE|ENG": [ agg(4, "nostradamus_doppelganger") ] },
+		PROMPT_NOSTRADAMUS_SUFFIX:                      { "SWE|ENG": [ "nostradamus_5", REF ] },
+		PROMPT_NOSTRADAMUS_WARNING:                     { "SWE|ENG": [ "paranormalinvestigator_2", REF, "nostradamus_3", REF ] },
 		PROMPT_NOSTRADAMUS_WARNING_AUTO_HINT:           { "SWE|ENG": [ "nostradamus_auto" ] },
+		PROMPT_NOSTRADAMUS_WARNING_RESOLVED:            { "SWE|ENG": [ agg(2, "nostradamus_4"), REF, REF ] },
+		PROMPT_ORACLE_BLOCK_ACTION:                     { "SWE|ENG": [ "all_hands_out", agg(2, "oracle_block_1"), "oracle_block_2" ] },
+		PROMPT_ORACLE_CHANGE_TEAM:                      { "SWE|ENG": [ c_agg(3, { TEAM_WEREWOLF_DEFINITE_GENITIVE: "oracle_join_werewolves", TEAM_ALIEN_DEFINITE_GENITIVE: "oracle_join_aliens", TEAM_VAMPIRE_DEFINITE_GENITIVE: "oracle_join_vampires" }) ] },
+		PROMPT_ORACLE_CHANGE_TEAM_DECLINED:             { "SWE|ENG": [ agg(4, "oracle_join_denied") ] },
+		PROMPT_ORACLE_CHANGE_TEAM_FULL:                 { "SWE|ENG": [ agg(2, "oracle_join_full") ] },
+		PROMPT_ORACLE_CHANGE_TEAM_PARTIAL:              { "SWE|ENG": [ agg(2, "oracle_join_partial") ] },
 		PROMPT_ORACLE_EVEN_ODD_AUTO:                    { "SWE|ENG": [ "oracle_even_odd" ] },
+		PROMPT_ORACLE_EVEN_ODD_RESULT:                  { "SWE|ENG": [ c_agg(4, { PROMPT_EVEN: "oracle_even", PROMPT_ODD: "oracle_odd" }) ] },
 		PROMPT_ORACLE_FORCE_RIPPLE:                     { "SWE|ENG": [ "oracle_force_ripple" ] },
 		PROMPT_ORACLE_FORCE_RIPPLE_NO:                  { "SWE|ENG": [ "oracle_force_ripple_no" ] },
 		PROMPT_ORACLE_FORCE_RIPPLE_YES:                 { "SWE|ENG": [ "oracle_force_ripple_yes" ] },
-		PROMPT_ORACLE_HUNT:                             { "SWE|ENG": [ "oracle_guess_1", PLACEHOLDER ] },
-		PROMPT_ORACLE_HUNT_AVOIDED:                     { "SWE|ENG": [ "oracle_guess_right_1", "oracle_guess_right_2", PLACEHOLDER ] },
-		PROMPT_ORACLE_HUNT_OMNISCIENCE:                 { "SWE|ENG": [ "oracle_guess_right_3", PLACEHOLDER ] },
-		PROMPT_PARANORMALINVESTIGATOR_ACTION:           { "SWE|ENG": [ "paranormalinvestigator_1", PLACEHOLDER ] },
-		PROMPT_PARANORMALINVESTIGATOR_WARNING:          { "SWE|ENG": [ "paranormalinvestigator_2", PLACEHOLDER, "paranormalinvestigator_3" ] },
+		PROMPT_ORACLE_HUNT:                             { "SWE|ENG": [ "oracle_hunt_intro", REF ] },
+		PROMPT_ORACLE_HUNT_AVOIDED:                     { "SWE|ENG": [ agg(2, "oracle_guess_right_1"), "oracle_guess_right_2", REF ] },
+		PROMPT_ORACLE_HUNT_OMNISCIENCE:                 { "SWE|ENG": [ "oracle_guess_right_3", REF ] },
+		PROMPT_ORACLE_HUNT_QUESTION_1:                  { "SWE|ENG": [ "oracle_q_1", REF ] },
+		PROMPT_ORACLE_HUNT_QUESTION_2:                  { "SWE|ENG": [ "oracle_q_2", REF ] },
+		PROMPT_ORACLE_HUNT_QUESTION_3:                  { "SWE|ENG": [ "oracle_q_3", REF ] },
+		PROMPT_ORACLE_HUNT_QUESTION_4:                  { "SWE|ENG": [ "oracle_q_4", REF ] },
+		PROMPT_ORACLE_HUNT_QUESTION_5:                  { "SWE|ENG": [ "oracle_q_5", REF ] },
+		PROMPT_ORACLE_HUNT_STARTED:                     { "SWE|ENG": [ agg(2, "oracle_guess_wrong_1"), agg(2, "oracle_guess_wrong_2"), agg(2, "oracle_guess_wrong_3") ] },
+		PROMPT_PARANORMALINVESTIGATOR_ACTION:           { "SWE|ENG": [ "paranormalinvestigator_1", REF ] },
+		PROMPT_PARANORMALINVESTIGATOR_WARNING:          { "SWE|ENG": [ "paranormalinvestigator_2", REF, "paranormalinvestigator_3" ] },
 		PROMPT_PICKPOCKET_ACTION:                       { "SWE|ENG": [ "pickpocket_1", "pickpocket_2" ] },
-		PROMPT_RASCAL_ACTION:                           { "SWE|ENG": [ PLACEHOLDER ] },
-		PROMPT_REVEALER_ACTION:                         { "SWE|ENG": [ "revealer_1", PLACEHOLDER ] },
-		PROMPT_REVEALER_HIDDEN_ROLE:                    { "SWE|ENG": [ "revealer_2", PLACEHOLDER, "revealer_3" ] },
-		PROMPT_RIPPLE_CONTENT:                          { "SWE|ENG": [ "ripple", PLACEHOLDER ] },
-		PROMPT_RIPPLE_ROLE_ACTION:                      { "SWE|ENG": [ "player", PLACEHOLDER, "generic_wake", PLACEHOLDER, "player", PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_PRIEST_ACTION:                           { "SWE|ENG": [ agg(2, "priest_1"), agg(2, "priest_2") ] },
+		PROMPT_RASCAL_ACTION:                           { "SWE|ENG": [ REF ] },
+		PROMPT_RENFIELD:                                { "SWE|ENG": [ REF, agg(3, "renfield_1"), REF, REF, REF, REF, agg(2, "renfield_3") ] },
+		PROMPT_RENFIELD_ACTION:                         { "SWE|ENG": [ agg(4, "renfield_2") ] },
+		PROMPT_RENFIELD_DOPPELGANGER:                   { "SWE|ENG": [ REF, agg(3, "renfield_doppelganger"), REF, REF, REF ] },
+		PROMPT_REVEALER_ACTION:                         { "SWE|ENG": [ "revealer_1", REF ] },
+		PROMPT_REVEALER_HIDDEN_ROLE:                    { "SWE|ENG": [ "revealer_2", REF, "revealer_3" ] },
+		PROMPT_RIPPLE_CONTENT:                          { "SWE|ENG": [ "ripple", REF ] },
+		PROMPT_RIPPLE_ROLE_ACTION:                      { "SWE|ENG": [ "player", REF, "generic_wake", REF, "player", REF, "generic_sleep" ] },
 		PROMPT_RIPPLE_TIMER:                            { "SWE|ENG": [ "ripple_timer" ] },
-		PROMPT_RIPPLE_VIEW_PLAYER:                      { "SWE|ENG": [ "player", PLACEHOLDER, "generic_wake", PLACEHOLDER, "player", PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_RIPPLE_VIEW_PLAYER:                      { "SWE|ENG": [ "player", REF, "generic_wake", REF, "player", REF, "generic_sleep" ] },
 		PROMPT_ROBBER_ACTION:                           { "SWE|ENG": [ "robber_1", "robber_2", "robber_3" ] },
 		PROMPT_SEER_ACTION:                             { "SWE|ENG": [ "seer_1" ] },
-		PROMPT_SLEEP_CALL:                              { "SWE|ENG": [ PLACEHOLDER, "generic_sleep" ] },
-		PROMPT_SLEEP_CALL_DOPPELGANGER:                 { "SWE|ENG": [ PLACEHOLDER, "generic_sleep" ] },
+		PROMPT_SENTINEL_ACTION:                         { "SWE|ENG": [ agg(3, "sentinel_1"), "sentinel_2" ] },
+		PROMPT_SLEEP_CALL:                              { "SWE|ENG": [ REF, "generic_sleep" ] },
+		PROMPT_SLEEP_CALL_DOPPELGANGER:                 { "SWE|ENG": [ REF, "generic_sleep" ] },
+		PROMPT_SQUIRE:                                  { "SWE|ENG": [ REF, agg(4, "squire_1"), REF, "shared_may_view_cards", REF, REF, agg(2, "minion_2") ] },
+		PROMPT_SQUIRE_DOPPELGANGER:                     { "SWE|ENG": [ REF, agg(2, "minion_doppelganger"), REF, "shared_may_view_cards", REF ] },
+		PROMPT_THING_ACTION:                            { "SWE|ENG": [ "all_hands_out", agg(2, "thing_2") ] },
 		PROMPT_TROUBLEMAKER_ACTION:                     { "SWE|ENG": [ "troublemaker_1" ] },
-		PROMPT_VIEW_CARD:                               { "SWE|ENG": [ "view_card_prefix_solo", PLACEHOLDER ] },
-		PROMPT_VIEW_CARD_CENTER:                        { "SWE|ENG": [ PLACEHOLDER, "view_card_suffix_center" ] },
+		PROMPT_VAMPIRE_TEAM:                            { "SWE|ENG": [ REF, "wake_and_identify", agg(2, "vampire_team_1"), REF, "generic_sleep" ] },
+		PROMPT_VIEW_CARD:                               { "SWE|ENG": [ "view_card_prefix_solo", REF ] },
+		PROMPT_VIEW_CARD_CENTER:                        { "SWE|ENG": [ REF, "view_card_suffix_center" ] },
 		PROMPT_VIEW_CARD_NEIGHBOR_ANY:                  { "SWE|ENG": [ "view_card_suffix_any_neighbor" ] },
 		PROMPT_VIEW_CARD_NEIGHBOR_BOTH:                 { "SWE|ENG": [ "view_card_suffix_both_neighbors" ] },
 		PROMPT_VIEW_CARD_NEIGHBOR_LEFT:                 { "SWE|ENG": [ "view_card_suffix_left_neighbor" ] },
 		PROMPT_VIEW_CARD_NEIGHBOR_RIGHT:                { "SWE|ENG": [ "view_card_suffix_right_neighbor" ] },
 		PROMPT_VIEW_CARD_SELF:                          { "SWE|ENG": [ "view_card_suffix_own" ] },
 		PROMPT_VILLAGEIDIOT_ACTION:                     { "SWE|ENG": [ "villageidiot_1" ] },
-		PROMPT_WAKE_CALL:                               { "SWE|ENG": [ PLACEHOLDER, "generic_wake" ] },
+		PROMPT_WAKE_CALL:                               { "SWE|ENG": [ REF, "generic_wake" ] },
+		PROMPT_WAKE_CALL_DOPPELGANGER_ECHO:             { "SWE|ENG": [ agg(2, "doppelganger_wake_prefix"), REF, "generic_wake" ] },
+		PROMPT_WAKE_CALL_DOPPELGANGER_INLINE:           { "SWE|ENG": [ agg(2, "doppelganger_wake_prefix"), REF, "generic_wake" ] },
+		PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF:            { "SWE|ENG": [ REF, agg(2, "werewolf_team_dreamwolf_1"), "wake_and_identify", agg(4, "werewolf_team_dreamwolf_2"), agg(3, "werewolf_team_1"), REF, "thumb_down", REF, "generic_sleep" ] },
+		PROMPT_WEREWOLF_TEAM_CORE_STANDARD:             { "SWE|ENG": [ REF, "wake_and_identify", agg(3, "werewolf_team_1"), REF, "generic_sleep" ] },
 		PROMPT_WITCH_ACTION:                            { "SWE|ENG": [ "witch_1", "witch_2" ] },
-		PROMPT_ALIEN_TEAM_ACTION_MAKE_ALIEN:            { SWE: [ "all_hands_out", aggregate(2, "alien_team_turncoat_1"), aggregate(3, "alien_team_turncoat_2a"), "all_hands_down" ] },
-		PROMPT_ALIEN_TEAM_ACTION_MAKE_MINION:           { SWE: [ "all_hands_out", aggregate(2, "alien_team_turncoat_1"), aggregate(3, "alien_team_turncoat_2b"), "all_hands_down" ] },
-		PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS:           { SWE: [ conditionalAggregate(5, { DIRECTION_LEFT: "alien_team_shift_cards_left", DIRECTION_RIGHT: "alien_team_shift_cards_right" }) ] },
-		PROMPT_ALIEN_TEAM_COW:                          { SWE: [ PLACEHOLDER, PLACEHOLDER, "hand_out", aggregate(6, "alien_team_cow_1"), PLACEHOLDER, "hand_down" ] },
-		PROMPT_ALIEN_TEAM_COW_DOPPELGANGER:             { SWE: [ aggregate(4, "alien_team_cow_doppelganger") ] },
-		PROMPT_ALPHAWOLF_ACTION:                        { SWE: [ aggregate(2, "alphawolf_1") ] },
-		PROMPT_APPRENTICEASSASSIN_ACTION:               { SWE: [ aggregate(2, "apprenticeassassin_1"), aggregate(2, "apprenticeassassin_2"), PLACEHOLDER ] },
-		PROMPT_APPRENTICEASSASSIN_DOPPELGANGER:         { SWE: [ aggregate(2, "doppelganger_wake_prefix"), PLACEHOLDER, "generic_wake", PLACEHOLDER, PLACEHOLDER ] },
-		PROMPT_APPRENTICETANNER:                        { SWE: [ PLACEHOLDER, aggregate(4, "apprenticetanner_1"), PLACEHOLDER, PLACEHOLDER, PLACEHOLDER, "thumb_down" ] },
-		PROMPT_APPRENTICETANNER_DOPPELGANGER:           { SWE: [ PLACEHOLDER, aggregate(4, "apprenticetanner_doppelganger"), PLACEHOLDER ] },
-		PROMPT_ASSASSIN_ACTION:                         { SWE: [ aggregate(2, "assassin_1") ] },
-		PROMPT_AURASEER:                                { SWE: [ PLACEHOLDER, PLACEHOLDER, aggregate(3, "auraseer_1"), PLACEHOLDER, PLACEHOLDER, "all_thumbs_down" ] },
-		PROMPT_BEHOLDER:                                { SWE: [ PLACEHOLDER, PLACEHOLDER, aggregate(3, "beholder_1"), PLACEHOLDER, "shared_may_view_cards", PLACEHOLDER, PLACEHOLDER, "all_thumbs_down" ] },
-		PROMPT_BLOB_OBJECTIVE_MULTI:                    { SWE: [ "blob_multi_1", PLACEHOLDER, conditionalAggregate(2, { "GRAMMAR_PLAYER_SINGULAR,GRAMMAR_PLAYER_PLURAL": "blob_multi_2" }),PLACEHOLDER, conditionalAggregate(2, { "GRAMMAR_PLAYER_SINGULAR,GRAMMAR_PLAYER_PLURAL": "blob_multi_3" }) ] },
-		PROMPT_BLOB_OBJECTIVE_SINGLE:                   { SWE: [ conditionalAggregate(3, { DIRECTION_RIGHT: "blob_duo_right", DIRECTION_LEFT: "blob_duo_left", }) ] },
-		PROMPT_BODYSNATCHER_ACTION:                     { SWE: [ PLACEHOLDER, "bodysnatcher_1", aggregate(2, "bodysnatcher_2") ] },
-		PROMPT_COUNT_ACTION:                            { SWE: [ aggregate(2, "count_1") ] },
-		PROMPT_CUPID_ACTION:                            { SWE: [ aggregate(3, "cupid_1") ] },
-		PROMPT_DISEASED_ACTION:                         { SWE: [ aggregate(2, "diseased_1") ] },
-		PROMPT_DOPPELGANGER_DREAMWOLF_EXCLUSION:        { SWE: [ aggregate(5, "doppelganger_4_dreamwolf") ] },
-		PROMPT_EMPATH_QUESTION_5:                       { SWE: [ aggregate(2, "empath_q_5") ] },
-		PROMPT_FEUDINGALIENS_DOPPELGANGER:              { SWE: [ aggregate(3, "feudingaliens_doppelganger") ] },
-		PROMPT_INSTIGATOR_ACTION:                       { SWE: [ aggregate(3, "instigator_1") ] },
-		PROMPT_LEADER:                                  { SWE: [ PLACEHOLDER, aggregate(4, "leader_1"), PLACEHOLDER, PLACEHOLDER, PLACEHOLDER, aggregate(2, "leader_2") ] },
-		PROMPT_LEADER_DOPPELGANGER:                     { SWE: [ PLACEHOLDER, aggregate(2, "leader_doppelganger"), PLACEHOLDER ] },
-		PROMPT_LEADER_FEUDINGALIENS:                    { SWE: [ aggregate(2, "leader_feudingaliens_1"), aggregate(4, "leader_feudingaliens_2") ] },
-		PROMPT_MASON_DOPPELGANGER:                      { SWE: [ aggregate(4, "mason_doppelganger") ] },
-		PROMPT_MINION:                                  { SWE: [ PLACEHOLDER, aggregate(4, "minion_1"), PLACEHOLDER, PLACEHOLDER, aggregate(2, "minion_2") ] },
-		PROMPT_MINION_DOPPELGANGER:                     { SWE: [ PLACEHOLDER, aggregate(2, "minion_doppelganger"), PLACEHOLDER ] },
-		PROMPT_NOSTRADAMUS_DOPPELGANGER:                { SWE: [ aggregate(4, "nostradamus_doppelganger") ] },
-		PROMPT_NOSTRADAMUS_WARNING_RESOLVED:            { SWE: [ aggregate(2, "nostradamus_4"), PLACEHOLDER, PLACEHOLDER ] },
-		PROMPT_ORACLE_BLOCK_ACTION:                     { SWE: [ "all_hands_out", aggregate(2, "oracle_block_1"), "oracle_block_2" ] },
-		PROMPT_ORACLE_CHANGE_TEAM:                      { SWE: [ conditionalAggregate(3, { TEAM_WEREWOLF_DEFINITE_GENITIVE: "oracle_join_werewolves", TEAM_ALIEN_DEFINITE_GENITIVE: "oracle_join_aliens", TEAM_VAMPIRE_DEFINITE_GENITIVE: "oracle_join_vampires" }) ] },
-		PROMPT_ORACLE_CHANGE_TEAM_DECLINED:             { SWE: [ aggregate(4, "oracle_join_denied") ] },
-		PROMPT_ORACLE_CHANGE_TEAM_FULL:                 { SWE: [ aggregate(2, "oracle_join_full") ] },
-		PROMPT_ORACLE_CHANGE_TEAM_PARTIAL:              { SWE: [ aggregate(2, "oracle_join_partial") ] },
-		PROMPT_ORACLE_EVEN_ODD_RESULT:                  { SWE: [ conditionalAggregate(4, { PROMPT_EVEN: "oracle_even", PROMPT_ODD: "oracle_odd" }) ] },
-		PROMPT_ORACLE_HUNT_STARTED:                     { SWE: [ "oracle_guess_wrong_1", aggregate(2, "oracle_guess_wrong_2"), aggregate(2, "oracle_guess_wrong_3") ] },
-		PROMPT_PRIEST_ACTION:                           { SWE: [ aggregate(2, "priest_1"), aggregate(2, "priest_2") ] },
-		PROMPT_RENFIELD:                                { SWE: [ PLACEHOLDER, aggregate(4, "renfield_1"), PLACEHOLDER, PLACEHOLDER, PLACEHOLDER, PLACEHOLDER, aggregate(2, "renfield_3") ] },
-		PROMPT_RENFIELD_ACTION:                         { SWE: [ aggregate(4, "renfield_2") ] },
-		PROMPT_RENFIELD_DOPPELGANGER:                   { SWE: [ PLACEHOLDER, aggregate(4, "renfield_doppelganger"), PLACEHOLDER, PLACEHOLDER, PLACEHOLDER ] },
-		PROMPT_RIPPLE_DOUBLE_VOTE:                      { SWE: [ "player", PLACEHOLDER, "ripple_double_vote" ] },
-		PROMPT_RIPPLE_MUTED:                            { SWE: [ "player", PLACEHOLDER, "ripple_mute" ] },
-		PROMPT_RIPPLE_REBUKED:                          { SWE: [ "player", PLACEHOLDER, "ripple_rebuke" ] },
-		PROMPT_SENTINEL_ACTION:                         { SWE: [ aggregate(3, "sentinel_1"), "sentinel_2" ] },
-		PROMPT_SQUIRE:                                  { SWE: [ PLACEHOLDER, aggregate(4, "squire_1"), PLACEHOLDER, "shared_may_view_cards", PLACEHOLDER, PLACEHOLDER, aggregate(2, "minion_2") ] },
-		PROMPT_SQUIRE_DOPPELGANGER:                     { SWE: [ PLACEHOLDER, aggregate(2, "minion_doppelganger"), PLACEHOLDER, "shared_may_view_cards", PLACEHOLDER ] },
-		PROMPT_THING_ACTION:                            { SWE: [ "all_hands_out", aggregate(2, "thing_2") ] },
-		PROMPT_VAMPIRE_TEAM:                            { SWE: [ PLACEHOLDER, "wake_and_identify", aggregate(2, "vampire_team_1"), PLACEHOLDER, "generic_sleep" ] },
-		PROMPT_VIEW_CARD_EVEN:                          { SWE: [ PLACEHOLDER, conditionalAggregate(2, { "GRAMMAR_CARD_SINGULAR,GRAMMAR_CARD_PLURAL": "view_card_suffix_even_players" }) ] },
-		PROMPT_VIEW_CARD_ODD:                           { SWE: [ PLACEHOLDER, conditionalAggregate(2, { "GRAMMAR_CARD_SINGULAR,GRAMMAR_CARD_PLURAL": "view_card_suffix_odd_players" }) ] },
-		PROMPT_VIEW_CARD_PLAYER_ANY:                    { SWE: [ PLACEHOLDER, conditionalAggregate(4, { "GRAMMAR_CARD_SINGULAR|PROMPT_VIEW_CARD_PLAYER_ANY_SINGLE|GRAMMAR_PLAYER_SINGULAR": "view_card_suffix_one_player", "GRAMMAR_CARD_PLURAL|PROMPT_VIEW_CARD_PLAYER_ANY_MULTI|GRAMMAR_PLAYER_PLURAL": "view_card_suffix_other_players", }) ] },
-		PROMPT_VIEW_CARD_PLAYER_SPECIFIC:               { SWE: [ conditionalAggregate(3, { "GRAMMAR_CARD_SINGULAR|GRAMMAR_PLAYER_SINGULAR": "view_card_playerlist_prefix", "GRAMMAR_CARD_PLURAL|GRAMMAR_PLAYER_PLURAL": "view_card_playerlist_prefix", }), PLACEHOLDER ] },
-		PROMPT_WAKE_CALL_DOPPELGANGER_ECHO:             { SWE: [ aggregate(2, "doppelganger_wake_prefix"), PLACEHOLDER, "generic_wake" ] },
-		PROMPT_WAKE_CALL_DOPPELGANGER_INLINE:           { SWE: [ aggregate(2, "doppelganger_wake_prefix"), PLACEHOLDER, "generic_wake" ] },
-		PROMPT_WEREWOLF_TEAM_CORE_DREAMWOLF:            { SWE: [ PLACEHOLDER, aggregate(2, "werewolf_team_dreamwolf_1"), "wake_and_identify", aggregate(4, "werewolf_team_dreamwolf_2"), aggregate(3, "werewolf_team_1"), PLACEHOLDER, "thumb_down", PLACEHOLDER, "generic_sleep" ] },
-		PROMPT_WEREWOLF_TEAM_CORE_STANDARD:             { SWE: [ PLACEHOLDER, "wake_and_identify", aggregate(3, "werewolf_team_1"), PLACEHOLDER, "generic_sleep" ] },
+		
+		// These keys need separate English and Swedish definitions, either due to player/card plural forms that needs conditional (or no) aggregation or different clips, or due to different sentence structure
+		PROMPT_ALIEN_TEAM_ACTION_TRADE_CARDS:           { SWE: [ c_agg(5, { DIRECTION_LEFT: "alien_team_shift_cards_left", DIRECTION_RIGHT: "alien_team_shift_cards_right" }) ] },
+		PROMPT_ALPHAWOLF_ACTION:                        { SWE: [ agg(2, "alphawolf_1") ] },
+		PROMPT_BLOB_OBJECTIVE_MULTI:                    { SWE: [ "blob_multi_1", REF, c_agg(2, { "GRAMMAR_PLAYER_SINGULAR,GRAMMAR_PLAYER_PLURAL": "blob_multi_2" }),REF, c_agg(2, { "GRAMMAR_PLAYER_SINGULAR,GRAMMAR_PLAYER_PLURAL": "blob_multi_3" }) ] },
+		PROMPT_RIPPLE_DOUBLE_VOTE:                      { SWE: [ "player", REF, "ripple_double_vote" ] },
+		PROMPT_RIPPLE_MUTED:                            { SWE: [ "player", REF, "ripple_mute" ] },
+		PROMPT_RIPPLE_REBUKED:                          { SWE: [ "player", REF, "ripple_rebuke" ] },
+		PROMPT_VIEW_CARD_EVEN:                          { SWE: [ REF, c_agg(2, { "GRAMMAR_CARD_SINGULAR,GRAMMAR_CARD_PLURAL": "view_card_suffix_even_players" }) ] },
+		PROMPT_VIEW_CARD_ODD:                           { SWE: [ REF, c_agg(2, { "GRAMMAR_CARD_SINGULAR,GRAMMAR_CARD_PLURAL": "view_card_suffix_odd_players" }) ] },
+		PROMPT_VIEW_CARD_PLAYER_ANY:                    { SWE: [ REF, c_agg(4, { "GRAMMAR_CARD_SINGULAR|PROMPT_VIEW_CARD_PLAYER_ANY_SINGLE|GRAMMAR_PLAYER_SINGULAR": "view_card_suffix_one_player", "GRAMMAR_CARD_PLURAL|PROMPT_VIEW_CARD_PLAYER_ANY_MULTI|GRAMMAR_PLAYER_PLURAL": "view_card_suffix_other_players", }) ] },
+		PROMPT_VIEW_CARD_PLAYER_SPECIFIC:               { SWE: [ c_agg(3, { "GRAMMAR_CARD_SINGULAR|GRAMMAR_PLAYER_SINGULAR": "view_card_playerlist_prefix", "GRAMMAR_CARD_PLURAL|GRAMMAR_PLAYER_PLURAL": "view_card_playerlist_prefix", }), REF ] },
+	};
+	
+	// Plain announcement clips; key -> clip mapping, no sentence boundaries or extras
+	const ANNOUNCEMENT_CLIPS = {
+		UI_DAYTIMER_60S_WARNING: { "SWE|ENG": "timer_60s_warning" },
+		UI_DAYTIMER_30S_WARNING: { "SWE|ENG": "timer_30s_warning" },
+		UI_DAYTIMER_EXPIRED:     { "SWE|ENG": "timer_expired" },
 	};
 
 	/*
@@ -254,6 +263,9 @@ const TTSManifest = (() => {
 	 * derived.
 	 */
 	let _map = null;
+	
+	// Flattened key -> clip name map for announcements
+	let _announcementMap = null;
 
 	/*
 	 * Exact-ref aggregation entries - { refs: [ref,...], clip }, compiled from authored groups (see
@@ -270,6 +282,7 @@ const TTSManifest = (() => {
 
 	function _init() {
 		_map = new Map();
+		_announcementMap = new Map();
 		_templates = [];
 
 		const language = Localization.getLanguage();
@@ -277,6 +290,7 @@ const TTSManifest = (() => {
 		_initNumbers();
 		_initRoles();
 		
+		// Init MANIFEST entries
 		for (const [key, variants] of Object.entries(MANIFEST)) {
 			const entry = _selectVariant(key, variants, language);
 
@@ -284,6 +298,17 @@ const TTSManifest = (() => {
 				_registerKey(key, entry);
 		}
 		
+		// Init ANNOUNCEMENT_CLIPS entries
+		for (const [key, variants] of Object.entries(ANNOUNCEMENT_CLIPS)) {
+			const clip = _selectVariant(key, variants, language);
+
+			if (clip !== undefined) {
+				if (typeof clip !== "string" || clip === "")
+					throw new Error(`ClipSelector: announcement "${key}" must name a non-empty clip`);
+
+				_announcementMap.set(key, clip);
+			}
+		}
 	}
 
 	_init();
@@ -341,6 +366,8 @@ const TTSManifest = (() => {
 
 		// Roles take precedence over teams (addForms' _map.has guard means whichever is added first wins).
 		roles.forEach((role) => { addForms(role.nameKey); teams.add(role.team); });
+		// Special case for the feuding aliens expansion as they are not proper roles
+		[ "ROLE_FEUDINGALIENS_GROOB", "ROLE_FEUDINGALIENS_ZERB" ].forEach((roleID) => { addForms(roleID); });
 		teams.forEach((team) => addForms(team));
 	}
 
@@ -349,20 +376,19 @@ const TTSManifest = (() => {
 	 * _selectVariant) against the key's own template positions, then registers it into `_map`/`_templates`.
 	 *
 	 * Walks the array left to right, consuming one template position per plain item (a literal clip name for a
-	 * literal position, or PLACEHOLDER for a {...} reference) and `item.count` positions per aggregate/
-	 * conditionalAggregate item, recording each aggregate's range as a `groups` entry instead of slotting it
-	 * position-by-position. Once every position is accounted for, non-aggregated literal positions are
-	 * registered directly into `_map`, and each recorded group is compiled via _registerGroup/
-	 * _registerConditionalGroup. Throws on any mismatch between the entry and the key's actual template shape -
-	 * wrong item count, a literal position without a clip name, a PLACEHOLDER on a position that isn't a {...}
-	 * reference, or an aggregate spanning past the end of the array.
+	 * literal position, or REF for a {...} reference) and `item.count` positions per agg/ c_agg item, recording
+	 * each aggregate's range as a `groups` entry instead of slotting it position-by-position. Once every
+	 * position is accounted for, non-aggregated literal positions are registered directly into `_map`, and each
+	 * recorded group is compiled via _registerGroup/_registerConditionalGroup. Throws on any mismatch between the
+	 * entry and the key's actual template shape - wrong item count, a literal position without a clip name, a REF
+	 * on a position that isn't a {...} reference, or an aggregate spanning past the end of the array.
 	 */
 	function _registerKey(key, entry) {
 		if (!Array.isArray(entry) || entry.length === 0)
-			throw new Error(`TTSManifest: entry "${key}" must be a non-empty MANIFEST array`);
+			throw new Error(`ClipSelector: entry "${key}" must be a non-empty MANIFEST array`);
 
 		if (Localization.parseTemplate(key) === undefined)
-			throw new Error(`TTSManifest: entry "${key}" doesn't match any localization key`);
+			throw new Error(`ClipSelector: entry "${key}" doesn't match any localization key`);
 
 		const positions = _templatePositions(key);
 		const slots = new Array(positions.length);
@@ -371,25 +397,25 @@ const TTSManifest = (() => {
 
 		for (const item of entry) {
 			if (Array.isArray(item)) {
-				throw new Error(`TTSManifest: entry "${key}" contains a bare nested array; use aggregate(count, "clip") or conditionalAggregate(count, {...})`);
+				throw new Error(`ClipSelector: entry "${key}" contains a bare nested array; use agg(count, "clip") or c_agg(count, {...})`);
 			}
 
 			if (item && typeof item === "object" && item[AGGREGATE] === true) {
 				const isConditional = Object.prototype.hasOwnProperty.call(item, "alternatives");
 
 				if (!isConditional && (typeof item.clip !== "string" || item.clip === ""))
-					throw new Error(`TTSManifest: entry "${key}" aggregate must have a non-empty clip name`);
+					throw new Error(`ClipSelector: entry "${key}" aggregate must have a non-empty clip name`);
 
 				if (!Number.isInteger(item.count) || item.count <= 0)
-					throw new Error(`TTSManifest: entry "${key}" aggregate must have a positive integer count`);
+					throw new Error(`ClipSelector: entry "${key}" aggregate must have a positive integer count`);
 
 				if (isConditional) {
 					if (!item.alternatives || typeof item.alternatives !== "object" || Array.isArray(item.alternatives)) {
-						throw new Error(`TTSManifest: entry "${key}" conditional aggregate must have an alternatives object`);
+						throw new Error(`ClipSelector: entry "${key}" conditional aggregate must have an alternatives object`);
 					}
 
 					if (Object.keys(item.alternatives).length === 0) {
-						throw new Error(`TTSManifest: entry "${key}" conditional aggregate must define at least one alternative`);
+						throw new Error(`ClipSelector: entry "${key}" conditional aggregate must define at least one alternative`);
 					}
 				}
 
@@ -397,7 +423,7 @@ const TTSManifest = (() => {
 				const end = start + item.count - 1;
 
 				if (end >= positions.length) {
-					throw new Error(`TTSManifest: entry "${key}" aggregate spans ${item.count} position(s) starting at ${start}, but its template has only ${positions.length} position(s)`);
+					throw new Error(`ClipSelector: entry "${key}" aggregate spans ${item.count} position(s) starting at ${start}, but its template has only ${positions.length} position(s)`);
 				}
 
 				if (isConditional) {
@@ -411,7 +437,7 @@ const TTSManifest = (() => {
 			}
 
 			if (positionIndex >= positions.length) {
-				throw new Error(`TTSManifest: entry "${key}" contains more authored positions than its template`);
+				throw new Error(`ClipSelector: entry "${key}" contains more authored positions than its template`);
 			}
 
 			slots[positionIndex] = item;
@@ -419,7 +445,7 @@ const TTSManifest = (() => {
 		}
 
 		if (positionIndex !== positions.length) {
-			throw new Error( `TTSManifest: entry "${key}" describes ${positionIndex} position(s) but its template has ${positions.length}`);
+			throw new Error( `ClipSelector: entry "${key}" describes ${positionIndex} position(s) but its template has ${positions.length}`);
 		}
 
 		const aggregated = new Array(positions.length).fill(false);
@@ -438,12 +464,12 @@ const TTSManifest = (() => {
 
 			if (position.kind === "literal") {
 				if (typeof slot !== "string" || slot === "") {
-					throw new Error(`TTSManifest: entry "${key}" position ${i} is a literal span and must be a non-empty clip name string`);
+					throw new Error(`ClipSelector: entry "${key}" position ${i} is a literal span and must be a non-empty clip name string`);
 				}
 
 				_map.set(_refKey({ type: "span", key, index: position.index }), slot);
-			} else if (slot !== PLACEHOLDER) {
-				throw new Error(`TTSManifest: entry "${key}" position ${i} is a {...} reference and must be PLACEHOLDER`);
+			} else if (slot !== REF) {
+				throw new Error(`ClipSelector: entry "${key}" position ${i} is a {...} reference and must be REF`);
 			}
 		}
 
@@ -470,7 +496,7 @@ const TTSManifest = (() => {
 			return undefined;
 		
 		if (matches.length > 1)
-			throw new Error(`TTSManifest: entry "${key}" has overlapping variants both covering language "${language}": ` + matches.map(([langSet]) => langSet).join(", "));
+			throw new Error(`ClipSelector: entry "${key}" has overlapping variants both covering language "${language}": ` + matches.map(([langSet]) => langSet).join(", "));
 
 		return matches[0][1];
 	}
@@ -478,7 +504,7 @@ const TTSManifest = (() => {
 	/*
 	 * Converts a structural narration reference into a stable Map key.
 	 *
-	 * TTSManifest never matches on rendered wording. It only matches the structural reference supplied by
+	 * ClipSelector never matches on rendered wording. It only matches the structural reference supplied by
 	 * Interpreter.renderContent().
 	 */
 	function _refKey(ref) {
@@ -512,7 +538,7 @@ const TTSManifest = (() => {
 		const template = Localization.parseTemplate(key);
 
 		if (template === undefined)
-			throw new Error(`TTSManifest: entry "${key}" doesn't match any localization key`);
+			throw new Error(`ClipSelector: entry "${key}" doesn't match any localization key`);
 
 		const positions = [];
 
@@ -562,7 +588,7 @@ const TTSManifest = (() => {
 			const positionKeyLists = encodedKeys.split("|").map(segment => segment.split(",").map(k => k.trim()));
 
 			if (positionKeyLists.length !== dynamicCount)
-				throw new Error( `TTSManifest: entry "${key}" conditional aggregate [${start}, ${end}] expects ${dynamicCount} dynamic key(s), but alternative "${encodedKeys}" provides ${positionKeyLists.length}`);
+				throw new Error( `ClipSelector: entry "${key}" conditional aggregate [${start}, ${end}] expects ${dynamicCount} dynamic key(s), but alternative "${encodedKeys}" provides ${positionKeyLists.length}`);
 
 			for (const dynamicKeys of _cartesianProduct(positionKeyLists)) {
 				const refs = _resolveGroupRefs(key, positions, start, end, dynamicKeys);
@@ -581,9 +607,9 @@ const TTSManifest = (() => {
 		const [start, end] = group.range;
 
 		if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end >= positions.length)
-			throw new Error(`TTSManifest: entry "${key}" has a group with an invalid range [${start}, ${end}] for ${positions.length} slot(s)`);
+			throw new Error(`ClipSelector: entry "${key}" has a group with an invalid range [${start}, ${end}] for ${positions.length} slot(s)`);
 		if (typeof group.aggregate !== "string" || group.aggregate === "")
-			throw new Error(`TTSManifest: entry "${key}" has a group with no aggregate clip name`);
+			throw new Error(`ClipSelector: entry "${key}" has a group with no aggregate clip name`);
 
 		const refs = _resolveGroupRefs(key, positions, start, end);
 
@@ -642,11 +668,11 @@ const TTSManifest = (() => {
 
 			// Dynamic position.
 			if (dynamicKeys === null) {
-				throw new Error(`TTSManifest: entry "${key}" group [${start}, ${end}] includes slot ${i}, a data-dependent {...} reference - use conditionalAggregate(...) to provide an explicit alternative key`);
+				throw new Error(`ClipSelector: entry "${key}" group [${start}, ${end}] includes slot ${i}, a data-dependent {...} reference - use c_agg(...) to provide an explicit alternative key`);
 			}
 
 			if (dynamicIndex >= dynamicKeys.length) {
-				throw new Error(`TTSManifest: entry "${key}" conditional aggregate has too few dynamic keys for the dynamic positions in range [${start}, ${end}]`);
+				throw new Error(`ClipSelector: entry "${key}" conditional aggregate has too few dynamic keys for the dynamic positions in range [${start}, ${end}]`);
 			}
 
 			const targetKey = dynamicKeys[dynamicIndex++];
@@ -654,7 +680,7 @@ const TTSManifest = (() => {
 		}
 
 		if (dynamicKeys !== null && dynamicIndex !== dynamicKeys.length) {
-			throw new Error(`TTSManifest: entry "${key}" conditional aggregate supplied ${dynamicKeys.length} dynamic key(s), but the range [${start}, ${end}] contains ${dynamicIndex} dynamic position(s)`);
+			throw new Error(`ClipSelector: entry "${key}" conditional aggregate supplied ${dynamicKeys.length} dynamic key(s), but the range [${start}, ${end}] contains ${dynamicIndex} dynamic position(s)`);
 		}
 
 		return refs;
@@ -665,18 +691,18 @@ const TTSManifest = (() => {
 	 * produced by that key.
 	 *
 	 * The template structure comes directly from Localization.parseTemplate() through _templatePositions(), so
-	 * TTSManifest no longer maintains a second copy of Localization's template parser.
+	 * ClipSelector no longer maintains a second copy of Localization's template parser.
 	 *
 	 * Expansion is only valid when every position is static or literal. A dynamic expression would depend on turn
 	 * data and therefore cannot be part of a precompiled aggregate.
 	 */
 	function _expandStaticKey(fromKey, slotIndex, targetKey, seen = new Set()) {
 		if (seen.has(targetKey)) {
-			throw new Error(`TTSManifest: entry "${fromKey}" slot ${slotIndex} - static reference cycle involving "${targetKey}"`);
+			throw new Error(`ClipSelector: entry "${fromKey}" slot ${slotIndex} - static reference cycle involving "${targetKey}"`);
 		}
 
 		if (Localization.parseTemplate(targetKey) === undefined) {
-			throw new Error(`TTSManifest: entry "${fromKey}" slot ${slotIndex} references unknown key "${targetKey}"`);
+			throw new Error(`ClipSelector: entry "${fromKey}" slot ${slotIndex} references unknown key "${targetKey}"`);
 		}
 
 		const refs = [];
@@ -690,7 +716,7 @@ const TTSManifest = (() => {
 				refs.push(..._expandStaticKey(fromKey, slotIndex, position.key, new Set(seen).add(targetKey)));
 
 			} else {
-				throw new Error(`TTSManifest: entry "${fromKey}" slot ${slotIndex} references "${targetKey}", which contains a data-dependent {...} reference of its own - a group can't cover it`);
+				throw new Error(`ClipSelector: entry "${fromKey}" slot ${slotIndex} references "${targetKey}", which contains a data-dependent {...} reference of its own - a group can't cover it`);
 			}
 		}
 
@@ -770,10 +796,12 @@ const TTSManifest = (() => {
 	/*
 	 * Attempts to find recordings covering every part of one rendered content unit.
 	 *
-	 * The returned names are logical clip names. TTSManifest does not inspect or resolve those names; AudioAtlas
-	 * owns the mapping from logical clip names to physical audio.
+	 * The returned names are logical clip names. ClipSelector does not inspect or resolve those names, and never
+	 * checks whether they actually exist in the atlas - ClipPlayback owns the mapping from logical clip names to
+	 * physical audio, and ClipPlayback.resolve() is responsible for checking this function's result against it
+	 * before treating anything as playable.
 	 */
-	function lookup(parts) {
+	function resolve(parts) {
 		if (!Array.isArray(parts) || parts.length === 0)
 			return null;
 
@@ -784,7 +812,7 @@ const TTSManifest = (() => {
 				const refKey = _refKey(part?.ref);
 
 				if (!_map.has(refKey)) {
-					console.log(`[TTSManifest] no recording for structural reference: ${refKey ?? "unattributed"}`);
+					console.log(`[ClipSelector] no recording for structural reference: ${refKey ?? "unattributed"}`);
 				}
 			}
 		}
@@ -792,8 +820,14 @@ const TTSManifest = (() => {
 		return clips;
 	}
 
+	// Attempts to find recordings for an announcement from a simple key
+	function resolveAnnouncement(key) {
+		return _announcementMap.get(key) ?? null;
+	}
+
 
 	return {
-		lookup,
+		resolve,
+		resolveAnnouncement,
 	};
 })();

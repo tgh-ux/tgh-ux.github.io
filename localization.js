@@ -22,6 +22,11 @@ const Localization = (() => {
 	// Arbitrary safety limit preventing an infinite loop caused by cyclic template references
 	const MAX_ITERATIONS = 20;
 	
+	const LANGUAGES = {
+		SWE: "Svenska",
+		ENG: "English",
+	}
+	
 	// Wrapper marking a template argument that was written as a quoted literal, as opposed to a bareword key reference - the two are otherwise
 	// indistinguishable plain strings once _parseTemplateArg has stripped quotes. Primitives that branch between "wrap as key" and "use as-is" 
 	// check isLiteral(); everything else can keep treating it as a string via normal coercion (+, `${}`, String(), etc. all fall through to toString()).
@@ -478,8 +483,8 @@ const Localization = (() => {
 			COMMON: "{Select:huntActive,true,PROMPT_BRIEF_ORACLE_HUNT_STARTED,false,PROMPT_BRIEF_ORACLE_HUNT_AVOIDED}",
 		},
 		PROMPT_BRIEF_ORACLE_HUNT_AVOIDED: {
-			ENG: "hunt avoided — may wake once to observe all-seeing.{If:showExclusionWarning,PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE}",
-			SWE: "jakten undviks — får vakna en gång för allseende.{If:showExclusionWarning,PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE}",
+			ENG: "hunt avoided — may wake once to observe all-seeing.{If:hasExcludedRoles,PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE}",
+			SWE: "jakten undviks — får vakna en gång för allseende.{If:hasExcludedRoles,PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE}",
 		},
 		PROMPT_BRIEF_ORACLE_HUNT_OMNISCIENCE: {
 			ENG: " Not for: {IdentityList:listExcludedRoles,or}.",
@@ -632,8 +637,8 @@ const Localization = (() => {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_CUPID_ACTION} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_CUPID_ACTION: {
-			ENG: "Swap two other players' markers for {ROLE_CUPID_DEFINITE_GENITIVE} marker. {Pause:medium}",
-			SWE: "Byt ut två andra spelares märken mot {ROLE_CUPID_DEFINITE_GENITIVE} märke. {Pause:medium}",
+			ENG: "Swap two other players' markers for {TOKEN_MARK_CUPID}. {Pause:medium}",
+			SWE: "Byt ut två andra spelares märken mot {TOKEN_MARK_CUPID}. {Pause:medium}",
 		},
 		PROMPT_CURATOR: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_CURATOR_ACTION} {PROMPT_SLEEP_CALL}",
@@ -682,8 +687,11 @@ const Localization = (() => {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_EMPATH_ACTION} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_EMPATH_ACTION: {
-			ENG: "Observe what the other players do. {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}, without waking up, {LocalizedValue:question} {Pause:short}",
-			SWE: "Iaktta vad de andra spelarna gör. {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}, utan att vakna, {LocalizedValue:question} {Pause:short}",
+			ENG: "Observe what the other players do. {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}, without waking up, {PROMPT_EMPATH_QUESTION_SELECTOR} {Pause:short}",
+			SWE: "Iaktta vad de andra spelarna gör. {Select:count,1,GRAMMAR_PLAYER_SINGULAR,*,GRAMMAR_PLAYER_PLURAL} {ValueList:players}, utan att vakna, {PROMPT_EMPATH_QUESTION_SELECTOR} {Pause:short}",
+		},
+		PROMPT_EMPATH_QUESTION_SELECTOR: {
+			COMMON: "{Random:PROMPT_EMPATH_QUESTION_1,PROMPT_EMPATH_QUESTION_2,PROMPT_EMPATH_QUESTION_3,PROMPT_EMPATH_QUESTION_4,PROMPT_EMPATH_QUESTION_5,PROMPT_EMPATH_QUESTION_6,PROMPT_EMPATH_QUESTION_7,PROMPT_EMPATH_QUESTION_8,PROMPT_EMPATH_QUESTION_9,PROMPT_EMPATH_QUESTION_10,PROMPT_EMPATH_QUESTION_11}"
 		},
 		PROMPT_EMPATH_QUESTION_10: {
 			ENG: "give a thumbs up if you think you will win, or a thumbs down if you think you will lose.",
@@ -769,8 +777,8 @@ const Localization = (() => {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_INSTIGATOR_ACTION} {PROMPT_SLEEP_CALL}",
 		},
 		PROMPT_INSTIGATOR_ACTION: {
-			ENG: "Swap another player's marker for {ROLE_INSTIGATOR_DEFINITE_GENITIVE} marker. {Pause:short}",
-			SWE: "Byt ut en annan spelares märke mot {ROLE_INSTIGATOR_DEFINITE_GENITIVE} märke. {Pause:short}",
+			ENG: "Swap another player's marker for {TOKEN_MARK_INSTIGATOR}. {Pause:short}",
+			SWE: "Byt ut en annan spelares märke mot {TOKEN_MARK_INSTIGATOR}. {Pause:short}",
 		},
 		PROMPT_LEADER: {
 			ENG: "{PROMPT_WAKE_CALL} {TEAM_ALIEN_PLURAL}, hold out a thumb so {ROLE_LEADER_DEFINITE} can see who you are. {If:hasFeudingAliens,PROMPT_LEADER_FEUDINGALIENS} {Pause:short} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_LEADER_DOPPELGANGER} {TEAM_ALIEN_PLURAL}, put your thumbs down.",
@@ -917,29 +925,80 @@ const Localization = (() => {
 			SWE: "En krusning är nu garanterad att inträffa.",
 		},
 		PROMPT_ORACLE_HUNT: {
-			ENG: "Guess a number between one and ten. {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_AUTO}",
-			SWE: "Gissa ett tal mellan ett och tio. {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_AUTO}",
-		},
-		PROMPT_ORACLE_HUNT_AUTO: {
-			COMMON: "{Input:oracleHuntGuess,choice,PROMPT_ORACLE_HUNT_MANUAL,short,defaultHuntGuess,1,UI_NUM_1,PROMPT_ORACLE_HUNT_RESOLVE,2,UI_NUM_2,PROMPT_ORACLE_HUNT_RESOLVE,3,UI_NUM_3,PROMPT_ORACLE_HUNT_RESOLVE,4,UI_NUM_4,PROMPT_ORACLE_HUNT_RESOLVE,5,UI_NUM_5,PROMPT_ORACLE_HUNT_RESOLVE,6,UI_NUM_6,PROMPT_ORACLE_HUNT_RESOLVE,7,UI_NUM_7,PROMPT_ORACLE_HUNT_RESOLVE,8,UI_NUM_8,PROMPT_ORACLE_HUNT_RESOLVE,9,UI_NUM_9,PROMPT_ORACLE_HUNT_RESOLVE,10,UI_NUM_10,PROMPT_ORACLE_HUNT_RESOLVE}",
+			COMMON: "Svara på följande fråga. {Random:PROMPT_ORACLE_HUNT_QUESTION_1,PROMPT_ORACLE_HUNT_QUESTION_2,PROMPT_ORACLE_HUNT_QUESTION_3,PROMPT_ORACLE_HUNT_QUESTION_4,PROMPT_ORACLE_HUNT_QUESTION_5}",
 		},
 		PROMPT_ORACLE_HUNT_AVOIDED: {
-			ENG: "Correct. Whenever another role is told to wake up, you may wake up with them once during the night to observe who they are and what they do. {If:showExclusionWarning,PROMPT_ORACLE_HUNT_OMNISCIENCE}",
-			SWE: "Korrekt. När en annan roll blir tillsagd att vakna kan du en gång under natten vakna tillsammans med dem för att iaktta vem de är och vad de gör. {If:showExclusionWarning,PROMPT_ORACLE_HUNT_OMNISCIENCE}",
+			ENG: "Correct, you really are an {ROLE_ORACLE}. Whenever another role is told to wake up, you may wake up with them once during the night to observe who they are and what they do. {If:hasExcludedRoles,PROMPT_ORACLE_HUNT_OMNISCIENCE}",
+			SWE: "Korrekt, du är verkligen ett {ROLE_ORACLE}. När en annan roll blir tillsagd att vakna kan du en gång under natten vakna tillsammans med dem för att iaktta vem de är och vad de gör. {If:hasExcludedRoles,PROMPT_ORACLE_HUNT_OMNISCIENCE}",
 		},
 		PROMPT_ORACLE_HUNT_MANUAL: {
-			COMMON: "{Select:huntActive,true,PROMPT_ORACLE_HUNT_STARTED,false,PROMPT_ORACLE_HUNT_AVOIDED}",
+			COMMON: "{PROMPT_ORACLE_HUNT_RESOLVE}",
 		},
 		PROMPT_ORACLE_HUNT_OMNISCIENCE: {
 			ENG: "However, you may not wake up to observe any of the following roles: {IdentityList:listExcludedRoles,or}.",
 			SWE: "Du får dock inte vakna för att iaktta någon av följande roller: {IdentityList:listExcludedRoles,or}.",
 		},
+		PROMPT_ORACLE_HUNT_QUESTION_1: {
+			ENG: "What number am I thinking of? {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_QUESTION_1_AUTO}",
+			SWE: "Vilket tal tänker jag på? {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_QUESTION_1_AUTO}",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_1_AUTO: {
+			COMMON: "{FakeInput:short,PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_RESOLVE,'1','2','3','4','5','6','7','8','9','10'}",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_2: {
+			ENG: "What is my favourite colour? {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_QUESTION_2_AUTO}",
+			SWE: "Vilken är min favoritfärg? {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_QUESTION_2_AUTO}",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_2_A1: {
+			ENG: "Red",
+			SWE: "Röd",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_2_A2: {
+			ENG: "Blue",
+			SWE: "Blå",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_2_A3: {
+			ENG: "Green",
+			SWE: "Grön",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_2_A4: {
+			ENG: "Yellow",
+			SWE: "Gul",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_2_AUTO: {
+			COMMON: "{FakeInput:short,PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_RESOLVE,PROMPT_ORACLE_HUNT_QUESTION_2_A1,PROMPT_ORACLE_HUNT_QUESTION_2_A2,PROMPT_ORACLE_HUNT_QUESTION_2_A3,PROMPT_ORACLE_HUNT_QUESTION_2_A4}",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_3: {
+			ENG: "Does pineapple go on pizza? {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_QUESTION_3_AUTO}",
+			SWE: "Passar ananas på pizza? {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_QUESTION_3_AUTO}",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_3_AUTO: {
+			COMMON: "{FakeInput:short,PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_RESOLVE,UI_YES,UI_NO}",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_4: {
+			ENG: "How many rivets are in the Golden Gate bridge? {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_QUESTION_4_AUTO}",
+			SWE: "Hur många skruvar finns det i Ölandsbron? {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_QUESTION_4_AUTO}",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_4_AUTO: {
+			COMMON: "{FakeInput:short,PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_RESOLVE,'10 680','47 122','112 769','255 112','327 122','485 049','546 737','660 887','775 238','959 605'}",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_5: {
+			ENG: "What is the airspeed velocity of an unladen swallow? {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_QUESTION_5_AUTO}",
+			SWE: "Vad är flyghastigheten hos en obelastad svala? {AutoKey:PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_QUESTION_5_AUTO}",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_5_A1: {
+			ENG: "African or European?",
+			SWE: "Afrikansk eller Europeisk?",
+		},
+		PROMPT_ORACLE_HUNT_QUESTION_5_AUTO: {
+			COMMON: "{FakeInput:short,PROMPT_ORACLE_HUNT_MANUAL,PROMPT_ORACLE_HUNT_RESOLVE,'7km/h','9km/h','11km/h','13km/h','15km/h',PROMPT_ORACLE_HUNT_QUESTION_5_A1}",
+		},
 		PROMPT_ORACLE_HUNT_RESOLVE: {
 			COMMON: "{Select:huntActive,true,PROMPT_ORACLE_HUNT_STARTED,false,PROMPT_ORACLE_HUNT_AVOIDED}",
 		},
 		PROMPT_ORACLE_HUNT_STARTED: {
-			ENG: "Wrong. {ROLE_ORACLE}, you now only win if you are not voted out. All other players, regardless of previous role and team, now have only one win condition: find {ROLE_ORACLE_DEFINITE}.",
-			SWE: "Fel. {ROLE_ORACLE}, du vinner nu endast om du inte blir utröstad. Övriga spelare, oberoende av tidigare roll- och lagtillhörighet har ni nu endast ett vinstvillkor: hitta {ROLE_ORACLE_DEFINITE}.",
+			ENG: "Wrong, you are clearly a terrible {ROLE_ORACLE}. All other players, regardless of previous role and team, now have only one win condition: find {ROLE_ORACLE_DEFINITE}. {ROLE_ORACLE}, good luck, you now only win if you are not voted out.",
+			SWE: "Fel, du är uppenbarligen ett uselt {ROLE_ORACLE}. Övriga spelare, oberoende av tidigare roll- och lagtillhörighet har ni nu endast ett vinstvillkor: hitta {ROLE_ORACLE_DEFINITE}. {ROLE_ORACLE}, lycka till, du vinner nu endast om du inte blir utröstad.",
 		},
 		PROMPT_ORACLE_VIEW_CARD: {
 			COMMON: "{PROMPT_VIEW_CARD} {Pause:medium}",
@@ -979,16 +1038,16 @@ const Localization = (() => {
 			COMMON: "{PROMPT_DO_ROLE_ACTION}",
 		},
 		PROMPT_RENFIELD: {
-			ENG: "{PROMPT_WAKE_CALL} {TEAM_VAMPIRE_PLURAL}, point at the player you have given {TEAM_VAMPIRE_DEFINITE_GENITIVE} marker. {ROLE_RENFIELD}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_RENFIELD_DOPPELGANGER} {TEAM_VAMPIRE_PLURAL}, stop pointing.",
-			SWE: "{PROMPT_WAKE_CALL} {TEAM_VAMPIRE_PLURAL}, peka på den spelare som ni har gett {TEAM_VAMPIRE_DEFINITE_GENITIVE} märke. {ROLE_RENFIELD}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_RENFIELD_DOPPELGANGER} {TEAM_VAMPIRE_PLURAL}, sluta peka.",
+			ENG: "{PROMPT_WAKE_CALL} {TEAM_VAMPIRE_PLURAL}, point at the player you have given {TOKEN_MARK_VAMPIRE}. {ROLE_RENFIELD}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_RENFIELD_DOPPELGANGER} {TEAM_VAMPIRE_PLURAL}, stop pointing.",
+			SWE: "{PROMPT_WAKE_CALL} {TEAM_VAMPIRE_PLURAL}, peka på den spelare som ni har gett {TOKEN_MARK_VAMPIRE}. {ROLE_RENFIELD}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL} {If:hasDoppelganger,PROMPT_RENFIELD_DOPPELGANGER} {TEAM_VAMPIRE_PLURAL}, sluta peka.",
 		},
 		PROMPT_RENFIELD_ACTION: {
 			ENG: "identify {TEAM_VAMPIRE_DEFINITE} and swap your marker for {TOKEN_MARK_RENFIELD}. {Pause:medium}",
 			SWE: "identifiera {TEAM_VAMPIRE_DEFINITE} och byt ut ditt märke mot {TOKEN_MARK_RENFIELD}. {Pause:medium}",
 		},
 		PROMPT_RENFIELD_DOPPELGANGER: {
-			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_VAMPIRE_PLURAL}, keep pointing at the player you have given {TEAM_VAMPIRE_DEFINITE_GENITIVE} marker. {ROLE_DOPPELGANGER}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
-			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_VAMPIRE_PLURAL}, fortsätt peka på den spelare som ni har gett {TEAM_VAMPIRE_DEFINITE_GENITIVE} märke. {ROLE_DOPPELGANGER}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			ENG: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_VAMPIRE_PLURAL}, keep pointing at the player you have given {TOKEN_MARK_VAMPIRE}. {ROLE_DOPPELGANGER}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
+			SWE: "{PROMPT_WAKE_CALL_DOPPELGANGER_INLINE} {TEAM_VAMPIRE_PLURAL}, fortsätt peka på den spelare som ni har gett {TOKEN_MARK_VAMPIRE}. {ROLE_DOPPELGANGER}, {PROMPT_RENFIELD_ACTION} {PROMPT_SLEEP_CALL_DOPPELGANGER}",
 		},
 		PROMPT_REVEALER: {
 			COMMON: "{If:copiedRole,PROMPT_WAKE_CALL_DOPPELGANGER_ECHO,PROMPT_WAKE_CALL} {PROMPT_REVEALER_ACTION} {PROMPT_SLEEP_CALL}",
@@ -1965,6 +2024,70 @@ const Localization = (() => {
 		ROLE_FEUDINGALIENS_PLURAL_GENITIVE: {
 			ENG: "Groob and Zerb's",
 			SWE: "Groobs och Zerbs",
+		},
+		ROLE_FEUDINGALIENS_GROOB: {
+			ENG: "Groob",
+			SWE: "Groob",
+		},
+		ROLE_FEUDINGALIENS_GROOB_DEFINITE: {
+			ENG: "Groob",
+			SWE: "Groob",
+		},
+		ROLE_FEUDINGALIENS_GROOB_DEFINITE_GENITIVE: {
+			ENG: "Groob's",
+			SWE: "Groobs",
+		},
+		ROLE_FEUDINGALIENS_GROOB_GENITIVE: {
+			ENG: "Groob's",
+			SWE: "Groobs",
+		},
+		ROLE_FEUDINGALIENS_GROOB_PLURAL: {
+			ENG: "Groob",
+			SWE: "Groob",
+		},
+		ROLE_FEUDINGALIENS_GROOB_PLURAL_DEFINITE: {
+			ENG: "Groob",
+			SWE: "Groob",
+		},
+		ROLE_FEUDINGALIENS_GROOB_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "Groob's",
+			SWE: "Groobs",
+		},
+		ROLE_FEUDINGALIENS_GROOB_PLURAL_GENITIVE: {
+			ENG: "Groob's",
+			SWE: "Groobs",
+		},
+		ROLE_FEUDINGALIENS_ZERB: {
+			ENG: "Zerb",
+			SWE: "Zerb",
+		},
+		ROLE_FEUDINGALIENS_ZERB_DEFINITE: {
+			ENG: "Zerb",
+			SWE: "Zerb",
+		},
+		ROLE_FEUDINGALIENS_ZERB_DEFINITE_GENITIVE: {
+			ENG: "Zerb's",
+			SWE: "Zerbs",
+		},
+		ROLE_FEUDINGALIENS_ZERB_GENITIVE: {
+			ENG: "Zerb's",
+			SWE: "Zerbs",
+		},
+		ROLE_FEUDINGALIENS_ZERB_PLURAL: {
+			ENG: "Zerb",
+			SWE: "Zerb",
+		},
+		ROLE_FEUDINGALIENS_ZERB_PLURAL_DEFINITE: {
+			ENG: "Zerb",
+			SWE: "Zerb",
+		},
+		ROLE_FEUDINGALIENS_ZERB_PLURAL_DEFINITE_GENITIVE: {
+			ENG: "Zerb's",
+			SWE: "Zerbs",
+		},
+		ROLE_FEUDINGALIENS_ZERB_PLURAL_GENITIVE: {
+			ENG: "Zerb's",
+			SWE: "Zerbs",
 		},
 		ROLE_GREMLIN: {
 			ENG: "Gremlin",
@@ -3699,8 +3822,8 @@ const Localization = (() => {
 			SWE: "Trettio sekunder återstår.",
 		},
 		UI_DAYTIMER_EXPIRED: {
-			ENG: "Time is up. After the countdown, point to the player you want to eliminate. If two or more players receive the most votes, all will be eliminated. Five, four, three, two, one, vote.",
-			SWE: "Tiden är slut. Efter nedräkningen, peka på den spelare du vill rösta ut. Om två eller fler spelare får flest röster så kommer samtliga att röstas ut. Fem, fyra, tre, två, ett, rösta.",
+			ENG: "Time is up. After the countdown, point to the player you want to eliminate. If two or more players receive the most votes, all will be eliminated. Five. Four. Three. Two. One. Vote.",
+			SWE: "Tiden är slut. Efter nedräkningen, peka på den spelare du vill rösta ut. Om två eller fler spelare får flest röster så kommer samtliga att röstas ut. Fem. Fyra. Tre. Två. Ett. Rösta.",
 		},
 		UI_DAYTIMER_PAUSE: {
 			ENG: "Pause",
@@ -3761,36 +3884,6 @@ const Localization = (() => {
 		UI_NO: {
 			ENG: "No",
 			SWE: "Nej",
-		},
-		UI_NUM_10: {
-			COMMON: "10",
-		},
-		UI_NUM_1: {
-			COMMON: "1",
-		},
-		UI_NUM_2: {
-			COMMON: "2",
-		},
-		UI_NUM_3: {
-			COMMON: "3",
-		},
-		UI_NUM_4: {
-			COMMON: "4",
-		},
-		UI_NUM_5: {
-			COMMON: "5",
-		},
-		UI_NUM_6: {
-			COMMON: "6",
-		},
-		UI_NUM_7: {
-			COMMON: "7",
-		},
-		UI_NUM_8: {
-			COMMON: "8",
-		},
-		UI_NUM_9: {
-			COMMON: "9",
 		},
 		UI_PLAYER_COUNT: {
 			ENG: "Number of players:",
@@ -4465,6 +4558,7 @@ const Localization = (() => {
 		_initNumbers();
 		_deepFreeze(NUMBER_DATA);
 		_deepFreeze(LOCALIZATION_KEYS);
+		_deepFreeze(LANGUAGES);
 	}
 	
 	function _initNumbers() {
@@ -4510,7 +4604,16 @@ const Localization = (() => {
 
 	// Restores the persisted language into LANG, if one was saved; otherwise leaves LANG at its existing (default) value
 	function _loadLanguage() {
-		LANG = localStorage.getItem(LANGUAGE_STORE) || LANG;
+		const loadedLang = localStorage.getItem(LANGUAGE_STORE);
+		
+		if (loadedLang === null) return;
+		
+		if (!LANGUAGES[loadedLang]) {
+			console.warn("Localization._loadLanguage(): loaded language " + loadedLang + " does not match a known language. Using default.");
+			return;
+		}
+		
+		LANG = loadedLang;
 	}
 
 	// Shared helper
@@ -4837,6 +4940,10 @@ const Localization = (() => {
 
 	// Sets the current language and persists it. lang - a language code matching a key in LOCALIZATION_KEYS. No return value.
 	function setLanguage(lang) {
+		if (!LANGUAGES[lang]) {
+			throw new Error(`Unable to set unknown language ` + lang + `.`);
+		}
+		
 		LANG = lang;
 		_saveLanguage();
 	}
@@ -4860,6 +4967,11 @@ const Localization = (() => {
 	function getNumberTable() {
 		return NUMBER_DATA;
 	}
+	
+	// Returns the table of known languages, with their localized names
+	function getKnownLanguages() {
+		return LANGUAGES;
+	}
 
 
 	return {
@@ -4874,7 +4986,8 @@ const Localization = (() => {
 		getNumberTable,
 		firstSentenceBoundary,
 		parseTemplate,
-		getTemplateSpan
+		getTemplateSpan,
+		getKnownLanguages,
 	};
 	
 })();

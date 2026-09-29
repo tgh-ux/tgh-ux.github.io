@@ -24,9 +24,9 @@ const Rules = (() => {
 	 * Resolvers never generate narration text directly; they only populate structured data consumed later by the prompt interpreter.
 	 *
 	 * Every resolver has the signature (ctx, action, instigator, data) => resultData, where ctx is the evaluation context (see _makeCtx),
-	 * action/instigator are copied from the owning TURN_ORDER entry, and data is that entry's own resolveData(ctx) output (or {} if it has
-	 * none). resultData is merged over data in the final turn (see _runRule) - most resolvers ignore action/instigator/data entirely and
-	 * return a fresh object, since a rule needing to layer new fields onto its own resolveData is the exception, not the rule.
+	 * action is taken from the owning TURN_ORDER entry, instigator is the effective instigator for the current execution, and data is the
+	 * resolved data assembled for that execution (including any Doppelganger-specific execution data). resultData is merged over data in the
+	 * final turn (see _runRule).
 	 */
 	const RESOLVERS = {
 		/*
@@ -111,24 +111,15 @@ const Rules = (() => {
 			return { ..._chooseWeightedTree(choices, rngKey) };
 		},
 		/*
-		 * EmpathResolver queries Localization directly for available question keys, then picks one random question to assign for the prompt.
-		 *
-		 * This is an intentional exception to the otherwise data-driven design, allowing translators to add or remove question variants without requiring
-		 * corresponding changes to the rules engine.
+		 * EmpathResolver produces a seed used by the Random primitive in Localization to pick a question, and a list of players to answer it
 		 */
 		EmpathResolver: (ctx, action, instigator, data) => {
 			const rngKey = "empath_event" + (data.copiedRole ? "_doppelganger" : "");
-			const availableQuestions = Localization.getKeysContaining("PROMPT_EMPATH_QUESTION_") ?? []
-			
-			if (availableQuestions.length <= 0)
-				throw new Error(`EmpathResolver: No questions found in localization keys`);
-			
-			const questionID = Math.floor(_getCachedRandom(rngKey) * availableQuestions.length);
-			const question = availableQuestions[questionID];
 			const maxPlayers = Math.max(Math.min(Math.floor(ctx.playerCount * 0.3), 4), 1);	// Ensure Empath can't be confirmed by everyone in small games
 			const players = _getRandomPlayers(ctx.playerCount, rngKey, 1, maxPlayers);
+			const rndSeed = _getCachedRandom(rngKey);
 			
-			return { question: question, players: players, count: players.length };
+			return { rndSeed: rndSeed, players: players, count: players.length };
 		},
 		ExposerResolver: (ctx, action, instigator, data) => {
 			const rngKey = "exposer_event" + (data.copiedRole ? "_doppelganger" : "");
@@ -197,8 +188,8 @@ const Rules = (() => {
 		 * non-zero weight is "change_team" but no evil team exists to switch to — a misconfiguration that would otherwise surface as an opaque
 		 * "total weight is zero" error.
 		 *
-		 * defaultEvenOdd, defaultHuntGuess, and defaultJoinAccepted are used by the automatic TTS narration and is deliberately uncached random
-		 * booleans as they are intended to emulate a player response at the table if none is given, not a stable value for the script.
+		 * defaultEvenOdd and defaultJoinAccepted are used by the automatic TTS narration and is deliberately uncached random booleans as they are
+		 * intended to emulate a player response at the table if none is given, not a stable value for the script.
 		 *
 		 * NOTE: this is now effectively a historical artifact. It predates settings.js's requiresContext mechanism, which already declares
 		 * oracle.change_team as requiring evilTeamPresent within its weight group — Settings.validate() catches this exact misconfiguration
@@ -239,8 +230,9 @@ const Rules = (() => {
 			// Calculate hunt event
 			const huntActive = _getCachedRandom(rngKey + ".hunt") * 100 < Settings.getValue("oracle.hunt.chance");
 			const allowBad = Settings.getValue("oracle.hunt.allow_bad_teams")
-			const exclusionData = ctx.getTagList("ExcludedRoles", "ORACLE_OMNISCIENCE_EXCLUDED")
-			choices.push({ weight: Settings.getValue("oracle.hunt"), data: { type: "oracle_hunt", huntActive: huntActive, showExclusionWarning: !allowBad && (exclusionData.countExcludedRoles > 0), defaultHuntGuess: Math.floor(Math.random() * 10) + 1, ...exclusionData } });
+			const exclusionData = allowBad ? {} : ctx.getTagList("ExcludedRoles", "ORACLE_OMNISCIENCE_EXCLUDED");
+			const rndSeed = _getCachedRandom(rngKey + ".hunt.question");
+			choices.push({ weight: Settings.getValue("oracle.hunt"), data: { type: "oracle_hunt", huntActive: huntActive, rndSeed: rndSeed, ...exclusionData } });
 			
 			// Calculate team switch
 			const availableTeams = [];
@@ -380,11 +372,13 @@ const Rules = (() => {
 	 * Declarative turn definitions. The turns are ordered chronologically, and is simply evaluated from top to bottom in buildPrompt().
 	 *
 	 * Each entry represents a possible narration step in chronological order. Each must contain, at minimum, an action field (what to do), as well as
-	 * an instigator field (who does the action). The action value is used in the interpreter to find an entry point among the localization keys. Note
-	 * that an action, while normally corresponding to the instigator, does not have to match. The Doppelganger role performs the actions of a role it
-	 * copied extensively, in which case the action may belong to one role while the Doppelganger is the instigator of the action. For this case in
-	 * particular, it is also paired with the `copiedRole` value to reference the role that the Doppelganger copied.
-	 * Optional fields are condition, resolveData and resolver.
+	 * an instigator field (who does the action). The action value is used in the interpreter to find an entry point among the localization keys.
+	 * The action does not necessarily correspond to the instigator; for example, a Doppelganger echo performs another role's action while
+	 * ROLE_DOPPELGANGER is the instigator. In that case, the engine supplies `copiedRole` automatically from the original rule's instigator.
+	 *
+	 * Optional fields are condition, resolveData, resolver and doppelganger. `doppelganger` controls how the Doppelganger participates in the action:
+	 *   - "inline" - the Doppelganger participates within the normal turn and `hasDoppelganger` is added to its data.
+	 *   - "echo"   - the same action is executed again immediately afterward as ROLE_DOPPELGANGER, with `copiedRole` set to the original instigator.
 	 *
 	 * Rules may:
 	 *   - specify when they apply through conditions ('condition')
@@ -421,24 +415,19 @@ const Rules = (() => {
 			action: "VAMPIRE_TEAM",
 			instigator: "TEAM_VAMPIRE",
 			condition: ctx => ctx.isTeamPresent("TEAM_VAMPIRE"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "COUNT",
 			instigator: "ROLE_COUNT",
-			condition: ctx => ctx.isRolePresent("COUNT")
-		},
-		{
-			action: "COUNT",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("COUNT", "DOPPELGANGER"),
-			resolveData: ctx => ({ copiedRole: "ROLE_COUNT" }),
+			condition: ctx => ctx.isRolePresent("COUNT"),
+			doppelganger: "echo",
 		},
 		{
 			action: "RENFIELD",
 			instigator: "ROLE_RENFIELD",
 			condition: ctx => ctx.isRolePresent("RENFIELD"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "DISEASED",
@@ -458,21 +447,18 @@ const Rules = (() => {
 		{
 			action: "PRIEST",
 			instigator: "ROLE_PRIEST",
-			condition: ctx => ctx.isRolePresent("PRIEST")
-		},
-		{
-			action: "PRIEST",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("PRIEST", "DOPPELGANGER"),
-			resolveData: ctx => ({ copiedRole: "ROLE_PRIEST" }),
+			condition: ctx => ctx.isRolePresent("PRIEST"),
+			doppelganger: "echo",
 		},
 		{
 			action: "ASSASSIN",
 			instigator: "ROLE_ASSASSIN",
 			condition: ctx => ctx.isRolePresent("ASSASSIN"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), hasApprenticeAssassin: ctx.isRolePresent("APPRENTICEASSASSIN") })
+			resolveData: ctx => ({ hasApprenticeAssassin: ctx.isRolePresent("APPRENTICEASSASSIN") }),
+			doppelganger: "inline"
 		},
 		{
+			// Explicit Doppelganger echoed turn, as it must exclude the apprentice
 			action: "ASSASSIN",
 			instigator: "ROLE_DOPPELGANGER",
 			condition: ctx => ctx.isAllRolesPresent("ASSASSIN", "DOPPELGANGER"),
@@ -508,32 +494,28 @@ const Rules = (() => {
 			instigator: "TEAM_ALIEN",
 			condition: ctx => ctx.isTeamPresent("TEAM_ALIEN") || ctx.isRolePresent("SYNTHETICALIEN"),
 			resolver: "AlienResolver",
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), hasCow: ctx.isRolePresent("COW") })
+			resolveData: ctx => ({ hasCow: ctx.isRolePresent("COW") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "FEUDINGALIENS",
 			instigator: "ROLE_FEUDINGALIENS",
 			condition: ctx => ctx.isRolePresent("FEUDINGALIENS"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "BODYSNATCHER",
 			instigator: "ROLE_BODYSNATCHER",
 			condition: ctx => ctx.isRolePresent("BODYSNATCHER"),
 			resolver: "BodysnatcherResolver",
-		},
-		{
-			action: "BODYSNATCHER",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("BODYSNATCHER", "DOPPELGANGER"),
-			resolver: "BodysnatcherResolver",
-			resolveData: ctx => ({ copiedRole: "ROLE_BODYSNATCHER" }),
+			doppelganger: "echo",
 		},
 		{
 			action: "WEREWOLF_TEAM",
 			instigator: "TEAM_WEREWOLF",
 			condition: ctx => ctx.isAnyRolePresent("WEREWOLF", "ALPHAWOLF", "MYSTICWOLF"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), hasDreamWolf: ctx.isRolePresent("DREAMWOLF") }),
+			resolveData: ctx => ({ hasDreamWolf: ctx.isRolePresent("DREAMWOLF") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "ALPHAWOLF",
@@ -550,25 +532,26 @@ const Rules = (() => {
 			action: "MINION",
 			instigator: "ROLE_MINION",
 			condition: ctx => ctx.isRolePresent("MINION") && ctx.isTeamPresent("TEAM_WEREWOLF"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "APPRENTICETANNER",
 			instigator: "ROLE_APPRENTICETANNER",
 			condition: ctx => ctx.isRolePresent("APPRENTICETANNER") && ctx.isRolePresent("TANNER"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "LEADER",
 			instigator: "ROLE_LEADER",
 			condition: ctx => ctx.isRolePresent("LEADER") && (ctx.isTeamPresent("TEAM_ALIEN") || ctx.isRolePresent("SYNTHETICALIEN")),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), hasFeudingAliens: ctx.isRolePresent("FEUDINGALIENS") })
+			resolveData: ctx => ({ hasFeudingAliens: ctx.isRolePresent("FEUDINGALIENS") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "MASON",
 			instigator: "ROLE_MASON",
 			condition: ctx => ctx.getTotalRoleCountPresent("MASON", "DOPPELGANGER") >= 2,
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "THING",
@@ -595,33 +578,23 @@ const Rules = (() => {
 		{
 			action: "MARKSMAN",
 			instigator: "ROLE_MARKSMAN",
-			condition: ctx => ctx.isRolePresent("MARKSMAN")
-		},
-		{
-			action: "MARKSMAN",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("MARKSMAN", "DOPPELGANGER"),
-			resolveData: ctx => ({ copiedRole: "ROLE_MARKSMAN" }),
+			condition: ctx => ctx.isRolePresent("MARKSMAN"),
+			doppelganger: "echo",
 		},
 		{
 			action: "NOSTRADAMUS",
 			instigator: "ROLE_NOSTRADAMUS",
 			condition: ctx => ctx.isRolePresent("NOSTRADAMUS"),
 			resolver: "NostradamusResolver",
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), ...ctx.getTagList("DangerRoles", "PI_CONVERSION_ROLE") }),
+			resolveData: ctx => ({ ...ctx.getTagList("DangerRoles", "PI_CONVERSION_ROLE") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "PSYCHIC",
 			instigator: "ROLE_PSYCHIC",
 			condition: ctx => ctx.isRolePresent("PSYCHIC"),
 			resolver: "PsychicResolver",
-		},
-		{
-			action: "PSYCHIC",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("PSYCHIC", "DOPPELGANGER"),
-			resolver: "PsychicResolver",
-			resolveData: ctx => ({ copiedRole: "ROLE_PSYCHIC" }),
+			doppelganger: "echo",
 		},
 		{
 			action: "ROBBER",
@@ -636,13 +609,8 @@ const Rules = (() => {
 		{
 			action: "PICKPOCKET",
 			instigator: "ROLE_PICKPOCKET",
-			condition: ctx => ctx.isRolePresent("PICKPOCKET")
-		},
-		{
-			action: "PICKPOCKET",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("PICKPOCKET", "DOPPELGANGER"),
-			resolveData: ctx => ({ copiedRole: "ROLE_PICKPOCKET" }),
+			condition: ctx => ctx.isRolePresent("PICKPOCKET"),
+			doppelganger: "echo",
 		},
 		{
 			action: "TROUBLEMAKER",
@@ -658,31 +626,21 @@ const Rules = (() => {
 			action: "AURASEER",
 			instigator: "ROLE_AURASEER",
 			condition: ctx => ctx.isRolePresent("AURASEER") && ctx.isAnyTagPresent("AURA_SEER_DETECTABLE"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), ...ctx.getTagList("DetectableRoles", "AURA_SEER_DETECTABLE") })
+			resolveData: ctx => ({ ...ctx.getTagList("DetectableRoles", "AURA_SEER_DETECTABLE") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "GREMLIN",
 			instigator: "ROLE_GREMLIN",
-			condition: ctx => ctx.isRolePresent("GREMLIN")
-		},
-		{
-			action: "GREMLIN",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("GREMLIN", "DOPPELGANGER"),
-			resolveData: ctx => ({ copiedRole: "ROLE_GREMLIN" }),
+			condition: ctx => ctx.isRolePresent("GREMLIN"),
+			doppelganger: "echo",
 		},
 		{
 			action: "RASCAL",
 			instigator: "ROLE_RASCAL",
 			condition: ctx => ctx.isRolePresent("RASCAL"),
 			resolver: "RascalResolver",
-		},
-		{
-			action: "RASCAL",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("RASCAL", "DOPPELGANGER"),
-			resolver: "RascalResolver",
-			resolveData: ctx => ({ copiedRole: "ROLE_RASCAL" }),
+			doppelganger: "echo",
 		},
 		{
 			action: "DRUNK",
@@ -692,100 +650,62 @@ const Rules = (() => {
 		{
 			action: "INSOMNIAC",
 			instigator: "ROLE_INSOMNIAC",
-			condition: ctx => ctx.isRolePresent("INSOMNIAC")
-		},
-		{
-			action: "INSOMNIAC",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("INSOMNIAC", "DOPPELGANGER"),
-			resolveData: ctx => ({ copiedRole: "ROLE_INSOMNIAC" }),
+			condition: ctx => ctx.isRolePresent("INSOMNIAC"),
+			doppelganger: "echo",
 		},
 		{
 			action: "SQUIRE",
 			instigator: "ROLE_SQUIRE",
 			condition: ctx => ctx.isRolePresent("SQUIRE") && ctx.isTeamPresent("TEAM_WEREWOLF"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "BEHOLDER",
 			instigator: "ROLE_BEHOLDER",
 			condition: ctx => ctx.isRolePresent("BEHOLDER") && ctx.isAnyTagPresent("BEHOLDER_DETECTABLE"),
-			resolveData: ctx => ({ hasDoppelganger: ctx.isRolePresent("DOPPELGANGER"), ...ctx.getTagList("DetectableRoles", "BEHOLDER_DETECTABLE") })
+			resolveData: ctx => ({ ...ctx.getTagList("DetectableRoles", "BEHOLDER_DETECTABLE") }),
+			doppelganger: "inline",
 		},
 		{
 			action: "REVEALER",
 			instigator: "ROLE_REVEALER",
 			condition: ctx => ctx.isRolePresent("REVEALER"),
 			resolveData: ctx => ({ ...ctx.getTagList("HiddenRoles", "REVEALER_HIDDEN_ROLE") }),
-		},
-		{
-			action: "REVEALER",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("REVEALER", "DOPPELGANGER"),
-			resolveData: ctx => ({ copiedRole: "ROLE_REVEALER", ...ctx.getTagList("HiddenRoles", "REVEALER_HIDDEN_ROLE") })
+			doppelganger: "echo",
 		},
 		{
 			action: "EXPOSER",
 			instigator: "ROLE_EXPOSER",
 			condition: ctx => ctx.isRolePresent("EXPOSER"),
 			resolver: "ExposerResolver",
-		},
-		{
-			action: "EXPOSER",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("EXPOSER", "DOPPELGANGER"),
-			resolver: "ExposerResolver",
-			resolveData: ctx => ({ copiedRole: "ROLE_EXPOSER" }),
+			doppelganger: "echo",
 		},
 		{
 			action: "EMPATH",
 			instigator: "ROLE_EMPATH",
 			condition: ctx => ctx.isRolePresent("EMPATH"),
 			resolver: "EmpathResolver",
-		},
-		{
-			action: "EMPATH",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("EMPATH", "DOPPELGANGER"),
-			resolver: "EmpathResolver",
-			resolveData: ctx => ({ copiedRole: "ROLE_EMPATH" }),
+			doppelganger: "echo",
 		},
 		{
 			action: "CURATOR",
 			instigator: "ROLE_CURATOR",
-			condition: ctx => ctx.isRolePresent("CURATOR")
-		},
-		{
-			action: "CURATOR",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("CURATOR", "DOPPELGANGER"),
-			resolveData: ctx => ({ copiedRole: "ROLE_CURATOR" }),
+			condition: ctx => ctx.isRolePresent("CURATOR"),
+			doppelganger: "echo",
 		},
 		{
 			action: "BLOB",
 			instigator: "ROLE_BLOB",
 			condition: ctx => ctx.isRolePresent("BLOB"),
 			resolver: "BlobResolver",
-		},
-		{
-			action: "BLOB",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("BLOB", "DOPPELGANGER"),
-			resolver: "BlobResolver",
-			resolveData: ctx => ({ copiedRole: "ROLE_BLOB" }),
+			doppelganger: "echo",
 		},
 		{
 			action: "MORTICIAN",
 			instigator: "ROLE_MORTICIAN",
 			condition: ctx => ctx.isRolePresent("MORTICIAN"),
 			resolver: "MorticianResolver",
-		},
-		{
-			action: "MORTICIAN",
-			instigator: "ROLE_DOPPELGANGER",
-			condition: ctx => ctx.isAllRolesPresent("MORTICIAN", "DOPPELGANGER"),
-			resolver: "MorticianResolver",
-			resolveData: ctx => ({ copiedRole: "ROLE_MORTICIAN" }),
+			doppelganger: "echo",
 		},
 		{
 			action: "RIPPLE",
@@ -989,27 +909,65 @@ const Rules = (() => {
 	}
 
 	/*
-	 * Executes a single TURN_ORDER rule and combines static, derived and resolved data into one turn.
+	 * Expands any role with a subRoles definition (see Roles.js) into its individual component identities, for
+	 * a role-ID list destined for narration (e.g. via IdentityList). A role with subRoles stays a single entry
+	 * for every gameplay purpose (eligibility, counts, prereqs, tags); this expansion is only ever meant for
+	 * narration-facing list output, and fully replaces the parent entry with its components in the result.
 	 *
-	 *   ctx  - the evaluation context for the current game (see _makeCtx), passed through to rule.resolveData/rule.resolver unchanged.
-	 *   rule - one TURN_ORDER entry: { action, instigator, resolver?, resolveData? }. `resolver`, if present, must name a function in
-	 *          RESOLVERS. `resolveData(ctx)`, if present, computes base data merged with (and overridable by) the resolver's own result.
+	 *   roleIDs - array of role IDs as drawn from selectedRoles.
 	 *
-	 * Returns { action, instigator, data }, where data merges resolveData's output with the resolver's (the resolver's fields win on
-	 * conflict). Throws if action/instigator are missing, or if `resolver` names a function that doesn't exist in RESOLVERS.
+	 * Returns a new array where each subRoles-bearing entry is replaced by its components (the parent ID itself
+	 * is dropped), in order; entries without subRoles pass through unchanged.
 	 */
-	function _runRule(ctx, rule) {
-		if (!rule.action || !rule.instigator)
+	function _expandCompositeRoles(roleIDs) {
+		return roleIDs.flatMap(id => Roles.getSubRoles(id) ?? [id]);;
+	}
+
+	/*
+	 * Executes a TURN_ORDER rule and appends the resulting turn to the output array.
+	 *
+	 * `instigator` and `executionData` allow the same rule definition to be executed more than once with different execution-specific values. This is
+	 * used by the Doppelganger echo to reuse the original role's action/resolver while changing the instigator and supplying `copiedRole`.
+	 *
+	 * Resolution errors are caught here so a failed turn is preserved as an error entry instead of aborting construction of the entire prompt. The 
+	 * effective instigator is resolved before the try/catch so error turns correctly identify the role that was actually executing the action.
+	 */
+	function _appendTurn(ctx, turns, rule, instigator = rule.instigator, executionData = {}) {
+		try {
+			turns.push(_runRule(ctx, rule, instigator, executionData));
+		} catch (error) {
+			turns.push({ action: rule.action, instigator: instigator, error: error });
+		}
+	}
+
+	/*
+	 * Executes one TURN_ORDER rule once and combines its derived and resolved data
+	 * into a structured turn.
+	 *
+	 *   ctx            - evaluation context for the current game (see _makeCtx).
+	 *   rule           - TURN_ORDER entry describing the action, its normal instigator, optional resolver and optional resolveData.
+	 *   instigator     - effective instigator for this execution. Defaults to the rule's declared instigator, but can be overridden when the rule is 
+	 *                    being echoed by the Doppelganger.
+	 *   executionData  - additional data specific to this execution, merged after rule.resolveData(). Used by the Doppelganger echo to provide
+	 *                    { copiedRole: rule.instigator }.
+	 *
+	 * For rules marked `doppelganger: "inline"`, hasDoppelganger is automatically added to the resolved data. Resolver results are then merged over
+	 * the combined data, allowing a resolver to override fields supplied by resolveData or executionData.
+	 *
+	 * Returns { action, instigator, data }. Throws if the action/instigator is missing, or if `resolver` names an undefined RESOLVERS function.
+	 */
+	function _runRule(ctx, rule, instigator = rule.instigator, extraData = {}) {
+		if (!rule.action || !instigator)
 			throw new Error(`TURN_ORDER entry missing required action/instigator: ${JSON.stringify(rule)}`);
 
 		const resolveFn = rule.resolver ? RESOLVERS[rule.resolver] : null;
 		if (rule.resolver && !resolveFn)
-			throw new Error(`TURN_ORDER entry '${rule.action}'/'${rule.instigator}' references unknown resolver '${rule.resolver}'`);
+			throw new Error(`TURN_ORDER entry '${rule.action}'/'${instigator}' references unknown resolver '${rule.resolver}'`);
 
-		const resolveData = rule.resolveData ? rule.resolveData(ctx) : {};
-		const resolveResult = resolveFn ? resolveFn(ctx, rule.action, rule.instigator, resolveData) ?? {} : resolveData;
+		const resolveData = { ...(rule.resolveData ? rule.resolveData(ctx) : {}), ...(rule.doppelganger === "inline" ? { hasDoppelganger: ctx.isRolePresent("DOPPELGANGER") } : {}), ...extraData };
+		const resolveResult = resolveFn ? resolveFn(ctx, rule.action, instigator, resolveData) ?? {} : resolveData;
 
-		return { action: rule.action, instigator: rule.instigator, data: { ...resolveData, ...resolveResult } };
+		return { action: rule.action, instigator: instigator, data: { ...resolveData, ...resolveResult } };
 	}
 
 	/*
@@ -1086,13 +1044,13 @@ const Rules = (() => {
 				return count;
 			},
 			getRolesPresentWithTag(tag) {
-				return [...this.selectedRoles.keys()].filter(roleID => Roles.hasTag(roleID, tag));
+				return _expandCompositeRoles([...this.selectedRoles.keys()].filter(roleID => Roles.hasTag(roleID, tag)));
 			},
 			getRolesPresentWithAllTags(...tags) {
-				return [...this.selectedRoles.keys()].filter(roleID => Roles.hasAllTags(roleID, ...tags));
+				return _expandCompositeRoles([...this.selectedRoles.keys()].filter(roleID => Roles.hasAllTags(roleID, ...tags)));
 			},
 			getRolesPresentInTeam(team) {
-				return [...this.selectedRoles.keys()].filter(roleID => Roles.isTeam(roleID, team));
+				return _expandCompositeRoles([...this.selectedRoles.keys()].filter(roleID => Roles.isTeam(roleID, team)));
 			},
 			getTagList(fieldName, tag) {
 				const list = this.getRolesPresentWithTag(tag);
@@ -1121,17 +1079,25 @@ const Rules = (() => {
 	}
 
 	/*
-	 * Evaluates the turn definitions in TURN_ORDER against the selected roles and produces the complete structured narration sequence. Evaluation
-	 * is top-down according to the order of the TURN_ORDER entries, and the result returned preserves the same order.
+	 * Evaluates TURN_ORDER from top to bottom and produces the complete structured
+	 * narration sequence.
 	 *
-	 * Rules that fail during resolution are preserved in the output as error turns rather than aborting generation entirely.
+	 * Each rule whose condition passes produces its normal turn. A rule marked
+	 * `doppelganger: "echo"` also produces a second turn immediately afterward when
+	 * the Doppelganger is present. The echoed turn reuses the original rule's action,
+	 * resolver and resolveData, but executes as ROLE_DOPPELGANGER and receives
+	 * `copiedRole` set to the original rule's instigator.
+	 *
+	 * A rule marked `doppelganger: "inline"` does not create a separate turn.
+	 * Instead, _runRule() automatically adds `hasDoppelganger` to that turn's data.
+	 *
+	 * Rules that fail during resolution are preserved as error turns rather than
+	 * aborting generation entirely.
 	 *
 	 *   roleCounts - Map<roleID, count> of the currently selected roles.
 	 *
-	 * Returns { turns, insufficientPlayers }. If the resulting player count is below MIN_PLAYERS, turns is [] and insufficientPlayers is
-	 * true. Otherwise turns is one entry per TURN_ORDER rule whose condition (if any) passed, each either a normal { action, instigator, data }
-	 * turn (see _runRule) or, if that rule threw during resolution, { action, instigator, error } instead — the caller decides how to
-	 * present a failed turn rather than the whole prompt failing to generate.
+	 * Returns { turns, insufficientPlayers }. If the resulting player count is below
+	 * MIN_PLAYERS, turns is [] and insufficientPlayers is true.
 	 */
 	function buildPrompt(roleCounts) {
 		const ctx = _makeCtx(roleCounts);
@@ -1140,21 +1106,23 @@ const Rules = (() => {
 			return { turns: [], insufficientPlayers: true };
 
 		const turns = [];
+		const hasDoppelganger = ctx.isRolePresent("DOPPELGANGER");
 
 		for (const rule of TURN_ORDER) {
 			if (rule.condition && !rule.condition(ctx))
 				continue;
 
-			try {
-				turns.push(_runRule(ctx, rule));
-			} catch (error) {
-				turns.push({ action: rule.action, instigator: rule.instigator, error: error });
+			// Execute the rule normally.
+			_appendTurn(ctx, turns, rule);
+
+			// If this action is echoed by the Doppelganger, execute the same rule immediately afterward using ROLE_DOPPELGANGER as the instigator.
+			if (rule.doppelganger === "echo" && hasDoppelganger) {
+				_appendTurn(ctx, turns, rule, "ROLE_DOPPELGANGER", { copiedRole: rule.instigator });
 			}
 		}
 
 		return { turns: turns, insufficientPlayers: false };
 	}
-
 
 
 	return {

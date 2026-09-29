@@ -36,7 +36,7 @@ let activeSelectionPointerId = null;
  *
  * narrationData is the single structural representation produced from Rules.buildPrompt() by Interpreter.compileAll().
  * The GUI decides how that data is presented: manual text is rendered on demand, while automatic narration passes
- * the same data to AutoNarrator.
+ * the same data to Narration.
  *
  * currentTurn/showSingleTurn control manual single-turn display and navigation.
  */
@@ -210,14 +210,28 @@ function loadSelectedRoles() {
 		console.group("Loaded role selection");
 
 		for (const [roleId, count] of Object.entries(roles)) {
-			if (Roles.isEnabled(roleId)) {
-				if (count > 0) {
-					console.log("\t" + roleId + ": " + count);
-				}
-				setRoleCount(roleId, count);
-			} else {
+			if (!Roles.isEnabled(roleId)) {
 				console.warn("\t" + roleId + " is disabled, ignoring attempt to load");
+				continue;
 			}
+			
+			if (!Number.isInteger(count)) {
+				console.warn("\t" + roleId + " count is not an integer, ignoring attempt to load");
+				continue;
+			}
+			
+			if (count === 0) continue;
+			
+			const { minCount, maxCount } = Roles.getMinMax(roleId);
+			let effectiveCount = count;
+			
+			if (count > maxCount || count < minCount) {
+				console.warn("\t" + roleId + " count " + count + " is not within role min/max, clamping value");
+				effectiveCount = Math.max(minCount, Math.min(count, maxCount));
+			}
+			
+			console.log("\t" + roleId + ": " + count);
+			setRoleCount(roleId, effectiveCount);
 		}
 		console.groupEnd();
 
@@ -301,6 +315,8 @@ function loadDayTimer() {
 			dayTimer.state = "stopped";
 			dayTimer.remaining = dayTimer.duration;
 		}
+		
+		document.getElementById("btn-speech-start").disabled = (dayTimer.state == "stopped" ? false : true);
 
 	} catch {
 		console.warn("Unable to load day timer from storage");
@@ -1585,7 +1601,7 @@ function setTagFilterTileState(tile, isSelected) {
 
    Rules.buildPrompt() produces structured turns. Interpreter.compileAll() converts those turns into the single
    structural narration dataset stored in promptState. The GUI chooses the presentation: manual text is rendered
-   through Interpreter on demand, while automatic narration is delegated to AutoNarrator.
+   through Interpreter on demand, while automatic narration is delegated to Narration.
    ========================= */
 
 /*
@@ -1610,7 +1626,7 @@ function updatePrompt(relevantErrors) {
 		resizePromptBox();
 	}
 
-	AutoNarrator.stop();
+	Narration.stop();
 	resetSpeechOverlay();
 	closeSpeechOverlay();
 
@@ -1712,7 +1728,7 @@ function updatePrompt(relevantErrors) {
 	/*
 	 * Plays promptState.narrationData as automatic narration.
 	 *
-	 * The same structural data used by the manual script view is passed to AutoNarrator. It resolves each turn only
+	 * The same structural data used by the manual script view is passed to Narration. It resolves each turn only
 	 * when playback reaches it, allowing values bound by earlier inputs to affect later turns.
 	 */
 	function speakPrompt() {
@@ -1726,7 +1742,7 @@ function updatePrompt(relevantErrors) {
 		openSpeechOverlay();
 		resetSpeechOverlay();
 
-		AutoNarrator.play(promptState.narrationData, {
+		Narration.play(promptState.narrationData, {
 				onSpeaking: clbkSpeechSpeaking,
 				onPause: clbkSpeechPause,
 				onTurnComplete: clbkSpeechTurnComplete,
@@ -1773,7 +1789,7 @@ function updatePrompt(relevantErrors) {
 	}
 
 	/*
-	 * Fires when an input node begins its wait. Renders one tappable button per option. Selecting one only records the choice (AutoNarrator.selectInput) - the
+	 * Fires when an input node begins its wait. Renders one tappable button per option. Selecting one only records the choice (Narration.selectInput) - the
 	 * wait always runs its full fixed duration regardless of whether or when a button gets pressed, so there's nothing else for this handler to gate.
 	 * The narration text from just before the input is left in place rather than cleared, since it's usually the instruction the wait is time for.
 	 */
@@ -1792,7 +1808,7 @@ function updatePrompt(relevantErrors) {
 			button.className = "speech-overlay-option";
 			button.textContent = option.label;
 			button.addEventListener("click", () => {
-				AutoNarrator.selectInput(option.value);
+				Narration.selectInput(option.value);
 				optionsContainer.querySelectorAll(".speech-overlay-option")
 					.forEach(b => b.classList.toggle("selected", b === button));
 			});
@@ -1810,7 +1826,7 @@ function updatePrompt(relevantErrors) {
 	 * choices for the user to pick from - has fully elapsed and a value has been bound (either the user's selection, or the input's own
 	 * default if nothing was picked in time). Only clears the option buttons and countdown styling here; field/value aren't used since this
 	 * module doesn't currently need to react to which field or value was bound - the narration that follows arrives through
-	 * clbkSpeechSpeaking/clbkSpeechPause like anything else. field/value match AutoNarrator.play()'s onInputResolved(field,value) callback shape.
+	 * clbkSpeechSpeaking/clbkSpeechPause like anything else. field/value match Narration.play()'s onInputResolved(field,value) callback shape.
 	 */
 	function clbkSpeechInputResolved(field, value) {
 		document.getElementById("speechOverlayOptions").replaceChildren();
@@ -1848,7 +1864,7 @@ function updatePrompt(relevantErrors) {
 
 	/*
 	 * Syncs the overlay's pause/stop buttons to the current Speech state: both disabled when nothing is active, and the pause button's
-	 * icon/label toggling between pause and resume depending on AutoNarrator.isPaused(). No parameters, no return value.
+	 * icon/label toggling between pause and resume depending on Narration.isPaused(). No parameters, no return value.
 	 */
 	function updateSpeechOverlayControls() {
 		const pauseBtn = document.getElementById("btn-speech-overlay-pause");
@@ -1856,8 +1872,8 @@ function updatePrompt(relevantErrors) {
 
 		if (!pauseBtn || !stopBtn) return;
 
-		const active = AutoNarrator.isActive();
-		const paused = AutoNarrator.isPaused();
+		const active = Narration.isActive();
+		const paused = Narration.isPaused();
 
 		pauseBtn.textContent = paused ? "▶" : "⏸";
 		pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
@@ -2180,6 +2196,7 @@ function startDayTimer() {
 
 	dayTimer.targetTimestamp = Date.now() + dayTimer.remaining * 1000;
 	dayTimer.state = "running";
+	document.getElementById("btn-speech-start").disabled = (dayTimer.state == "stopped" ? false : true);
 
 	ensureDayTimerInterval();
 	updateDayTimerUI();
@@ -2193,6 +2210,7 @@ function pauseDayTimer() {
 	dayTimer.remaining = getDayTimerRemainingSeconds();
 	dayTimer.targetTimestamp = null;
 	dayTimer.state = "paused";
+	document.getElementById("btn-speech-start").disabled = (dayTimer.state == "stopped" ? false : true);
 
 	clearDayTimerInterval();
 	updateDayTimerUI();
@@ -2204,6 +2222,7 @@ function stopDayTimer() {
 	dayTimer.state = "stopped";
 	dayTimer.targetTimestamp = null;
 	dayTimer.remaining = dayTimer.duration;
+	document.getElementById("btn-speech-start").disabled = (dayTimer.state == "stopped" ? false : true);
 
 	clearDayTimerInterval();
 	updateDayTimerUI();
@@ -2268,6 +2287,7 @@ function tickDayTimer() {
 	dayTimer.state = "stopped";
 	dayTimer.targetTimestamp = null;
 	dayTimer.remaining = 0;
+	document.getElementById("btn-speech-start").disabled = (dayTimer.state == "stopped" ? false : true);
 
 	clearDayTimerInterval();
 	updateDayTimerUI();
@@ -2342,7 +2362,7 @@ function processDayTimerWarnings(remaining) {
         dayTimer.warnings.shift();
 
         if (remaining >= warning.threshold - DAY_TIMER_WARNING_GRACE_SECONDS) {
-            AutoNarrator.playAnnouncement(warning.text);
+            Narration.playAnnouncement(warning.text);
         }
     }
 }
@@ -2350,7 +2370,7 @@ function processDayTimerWarnings(remaining) {
 // Plays the time up announcement when the day timer expires
 function playDayTimerTimeUpAnnouncement() {
 	if (Settings.getValue("narration.play_timer_expired"))
-		AutoNarrator.playAnnouncement("UI_DAYTIMER_EXPIRED");
+		Narration.playAnnouncement("UI_DAYTIMER_EXPIRED");
 }
 
 
@@ -2365,19 +2385,19 @@ function onSpeechStartClicked() {
 }
 
 function onSpeechOverlayPauseClicked() {
-	if (!AutoNarrator.isActive())
+	if (!Narration.isActive())
 		return;
 
-	if (AutoNarrator.isPaused())
-		AutoNarrator.resume();
+	if (Narration.isPaused())
+		Narration.resume();
 	else
-		AutoNarrator.pause();
+		Narration.pause();
 
 	updateSpeechOverlayControls();
 }
 
 function onSpeechOverlayStopClicked() {
-	AutoNarrator.stop();
+	Narration.stop();
 
 	resetSpeechOverlay();
 	closeSpeechOverlay();
@@ -2704,6 +2724,23 @@ function initPanels() {
 		});
 }
 
+// Adds all known languages to the language selector, and selects the current language.
+function initLanguageSelector(lang) {
+	const languageSelector = document.getElementById("languageSelector");
+	
+	for (const [langID, langName] of Object.entries(Localization.getKnownLanguages())) {
+		const opt = document.createElement("option")
+		opt.value = langID;
+		opt.text = langName;
+		
+		languageSelector.add(opt)
+		
+		if (langID === lang) {
+			languageSelector.selectedIndex = languageSelector.options.length - 1;
+		}
+	}
+}
+
 /*
  * Initializes the application in dependency order:
  *
@@ -2717,6 +2754,7 @@ function initPanels() {
 function initGUI() {
 	// Load language first so it's ready for component initialization, no dependency on anything
 	const lang = Localization.getLanguage();
+	initLanguageSelector(lang);	
 	setGUILanguage(lang);
 
 	// Load configuration/stored values, no dependency
@@ -2745,7 +2783,7 @@ function initGUI() {
 	updateRolesUI();
 	
 	// Pre-fetch the TTS atlas file so that it's ready for use
-	AudioAtlas.preload();
+	ClipPlayback.preload();
 }
 
 initGUI();

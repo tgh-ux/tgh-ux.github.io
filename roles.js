@@ -58,6 +58,7 @@ const Roles = (() => {
 	 * 	- prereq: a prerequisite tree defining what conditions must be true in order for a role to be eligible for use
 	 * 	- extraCenterCards: how many extra unused center cards this role will contribute with (mainly for player count calculations)
 	 * 	- disabled: if present and true, excludes the role from consideration in the UI and logic
+	 *  - subRoles: if present, defines an array containing pseudo-roles the parent role can be expanded to. Used only by the rules engine to build role list entries.
 	 * 	
 	 * 	The following attributes are assigned during initialization
 	 * 	- id: the ID of the role, same as its entry in the ROLES table
@@ -178,6 +179,7 @@ const Roles = (() => {
 			maxCount: 2,
 			icon: { x: 2, y: 4 },
 			cardIcons: [ { x: 3, y: 4}, ],
+			subRoles: [ "FEUDINGALIENS_GROOB", "FEUDINGALIENS_ZERB" ],
 		},
 		GREMLIN: {
 			icon: { x: 5, y: 3 },
@@ -943,6 +945,12 @@ const Roles = (() => {
 		return roleEntry.nameKey;
 	}
 
+	// Returns the array of subRoles assigned to a role, or null if none exists
+	function getSubRoles(role) {
+		const roleEntry = _getRole(role);
+		return roleEntry.subRoles ?? null;
+	}
+
 	// Returns true if a role has the specified tag, else false
 	function hasTag(role, tag) {
 		return _getRole(role)?.tags?.includes(tag) || false;
@@ -970,7 +978,12 @@ const Roles = (() => {
 
 	// Returns true if a role is enabled, else false
 	function isEnabled(role) {
-		return !_getRole(role)?.disabled;
+		const roleEntry = _getRole(role);
+		
+		if (roleEntry)
+			return !roleEntry.disabled;
+		
+		return false;
 	}
 
 	/*
@@ -1045,6 +1058,7 @@ const Roles = (() => {
 		getCardIcons,
 		getMinMax,
 		getNameKey,
+		getSubRoles,
 		getPortraitIcon,
 		hasAllTags,
 		hasAnyTag,

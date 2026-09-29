@@ -1,18 +1,28 @@
 /*
- * Automatic narration and input handling.
+ * Narration state, turn/input sequencing, and speech playback - the module the GUI drives to run a game
+ * script, and the sole caller of both Synthesis and ClipPlayback (formerly split out as a separate
+ * NarrationAudio module; folded back in here since there was little left in that module beyond forwarding -
+ * see the "Speech dispatch" section below for what remains of it).
  *
  * Consumes NarrationData produced by Interpreter.compileTurn()/compileAll().
  *
- * AutoNarrator is deliberately unaware of how narration is structured beyond the small set of node types it needs
- * to execute. It asks Interpreter to evaluate the current turn only when that turn is reached, using the values
- * accumulated from earlier inputs.
+ * This module is deliberately unaware of how narration is structured beyond the small set of node types it
+ * needs to execute. It asks Interpreter to evaluate the current turn only when that turn is reached, using the
+ * values accumulated from earlier inputs. It is equally unaware of *how* a sentence ends up as sound: the
+ * "Speech dispatch" section is the one place that decides clips vs. synthesis and normalizes both into the
+ * same play/pause/resume handle shape; everything above that section - turn sequencing, input handling,
+ * pause/resume, GUI callbacks - only ever touches that handle, never Synthesis or ClipPlayback directly. That
+ * split is what a synthesis or clip backend swap (see synthesis.js's own header) doesn't have to touch: as
+ * long as the replacement exposes the same speak()/isSupported() (Synthesis) or resolve()/playSequence()/
+ * isAvailable() (ClipPlayback/Clips) shape, nothing below this file's own dispatch section changes.
  *
  * The Interpreter is also responsible for the final language rendering. For content nodes it returns both the
- * localized text and the structural source information that produced it. TTSManifest uses that source information
- * to select pre-recorded clips; if complete clip coverage is unavailable, the full rendered text is synthesized.
+ * localized text and the structural source information that produced it; both are handed to the dispatch
+ * section, which is solely responsible for deciding whether that source resolves to pre-recorded clips or
+ * falls back to synthesis, and for actually producing the sound either way.
  */
 
-const AutoNarrator = (() => {
+const Narration = (() => {
 
 	/* =========================
 	   Data
@@ -24,43 +34,63 @@ const AutoNarrator = (() => {
 	// Default gap between adjacent spoken sentences when no explicit pause/input already separates them.
 	const SENTENCE_GAP_SECONDS = 0.75;
 
-	// Bumped whenever a session starts or stops, invalidating callbacks belonging to an older session.
-	let _generation = 0;
-
-	let _active = false;
-	let _paused = false;
-
-	// Timer currently handling a pause/input countdown.
-	let _pendingTimer = null;
+	// Longest an announcement can hold the announcement guard below, in case its backend never reports completion.
+	const ANNOUNCEMENT_MAX_SECONDS = 20;
 
 	/*
-	 * Current execution phase:
-	 *   null      - idle
-	 *   waiting   - _wait owns the current countdown
-	 *   speaking  - either _activeAudio or speechSynthesis owns playback
+	 * Lifetime invalidation counters - NOT part of _session below, and not touched by _resetSession(). Both
+	 * only ever count up, for as long as the page lives, across every session: a callback captures the current
+	 * value when it's issued, and is only honored if that value still matches when it fires. Resetting either
+	 * one back to an initial value on session reset (the way every _session field is) would defeat that -  a
+	 * stale callback captured before the very first session (generation/token 0) would then match a fresh reset
+	 * session that also reads 0, and get honored when it shouldn't be. So these persist across _reset() and are
+	 * only ever incremented, never reassigned to a fixed "initial" value.
 	 */
-	let _phase = null;
+	let _generation = 0;  // bumped whenever a session starts or stops
+	let _speechToken = 0; // bumped whenever the current speech operation is abandoned/replaced
 
 	/*
-	 * State for the current wait. remainingMs is maintained explicitly so pause()/resume() can suspend and continue
-	 * from the same point rather than restarting the whole wait.
+	 * Current session state - where play() is right now. Every field is meaningless once _reset() runs; see
+	 * _resetSession() under Initialization for where it's set back to exactly this shape at the end of every
+	 * session (and the moment just before a new one starts, from play()).
 	 */
-	let _wait = null;
-
-	// Current AudioAtlas playback handle, if the active narration is using a recording.
-	let _activeAudio = null;
-
-	// Standalone announcements are independent of a narration session.
-	let _announcementAudio = null;
-
-	// Values bound by resolved input nodes. They belong to the current play() session rather than an individual turn.
-	let _boundValues = {};
+	let _session = {
+		active: false,
+		paused: false,
+		/*
+		 * Current execution phase:
+		 *   null      - idle
+		 *   waiting   - wait owns the current countdown
+		 *   speaking  - activeAudio owns playback, whichever backend the dispatch section chose for it
+		 */
+		phase: null,
+		// State for the current wait. remainingMs is maintained explicitly so pause()/resume() can suspend and continue from the same point rather than restarting the whole wait.
+		wait: null,
+		// The logical sentence currently being spoken. Retained while paused so resume() can replay it.
+		currentSpeech: null,
+		// Current speech-dispatch playback handle for whatever's currently speaking, recording or synthesis alike - Narration itself never needs to know which.
+		activeAudio: null,
+		// Timer currently handling a pause/input countdown.
+		pendingTimer: null,
+		// Values bound by resolved input nodes. They belong to the current play() session rather than an individual turn.
+		boundValues: {},
+		// Callback installed while an input is waiting. selectInput() calls this without needing to know which narration node is currently active.
+		pendingInputSelect: null,
+	};
 
 	/*
-	 * Callback installed while an input is waiting. selectInput() calls this without needing to know which narration
-	 * node is currently active.
+	 * Guard state for the announcement currently playing, if any - see playAnnouncement() and play(). Deliberately
+	 * not part of _session and never reset: announcements are independent of a narration session. While an
+	 * announcement is playing, a new announcement or a new narration start is ignored instead of playing over it.
+	 *
+	 * busyUntil is a timestamp rather than a plain flag so that a backend which never reports completion can only
+	 * hold the guard for ANNOUNCEMENT_MAX_SECONDS rather than forever. token only ever counts up, like the
+	 * counters above, so that a late completion from an older announcement can't release a newer one.
 	 */
-	let _pendingInputSelect = null;
+	let _announcement = {
+		busyUntil: 0,
+		token: 0,
+	};
 
 	const _NOOP_CALLBACKS = {
 		onSpeaking: () => {},
@@ -78,9 +108,25 @@ const AutoNarrator = (() => {
 	   ========================= */
 
 	function _init() {
-		
+		_resetSession();
 	}
-	
+
+	// Resets _session back to its start-of-module shape (see Data above) - the one place that reset shape is
+	// defined, used both by _init() (module load) and _reset() (end of every session).
+	function _resetSession() {
+		_session = {
+			active: false,
+			paused: false,
+			phase: null,
+			wait: null,
+			currentSpeech: null,
+			activeAudio: null,
+			pendingTimer: null,
+			boundValues: {},
+			pendingInputSelect: null,
+		};
+	}
+
 	_init();
 
 
@@ -88,110 +134,109 @@ const AutoNarrator = (() => {
 	   Private functions
 	   ========================= */
 
-	function _playAtlasClip(name, onDone, onError) {
-		return AudioAtlas.play(name, onDone, onError);
+	/* =========================
+	   Speech dispatch
+
+	   The one section of this module that knows Synthesis and ClipPlayback exist. Backend selection for one
+	   call to _dispatchSpeak(), in order:
+	     - no atlas at all for the current language (ClipPlayback.isAvailable() false) - synthesize, no
+	       per-call warning. This is an expected state (e.g. no recordings exist yet for a given language),
+	       not a bug, so it isn't reported as one.
+	     - ClipPlayback.resolve() finds no full recorded coverage for `source` (no structural match at all, or
+	       a resolved clip list naming a clip actually missing from the atlas - ClipPlayback.resolve() itself
+	       logs which) - synthesize the whole thing instead.
+	     - full coverage - play the complete sequence as one committed unit: either the whole thing is heard as
+	       recordings, or (only on a genuine runtime failure once playback is already underway - a clip that
+	       was resolved and confirmed present, but then failed to actually load/decode/play) the whole thing is
+	       synthesized instead. Never a mix of the two within one call.
+
+	   _dispatchSpeak() itself has no notion of sessions, turns, or announcements - see _speak() below for how
+	   its result gets used.
+	   ========================= */
+
+	/*
+	 * Speaks one already-rendered narration unit, choosing between pre-recorded clips and browser speech synthesis.
+	 * Returns a handle valid for the lifetime of this one call, forwarding to whichever backend is currently live,
+	 * including across the clip-to-synthesis fallback mid-sequence - a caller never needs to know which backend is live.
+	 */
+	function _dispatchSpeak(text, source, onDone) {
+		if (!ClipPlayback.isAvailable()) {
+			return Synthesis.speak(text, { onDone });
+		}
+
+		const names = ClipPlayback.resolve(source);
+
+		if (!names) {
+			return Synthesis.speak(text, { onDone });
+		}
+
+		let current = { pause() {}, resume() {}, stop() {} };
+
+		const handle = {
+			pause()  { current.pause(); },
+			resume() { current.resume(); },
+			stop()   { current.stop(); },
+		};
+
+		current = ClipPlayback.playSequence(names, {
+			onDone,
+			onError: name => {
+				console.warn("Narration: clip playback failed at runtime, falling back to speech synthesis:", name);
+				current = Synthesis.speak(text, { onDone });
+			}
+		});
+
+		return handle;
 	}
 
 	/*
-	 * Plays a complete recording sequence as one logical narration unit.
-	 *
-	 * If any clip fails, the complete rendered text is synthesized from the beginning. This preserves the
-	 * all-or-nothing behavior of TTSManifest.lookup() and avoids switching from recorded audio to synthesis halfway
-	 * through a sentence.
+	 * Speaks `text` (with structural `source`, if any - see _dispatchSpeak() above) as one logical narration
+	 * unit, tracking the resulting handle in _session.activeAudio for pause()/resume() and discarding it once done.
+	 * Generation is checked here, once, before handing control back to the caller's onDone - _dispatchSpeak()
+	 * itself has no notion of sessions or generations, so this is the one place that boundary is enforced.
 	 */
-	function _playClipSequence(names, text, generation, onDone) {
-		let index = 0;
+	function _speak(text, source, generation, onDone) {
+		const token = ++_speechToken;
 
-		const playNext = () => {
-			if (generation !== _generation)
+		_session.currentSpeech = { text, source, generation, onDone };
+
+		_session.phase = "speaking";
+
+		_session.activeAudio = _dispatchSpeak(text, source, () => {
+			if (generation !== _generation || token !== _speechToken)
 				return;
 
-			if (index >= names.length) {
-				onDone();
-				return;
-			}
-
-			const name = names[index++];
-
-			_activeAudio = _playAtlasClip(name, () => {
-					if (generation !== _generation)
-						return;
-
-					_activeAudio = null;
-					playNext();
-				},
-				() => {
-					console.warn("Clip playback failed, falling back to speech synthesis:", name);
-					_activeAudio = null;
-
-					if (generation === _generation)
-						_speakTextAsUtterance(text, generation, onDone);
-				}
-			);
-		};
-
-		playNext();
+			_session.activeAudio = null;
+			_session.currentSpeech = null;
+			onDone();
+		});
 	}
 
-	function _speakTextAsUtterance(text, generation, onDone) {
-		if (!("speechSynthesis" in window)) {
-			console.warn("Speech synthesis is not supported; unable to speak:", text);
-
-			if (generation === _generation)
-				onDone();
-
-			return;
-		}
-
-		const utterance = new SpeechSynthesisUtterance(text);
-		utterance.lang = _langTag();
-		const voice = _pickVoice(utterance.lang);
-
-		if (voice)
-			utterance.voice = voice;
-
-		utterance.onend = () => { 
-			if (generation === _generation) onDone();
-		};
-		utterance.onerror = event => {
-			console.warn("Speech synthesis error:", event.error);
-
-			if (generation === _generation)
-				onDone();
-		};
-
-		window.speechSynthesis.speak(utterance);
+	// Whether an announcement is currently playing - see _announcement in Data for why this is time-bounded.
+	function _isAnnouncementBusy() {
+		return Date.now() < _announcement.busyUntil;
 	}
 
 	/*
 	 * Plays one localized sentence returned by Interpreter.renderContent().
 	 *
-	 * The text is what the GUI displays and what synthesis would speak.
-	 * The source is what TTSManifest uses to select recordings.
+	 * The text is what the GUI displays and what synthesis would speak, if used. The source is what
+	 * _dispatchSpeak matches against recordings before deciding whether synthesis is needed at all.
 	 */
 	function _playRenderedSentence(rendered, generation, onDone) {
-		_phase = "speaking";
-
 		if (!rendered?.text) {
+			_session.phase = "speaking";
 			onDone();
 			return;
 		}
 
-		const source = Array.isArray(rendered.source) ? rendered.source : [];
-		const names = source.length > 0 ? TTSManifest.lookup(source) : null;
-
-		if (names && names.length > 0) {
-			_playClipSequence(names, rendered.text, generation, onDone);
-			return;
-		}
-
-		_speakTextAsUtterance(rendered.text, generation, onDone);
+		_speak(rendered.text, rendered.source, generation, onDone);
 	}
 
 	/*
 	 * Renders one content node and plays its sentences in order.
 	 *
-	 * Sentence splitting is performed by Interpreter, not by AutoNarrator. AutoNarrator therefore never needs to know
+	 * Sentence splitting is performed by Interpreter, not by Narration. Narration therefore never needs to know
 	 * anything about the current language's sentence-boundary rules.
 	 */
 	function _playContentNode(node, generation, callbacks, onDone) {
@@ -203,7 +248,7 @@ const AutoNarrator = (() => {
 			console.error("Failed to render narration content:", error);
 			const text = `⚠ COULD NOT RENDER: ${error?.message ?? String(error)}`;
 			callbacks.onSpeaking(text);
-			_speakTextAsUtterance(text, generation, onDone);
+			_speak(text, null, generation, onDone);
 			
 			return;
 		}
@@ -252,7 +297,7 @@ const AutoNarrator = (() => {
 	 * Runs one input node to completion: renders its prompt/options, waits up to node.timeoutSeconds for a
 	 * selection via selectInput(), then resolves the continuation and resumes playback from the same node index.
 	 *
-	 * _pendingInputSelect is installed before rendering (not after), so a selection arriving while the input is
+	 * _session.pendingInputSelect is installed before rendering (not after), so a selection arriving while the input is
 	 * still being rendered is never lost. If rendering itself throws, playback isn't left stuck: the node's own
 	 * defaultValue is used immediately, exactly as if the countdown had expired unanswered.
 	 *
@@ -261,43 +306,16 @@ const AutoNarrator = (() => {
 	 * this exact same path, with no special-casing for nesting.
 	 */
 	function _playInput(narration, nodes, nodeIndex, node, generation, callbacks, onNodesComplete) {
-		let selected = null;
-
-		_pendingInputSelect = value => {
-			if (_isInputValueAllowed(node, value)) {
-				selected = value;
-			}
-		};
-
-		let renderedInput;
-
-		try {
-			renderedInput = Interpreter.renderInput(node);
-		} catch (error) {
-			console.error("Failed to render input:", error);
-			_pendingInputSelect = null;
+		function resolveInput(selected) {
+			_session.pendingInputSelect = null;
 			// Continue with the node's default rather than leaving narration permanently stuck.
-			const value = node.defaultValue;
-			_boundValues[node.field] = value;
-			callbacks.onInputResolved(node.field, value);
-			const continuation = Interpreter.resolveInput(narration, node, value, _boundValues);
-			nodes.splice(nodeIndex, 1, ...continuation);
-			_playNodes(narration, nodes, nodeIndex, generation, callbacks, onNodesComplete);
-
-			return;
-		}
-
-		callbacks.onInputStart(renderedInput.field, renderedInput.options);
-
-		_startWait(node.timeoutSeconds, generation, callbacks.onInputCountdown, () => {
-			_pendingInputSelect = null;
 			const value = selected ?? node.defaultValue;
-			_boundValues[node.field] = value;
+			_session.boundValues[node.field] = value;
 			callbacks.onInputResolved(node.field, value);
 			let continuation;
 
 			try {
-				continuation = Interpreter.resolveInput(narration, node, value, _boundValues);
+				continuation = Interpreter.resolveInput(narration, node, value, _session.boundValues);
 			} catch (error) {
 				console.error("Failed to resolve input continuation:", error);
 				continuation = [];
@@ -309,6 +327,30 @@ const AutoNarrator = (() => {
 			 */
 			nodes.splice(nodeIndex, 1, ...continuation);
 			_playNodes(narration, nodes, nodeIndex, generation, callbacks, onNodesComplete);
+		}
+		
+		let selected = null;
+
+		_session.pendingInputSelect = value => {
+			if (_isInputValueAllowed(node, value)) {
+				selected = value;
+			}
+		};
+
+		let renderedInput;
+
+		try {
+			renderedInput = Interpreter.renderInput(node);
+		} catch (error) {
+			console.error("Failed to render input:", error);
+			resolveInput();
+			return;
+		}
+
+		callbacks.onInputStart(renderedInput.field, renderedInput.options);
+
+		_startWait(node.timeoutSeconds, generation, callbacks.onInputCountdown, () => {
+			resolveInput(selected);
 		});
 	}
 
@@ -368,8 +410,8 @@ const AutoNarrator = (() => {
 			return;
 
 		if (turnIndex >= narrations.length) {
-			_active = false;
-			_phase = null;
+			_session.active = false;
+			_session.phase = null;
 			callbacks.onFinished();
 			return;
 		}
@@ -382,17 +424,13 @@ const AutoNarrator = (() => {
 			 * This is deliberately evaluated here, rather than when play() starts. Any values bound by earlier
 			 * input nodes are therefore visible to this turn.
 			 */
-			nodes = Interpreter.getNodes(narration, "automatic", _boundValues);
+			nodes = Interpreter.getNodes(narration, "automatic", _session.boundValues);
 		} catch (error) {
 			console.error("Failed to resolve narration turn:", error);
 			const text = _formatTurnError(narration, error);
 			callbacks.onSpeaking(text);
 
-			_speakTextAsUtterance(text, generation, () => {
-				if (generation !== _generation) {
-					return;
-				}
-
+			_speak(text, null, generation, () => {
 				callbacks.onTurnComplete(turnIndex);
 				_startWait(INTER_TURN_GAP_SECONDS, generation, () => {}, () => _playTurn(narrations, turnIndex + 1, generation, callbacks));
 			});
@@ -415,70 +453,52 @@ const AutoNarrator = (() => {
 	 * differ only in what onPause/onDone do.
 	 */
 	function _startWait(duration, generation, onPause, onDone) {
-		_phase = "waiting";
-		_wait = { remainingMs: Math.max(0, duration * 1000), generation, onPause, onDone, stepStartedAt: Date.now() };
-		onPause(_wait.remainingMs / 1000 );
+		_session.phase = "waiting";
+		_session.wait = { remainingMs: Math.max(0, duration * 1000), generation, onPause, onDone, stepStartedAt: Date.now() };
+		onPause(_session.wait.remainingMs / 1000 );
 		_scheduleWaitStep();
 	}
 
 	/*
-	 * Advances the current wait by one step (at most 100ms), then reschedules itself until _wait.remainingMs
-	 * reaches zero or the wait is abandoned (a new generation, or _wait itself replaced/cleared).
+	 * Advances the current wait by one step (at most 100ms), then reschedules itself until _session.wait.remainingMs
+	 * reaches zero or the wait is abandoned (a new generation, or _session.wait itself replaced/cleared).
 	 *
 	 * Stepped rather than a single setTimeout for the full duration so pause() can suspend with sub-100ms
 	 * accuracy at any point, and so onPause can report a live countdown rather than only firing once at the end.
 	 */
 	function _scheduleWaitStep() {
-		if (!_wait || _wait.generation !== _generation || _paused) {
+		if (!_session.wait || _session.wait.generation !== _generation || _session.paused) {
 			return;
 		}
 
-		const stepMs = Math.min(100, _wait.remainingMs);
-		_wait.stepStartedAt = Date.now();
+		const stepMs = Math.min(100, _session.wait.remainingMs);
+		_session.wait.stepStartedAt = Date.now();
 
-		_pendingTimer = setTimeout(() => {
-				_pendingTimer = null;
+		_session.pendingTimer = setTimeout(() => {
+				_session.pendingTimer = null;
 
-				if (!_wait || _wait.generation !== _generation) {
+				if (!_session.wait || _session.wait.generation !== _generation) {
 					return;
 				}
 
-				_wait.remainingMs = Math.max(0, _wait.remainingMs - stepMs);
+				_session.wait.remainingMs = Math.max(0, _session.wait.remainingMs - stepMs);
 
-				if (_wait.remainingMs <= 0) {
-					const onDone = _wait.onDone;
-					_wait.onPause(0);
-					_phase = null;
-					_wait = null;
+				if (_session.wait.remainingMs <= 0) {
+					const onDone = _session.wait.onDone;
+					_session.wait.onPause(0);
+					_session.phase = null;
+					_session.wait = null;
 					onDone();
 					return;
 				}
 
-				_wait.onPause(_wait.remainingMs / 1000);
+				_session.wait.onPause(_session.wait.remainingMs / 1000);
 				_scheduleWaitStep();
 			},
 			stepMs
 		);
 	}
 
-	
-	/*
-	 * Selects the preferred voice used for browser synthesis. Currently lacks an interface with the user, and
-	 * only Swedish has a specifically preferred voice ("Sofie"); other languages fall back to whatever voice the
-	 * browser picks as its own default for utterance.lang.
-	 */
-	function _pickVoice(langTag) {
-		if (langTag !== "sv-SE")
-			return null;
-
-		const voices = window.speechSynthesis.getVoices();
-
-		return voices.find(voice => voice.lang === "sv-SE" && voice.name.includes("Sofie")) ?? null;
-	}
-
-	function _langTag() {
-		return Localization.getLanguage() === "SWE" ? "sv-SE" : "en-US";
-	}
 
 	/*
 	 * Clears all narration-session state and stops anything it owns (a pending wait timer, an in-progress clip,
@@ -487,75 +507,17 @@ const AutoNarrator = (() => {
 	 */
 	function _reset() {
 		_generation++;
+		_speechToken++;
 
-		_active = false;
-		_paused = false;
-		_phase = null;
-		_wait = null;
-
-		_pendingInputSelect = null;
-
-		if (_pendingTimer !== null) {
-			clearTimeout(_pendingTimer);
-			_pendingTimer = null;
+		if (_session.pendingTimer !== null) {
+			clearTimeout(_session.pendingTimer);
 		}
 
-		if (_activeAudio) {
-			_activeAudio.pause();
-			_activeAudio = null;
+		if (_session.activeAudio) {
+			_session.activeAudio.stop();
 		}
 
-		window.speechSynthesis?.cancel();
-	}
-
-	function _playAnnouncementClipSequence(names, text) {
-		let index = 0;
-
-		const playNext = () => {
-			if (index >= names.length) {
-				return;
-			}
-
-			const name = names[index++];
-
-			const handle = _playAtlasClip( name, () => {
-					if (_announcementAudio === handle) {
-						_announcementAudio = null;
-					}
-
-					playNext();
-				},
-				() => {
-					console.warn("Announcement clip playback failed, falling back to speech synthesis:", name);
-
-					if (_announcementAudio === handle) {
-						_announcementAudio = null;
-					}
-
-					_speakAnnouncementText(text);
-				}
-			);
-
-			_announcementAudio = handle;
-		};
-
-		playNext();
-	}
-
-	function _speakAnnouncementText(text) {
-		if (!("speechSynthesis" in window)) {
-			console.warn("Unable to play announcement: speech synthesis is not supported.");
-			return;
-		}
-
-		const utterance = new SpeechSynthesisUtterance(text);
-		utterance.lang = _langTag();
-		const voice = _pickVoice(utterance.lang);
-
-		if (voice)
-			utterance.voice = voice;
-
-		window.speechSynthesis.speak(utterance);
+		_resetSession();
 	}
 
 
@@ -563,77 +525,100 @@ const AutoNarrator = (() => {
 	   Public functions
 	   ========================= */
 
-	/*
-	 * Returns whether this browser has at least one narration backend available.
-	 *
-	 * Speech synthesis is optional because a complete narration can consist entirely of pre-recorded clips.
-	 */
 	function isSupported() {
-		return ("speechSynthesis" in window || typeof AudioAtlas?.play === "function");
+		return Synthesis.isSupported() || ClipPlayback.isAvailable();
 	}
 
 	function isActive() {
-		return _active;
+		return _session.active;
 	}
 
 	function isPaused() {
-		return _paused;
+		return _session.paused;
 	}
 
 	function pause() {
-		if (!_active || _paused)
+		if (!_session.active || _session.paused)
 			return;
 
-		_paused = true;
+		_session.paused = true;
 
-		if (_phase === "waiting" && _wait) {
-			if (_pendingTimer !== null) {
-				clearTimeout(_pendingTimer);
-				_pendingTimer = null;
+		if (_session.phase === "waiting" && _session.wait) {
+			if (_session.pendingTimer !== null) {
+				clearTimeout(_session.pendingTimer);
+				_session.pendingTimer = null;
 			}
 
-			_wait.remainingMs = Math.max(0, _wait.remainingMs - (Date.now() - _wait.stepStartedAt));
+			_session.wait.remainingMs = Math.max(0, _session.wait.remainingMs - (Date.now() - _session.wait.stepStartedAt));
 
 			return;
 		}
 
-		if (_phase === "speaking" && _activeAudio) { _activeAudio.pause(); return; }
-		if (_phase === "speaking" && "speechSynthesis" in window) { window.speechSynthesis.pause(); return; }
+		if (_session.phase === "speaking") {
+			// Invalidate completion from the audio operation we are about to abandon.
+			_speechToken++;
+
+			if (_session.activeAudio) {
+				_session.activeAudio.stop();
+				_session.activeAudio = null;
+			}
+		}
 	}
 
 	function resume() {
-		if (!_active || !_paused)
+		if (!_session.active || !_session.paused)
 			return;
 
-		_paused = false;
+		_session.paused = false;
 
-		if (_phase === "waiting") { _scheduleWaitStep(); return; }
-		if (_phase === "speaking" && _activeAudio) { _activeAudio.play(); return; }
-		if (_phase === "speaking" && "speechSynthesis" in window) { window.speechSynthesis.resume(); return; }
+		if (_session.phase === "waiting") {
+			_scheduleWaitStep();
+			return;
+		}
+
+		if (_session.phase === "speaking" && _session.currentSpeech) {
+			const speech = _session.currentSpeech;
+
+			_speak(
+				speech.text,
+				speech.source,
+				speech.generation,
+				speech.onDone
+			);
+		}
 	}
 
 	/*
 	 * Plays precompiled NarrationData from the beginning.
 	 *
-	 * NarrationData is not modified by AutoNarrator. Temporary node arrays are created from each turn when that turn
+	 * NarrationData is not modified by Narration. Temporary node arrays are created from each turn when that turn
 	 * is reached, allowing input continuations to be inserted without mutating the GUI's canonical narration data.
+	 *
+	 * If an announcement is currently playing, the request is ignored - narration is neither started over it nor
+	 * is it cut off - and nothing changes, so the caller can simply try again. Returns whether narration started.
 	 */
 	function play(narrations, callbacks = {}) {
 		if (!isSupported()) {
 			console.warn("No narration playback backend is available.");
-			return;
+			return false;
+		}
+
+		if (_isAnnouncementBusy()) {
+			console.warn("Narration.play: an announcement is playing, ignoring the request.");
+			return false;
 		}
 
 		_reset();
 
 		if (!Array.isArray(narrations) || narrations.length === 0) {
-			return;
+			return false;
 		}
 
-		_active = true;
-		_boundValues = {};
+		_session.active = true;
 		const mergedCallbacks = { ..._NOOP_CALLBACKS, ...callbacks };
 		_playTurn(narrations, 0, _generation, mergedCallbacks);
+
+		return true;
 	}
 
 	function stop() {
@@ -641,76 +626,57 @@ const AutoNarrator = (() => {
 	}
 
 	function selectInput(value) {
-		if (_pendingInputSelect)
-			_pendingInputSelect(value);
+		if (_session.pendingInputSelect)
+			_session.pendingInputSelect(value);
 	}
 
 	/*
 	 * Plays a standalone announcement (e.g. the game timer's "X seconds left" / "time's up") - a short clip
-	 * outside of any narration session, with no play/pause/stop of its own since it's always brief: one clip
-	 * sequence, or one synthesized utterance, covering the whole thing - never split or reported back to the GUI.
+	 * outside of any narration session, with no play/pause/stop of its own since it's always brief: one clip,
+	 * or one synthesized utterance, covering the whole thing - never split or reported back to the GUI.
 	 *
-	 * Announcement keys are plain localization strings with no {...} templates of their own (unlike PROMPT_ keys),
-	 * so this reads key's literal spans directly via Localization.parseTemplate() rather than going through
-	 * Interpreter - there's no turn data or expression resolution involved. Each span's own (key,index) is exactly
-	 * the ref TTSManifest.lookup() matches against (see ttsmanifest.js's own MANIFEST comment on what a ref is).
+	 * The key is a plain localization key that can be resolved to a localized string via Localization.localize(),
+	 * the key is passed directly to ClipPlayback to be resolved, while the localized string can be passed for
+	 * synthesis as a fallback if a clip does not exist.
 	 *
-	 * A stray {...} expression in key's template can't be resolved here without Interpreter, so it's dropped with
-	 * a warning rather than left as raw unresolved text - announcement keys aren't expected to have one, but this
-	 * keeps that case visible instead of silently wrong if one's ever added.
+	 * Never plays over narration or another announcement, and never cuts either off: if a narration session is
+	 * active (including while paused), or another announcement is still playing, the request is dropped.
+	 * play() applies the same rule in the other direction, so the two are never audible at once.
 	 */
 	function playAnnouncement(key) {
-		if (!key)
+		if (!key) return;
+
+		if (_session.active || _isAnnouncementBusy()) {
+			console.warn("playAnnouncement: narration or another announcement is playing, dropping:", key);
 			return;
+		}
 
-		const nodes = Localization.parseTemplate(key);
+		const text = Localization.localize(key);
 
-		if (!nodes) {
+		if (!text) {
 			console.warn("playAnnouncement: unknown localization key:", key);
 			return;
 		}
 
-		const spans = nodes.filter(node => node.type === "span");
+		const token = ++_announcement.token;
+		_announcement.busyUntil = Date.now() + ANNOUNCEMENT_MAX_SECONDS * 1000;
 
-		if (spans.length < nodes.length) {
-			console.warn("playAnnouncement: key contains a {...} expression, which isn't supported here - only its literal text will be spoken:", key);
+		const done = () => {
+			if (token === _announcement.token)
+				_announcement.busyUntil = 0;
+		};
+
+		const clip = ClipPlayback.resolveAnnouncement(key);
+
+		if (clip) {
+			ClipPlayback.play(clip, done, () => {
+				Synthesis.speak(text, { onDone: done });
+			});
+		} else {
+			Synthesis.speak(text, { onDone: done });
 		}
-
-		if (spans.length === 0)
-			return;
-
-		const text = Localization.normalizeText(spans.map(span => span.text).join(""));
-		const source = spans.map(span => ({ ref: { type: "span", key: span.key, index: span.index } }));
-		const names = TTSManifest.lookup(source);
-
-		if (names && names.length > 0) {
-			_playAnnouncementClipSequence(names, text);
-			return;
-		}
-
-		_speakAnnouncementText(text);
 	}
 
-	// Debug helper for testing a sequence of known AudioAtlas clips.
-	function debugPlay(names) {
-		if (!Array.isArray(names) || names.length === 0) {
-			return;
-		}
-
-		_reset();
-		_active = true;
-		const generation = _generation;
-
-		_playClipSequence(names, "", generation, () => {
-			if (generation !== _generation) {
-				return;
-			}
-
-			_active = false;
-			_phase = null;
-			_activeAudio = null;
-		});
-	}
 
 	return {
 		isSupported,
@@ -722,7 +688,6 @@ const AutoNarrator = (() => {
 		stop,
 		selectInput,
 		playAnnouncement,
-		debugPlay,
 	};
 
 })();
