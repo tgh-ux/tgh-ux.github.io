@@ -1,0 +1,206 @@
+<!--
+    Static application skeleton.
+
+    Most panel content is generated at runtime by gui.js from metadata exposed by the application modules.
+
+    Module responsibilities:
+    - Localization provides language services and localized text.
+    - Roles provides role and token definitions and related game metadata.
+    - Settings provides configurable narration and game settings.
+    - Rules provides game rules and prompt generation.
+    - Interpreter converts structured rules output into narration data and text.
+    - Clip playback, selection, and synthesis provide the available narration audio.
+    - Narration controls automatic narration and user input during playback.
+    - GUI builds and manages the interactive interface.
+
+    The GUI script is loaded last and deferred until the static page skeleton has been parsed.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title data-loc="UI_TITLE"></title>
+    <link rel="stylesheet" href="styles.css">
+	
+	<!-- Core services and game data -->
+	<script src="localization.js"></script>
+	<script src="roles.js"></script>
+	<script src="settings.js"></script>
+	<script src="rules.js"></script>
+	
+	<!-- Narration generation and audio -->
+	<script src="interpreter.js"></script>
+	<script src="clipplayback.js"></script>
+	<script src="clipselector.js"></script>
+	<script src="synthesis.js"></script>
+	<script src="narration.js"></script>
+</head>
+<body>
+
+<!-- Day timer: floating pill when collapsed, expanded control panel when open. -->
+<div id="dayTimerSpacer" class="day-timer-spacer"></div>
+<div id="dayTimer" class="day-timer">
+	<button type="button" id="dayTimerPill" class="day-timer-pill">
+		<span id="dayTimerPillText" class="day-timer-pill-text">00:00</span>
+	</button>
+	<div id="dayTimerPanel" class="day-timer-panel">
+		<div class="day-timer-panel-inner">
+			<div class="day-timer-controls">
+				<div class="day-timer-row">
+					<button type="button" id="dayTimerMinus30" class="day-timer-btn">−30s</button>
+					<input type="text" id="dayTimerDisplay" class="day-timer-display" value="00:00" inputmode="numeric" autocomplete="off" />
+					<button type="button" id="dayTimerPlus30" class="day-timer-btn">+30s</button>
+				</div>
+				<div class="day-timer-row">
+					<button type="button" id="dayTimerStop" class="day-timer-btn day-timer-btn-icon" aria-label="Stop">⏹</button>
+					<button type="button" id="dayTimerToggle" class="day-timer-btn day-timer-btn-icon day-timer-btn-primary" aria-label="Start"></button>
+				</div>
+			</div>
+		</div>
+		<button type="button" id="dayTimerCollapseTab" class="day-timer-collapse-tab" aria-label="Collapse">▲</button>
+	</div>
+</div>
+
+<!-- Application title and language selector. -->
+<div class="top-bar">
+    <h1 data-loc="UI_TITLE"></h1>
+    <select id="languageSelector"></select>
+</div>
+
+<div class="container">
+    <!-- Role selection and filtering. -->
+    <section class="panel panel-roles" data-panel="roles">
+        <div class="panel-header">
+			<span class="panel-toggle">-</span>
+            <h3 data-loc="UI_ROLESELECTION"></h3>
+			<button id="btn-reset-roles" class="panel-btn" type="button" data-loc="UI_RESET"></button>
+        </div>
+
+        <div class="panel-content roles">
+			<div class="role-search">
+				<label for="roleSelectionSearchField" data-loc="UI_SEARCH"></label>
+				<input data-loc-placeholder="UI_SEARCH_PLACEHOLDER" type="text" id="roleSelectionSearchField" />
+			</div>
+			<div class="selection-filter" id="roleFilterContainer"></div>
+			<div id="playerCountDisplay" class="selection-player-count" data-loc="UI_PLAYER_COUNT"></div>
+            <!-- GUI will populate this -->
+            <div id="selectionList"></div>
+        </div>
+    </section>
+
+    <!-- Generated narration script and speech controls. -->
+    <section class="panel panel-output" data-panel="prompt">
+        <div class="panel-header">
+			<span class="panel-toggle">-</span>
+            <h3 data-loc="UI_GENERATED_PROMPT"></h3>
+			<button id="btn-rerandomize" class="panel-btn" type="button" data-loc="UI_RERANDOMIZE"></button>
+        </div>
+
+        <div class="panel-content output">
+            <textarea id="promptOutput" rows="6"></textarea>
+
+            <div id="speechControls" class="speech-controls">
+                <button type="button" id="btn-speech-start" class="speech-btn">▶</button>
+            </div>
+        </div>
+    </section>
+	
+    <!-- Configurable narration and game settings. -->
+    <section class="panel panel-settings" data-panel="settings" data-collapsed="true">
+        <div class="panel-header">
+			<span class="panel-toggle">+</span>
+            <h3 data-loc="UI_SETTING"></h3>
+			<button id="btn-reset-settings" class="panel-btn" type="button" data-loc="UI_RESET"></button>
+        </div>
+
+        <div class="panel-content">
+            <!-- GUI will populate this -->
+            <div id="settingsList"></div>
+        </div>
+    </section>
+
+    <!-- Role reference descriptions. -->
+    <section class="panel panel-role-descriptions" data-panel="role-descriptions"  data-collapsed="true">
+        <div class="panel-header">
+			<span class="panel-toggle">+</span>
+            <h3 data-loc="UI_ROLEDESCRIPTIONS"></h3>
+			<button id="btn-print-descriptions" class="print-button" type="button" data-loc="UI_PRINT"></button>
+        </div>
+
+        <div class="panel-content role-descriptions">
+			<div class="role-search">
+				<label for="roleDescriptionSearchField" data-loc="UI_SEARCH"></label>
+				<input data-loc-placeholder="UI_SEARCH_PLACEHOLDER" type="text" id="roleDescriptionSearchField" />
+			</div>
+            <!-- GUI will populate this -->
+            <div id="descriptionList"></div>
+        </div>
+    </section>
+
+	<!-- Token reference descriptions. -->
+	<section class="panel panel-token-descriptions" data-panel="token-descriptions" data-collapsed="true">
+		<div class="panel-header">
+			<span class="panel-toggle">+</span>
+			<h3 data-loc="UI_TOKENDESCRIPTIONS"></h3>
+			<button id="btn-print-tokens" class="print-button" type="button" data-loc="UI_PRINT"></button>
+		</div>
+
+		<div class="panel-content token-descriptions">
+			<div class="role-search">
+				<label for="tokenDescriptionSearchField" data-loc="UI_SEARCH"></label>
+				<input data-loc-placeholder="UI_SEARCH_PLACEHOLDER" type="text" id="tokenDescriptionSearchField" />
+			</div>
+			<!-- GUI will populate this. -->
+			<div id="tokenDescriptionList"></div>
+		</div>
+	</section>
+
+    <!-- Game rules reference. -->
+    <section class="panel panel-rules" data-panel="rules"  data-collapsed="true">
+        <div class="panel-header">
+			<span class="panel-toggle">+</span>
+            <h3 data-loc="UI_GAMERULES"></h3>
+			<button id="btn-print-rules" class="print-button" type="button" data-loc="UI_PRINT"></button>
+        </div>
+
+        <div class="panel-content rules">
+			<div id="rulesText" data-loc-html="UI_RULES_FULL"></div>
+        </div>
+    </section>
+	
+	<!-- Copyright attribution and project disclaimer. -->
+	<footer class="site-footer">
+		<p id="disclaimerText" data-loc-html="UI_DISCLAIMER"></p>
+	</footer>
+</div>
+
+<!-- Shared modal overlay for role descriptions and settings validation errors. -->
+<div id="modalOverlay" class="modal-overlay hidden">
+    <div class="modal-overlay-backdrop"></div>
+
+    <div class="modal-overlay-panel">
+        <button id="modalOverlayClose" class="modal-overlay-close">×</button>
+        <div id="modalOverlayContainer"></div>
+    </div>
+</div>
+
+<!-- Speech narration overlay and playback controls. -->
+<div id="speechOverlay" class="speech-overlay" aria-hidden="true">
+    <div class="speech-overlay-content">
+        <div id="speechOverlayState" class="speech-overlay-state"></div>
+        <div id="speechOverlayText" class="speech-overlay-text"></div>
+        <div id="speechOverlayCountdown" class="speech-overlay-countdown"></div>
+		<div id="speechOverlayOptions" class="speech-overlay-options"></div>
+        <div class="speech-overlay-controls">
+            <button type="button" id="btn-speech-overlay-pause" class="speech-overlay-button">⏸</button>
+            <button type="button" id="btn-speech-overlay-stop" class="speech-overlay-button">⏹</button>
+        </div>
+    </div>
+</div>
+
+<!-- GUI logic is loaded after the static page skeleton. -->
+<script src="gui.js" defer></script>
+
+</body>
+</html>
