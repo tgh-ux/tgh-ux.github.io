@@ -128,32 +128,6 @@ const TAG_FILTER_GROUPS = [
 	}
 ];
 
-/*
- * Sprite-sheet assets whose CSS URL depends on the active language.
- *
- * Each entry contains:
- *   cssVar       - CSS custom property receiving the loaded image URL.
- *   path         - language-specific asset path; %LANGUAGE% is replaced with the lower-case Localization language code.
- *   fallbackPath - asset used when the localized path cannot be loaded.
- */
-const LOCALIZED_SPRITE_SHEETS = [
-	{
-		cssVar: "--card-sprite-sheet",
-		path: "Sprites/cards_%LANGUAGE%.jpg",
-		fallbackPath: "Sprites/placeholder_cards.jpg",
-	},
-	{
-		cssVar: "--role-sprite-sheet",
-		path: "Sprites/roles.png", // No localized sheets currently, add if needed
-		fallbackPath: "Sprites/placeholder_roles.png",
-	},
-	{
-		cssVar: "--token-sprite-sheet",
-		path: "Sprites/tokens.png",	// No localized sheets currently, add if needed
-		fallbackPath: "Sprites/placeholder_tokens.png",
-	},
-];
-
 
 
 /* =========================
@@ -163,58 +137,12 @@ const LOCALIZED_SPRITE_SHEETS = [
 /**
  * Synchronizes GUI language-dependent state with the supplied language.
  *
- * Updates localized sprite sheets and the language selector. The application's actual language is managed by Localization.setLanguage().
+ * Updates the language selector. The application's actual language is managed by Localization.setLanguage().
  *
  * @param {string} lang - Language code known to Localization.
  */
 function setGUILanguage(lang) {
-	setGUISpriteLanguage(lang);
 	document.getElementById("languageSelector").value = lang;
-}
-
-/**
- * Applies the localized sprite-sheet assets for the supplied language.
- *
- * Each entry in LOCALIZED_SPRITE_SHEETS has its `%LANGUAGE%` placeholder replaced with the lower-case language code. The corresponding CSS
- * custom property is updated when the image loads successfully; when it fails, the configured fallback asset is attempted instead.
- *
- * @param {string} lang - Language code used to construct localized asset paths.
- */
-function setGUISpriteLanguage(lang) {
-	LOCALIZED_SPRITE_SHEETS.forEach((sheetData) => {
-		const sheetPath = sheetData.path.replace(/%LANGUAGE%/, lang.toLowerCase());
-		const img = new Image();
-
-		// Set the path if the image loads successfully
-		img.onload = () => {
-			document.documentElement.style.setProperty(sheetData.cssVar, `url("${sheetPath}")`);
-		};
-
-		// Otherwise (e.g. missing asset) fall back to the default-language asset
-		img.onerror = () => {
-			console.warn("Unable to load localized asset '" + sheetPath + "' for sprite sheet '" + sheetData.cssVar + "'");
-
-			if (!sheetData.fallbackPath) {
-				console.error("No fallback asset defined");
-				return;
-			}
-
-			console.warn("Attempting to use fallback asset '" + sheetData.fallbackPath + "'");
-			const fallbackImg = new Image();
-
-			fallbackImg.onload = () => {
-				document.documentElement.style.setProperty(sheetData.cssVar, `url("${sheetData.fallbackPath}")`);
-			};
-
-			fallbackImg.onerror = () => {
-				console.error("Unable to load fallback asset '" + sheetData.fallbackPath + "'");
-			}
-
-			fallbackImg.src = sheetData.fallbackPath;
-		};
-
-		img.src = sheetPath;
-	});
 }
 
 /**
@@ -586,70 +514,13 @@ function getRoleList(roleIds) {
 	   ========================= */
 
 	/**
-	 * Reads the CSS-defined sprite-sheet geometry for a sprite type.
-	 *
-	 * @param {string} type - Sprite type: "role", "card", or "token".
-	 * @returns {{width: number, height: number, scale: number, columns: number, rows: number}}
-	 *     Sprite cell dimensions, display scale, and sheet dimensions in cells.
-	 */
-	function getSpriteData(type) {
-		const styles = getComputedStyle(document.documentElement);
-
-		return {
-			width: parseFloat(styles.getPropertyValue(`--${type}-sprite-width`)),
-			height: parseFloat(styles.getPropertyValue(`--${type}-sprite-height`)),
-			scale: parseFloat(styles.getPropertyValue(`--${type}-sprite-scale`)),
-			columns: parseInt(styles.getPropertyValue(`--${type}-sprite-columns`), 10),
-			rows: parseInt(styles.getPropertyValue(`--${type}-sprite-rows`), 10)
-		};
-	}
-
-	/**
-	 * Sets the CSS offsets needed to display a sprite at the specified sheet position.
-	 *
-	 * @param {HTMLElement} el - Sprite element to update.
-	 * @param {string} type - Sprite type: "role", "card", or "token".
-	 * @param {{x: number, y: number}} position - Zero-based sprite coordinates.
-	 */
-	function applySpriteOffset(el, type, position) {
-		const { width, height } = getSpriteData(type);
-
-		el.style.setProperty(`--${type}-sprite-x`, `${-position.x * width}px`);
-		el.style.setProperty(`--${type}-sprite-y`, `${-position.y * height}px`);
-	}
-
-	/**
-	 * Creates a generic sprite element positioned at the specified sprite-sheet coordinates.
-	 *
-	 * Adds the common sprite classes and any additional classes supplied by the caller.
-	 *
-	 * @param {string} type - Sprite type: "role", "card", or "token".
-	 * @param {{x: number, y: number}} position - Zero-based sprite coordinates.
-	 * @param {...string} classes - Additional CSS classes.
-	 * @returns {HTMLDivElement} Configured sprite element.
-	 */
-	function createSprite(type, position, ...classes) {
-		const el = document.createElement("div");
-
-		el.classList.add(
-			"sprite",
-			`${type}-sprite`,
-			...classes
-		);
-
-		applySpriteOffset(el, type, position);
-
-		return el;
-	}
-
-	/**
 	 * Creates a role portrait sprite for the supplied role.
 	 *
 	 * @param {object} role - Role definition.
 	 * @returns {HTMLDivElement} Role portrait element.
 	 */
 	function createRoleIcon(role) {
-		return createSprite("role", Roles.getPortraitIcon(role));
+		return Sprites.create("role", Roles.getPortraitIcon(role));
 	}
 
 	/**
@@ -659,7 +530,7 @@ function getRoleList(roleIds) {
 	 * @returns {HTMLDivElement} Card icon element.
 	 */
 	function createCardIcon(card) {
-		return createSprite("card", card);
+		return Sprites.create("card", card);
 	}
 
 	/**
@@ -669,7 +540,7 @@ function getRoleList(roleIds) {
 	 * @returns {HTMLDivElement} Token icon element.
 	 */
 	function createTokenIcon(token) {
-		return createSprite("token", Roles.getTokenIcon(token));
+		return Sprites.create("token", Roles.getTokenIcon(token));
 	}
 
 	/* =========================
@@ -3256,6 +3127,19 @@ function onRerandomizeClicked(e) {
 
 
 
+// Hidden file input used by the "load sprites" button; created on first use and kept in the DOM so the picker's change event isn't lost.
+let spriteFileInput = null;
+
+/** Opens a file picker for locally stored sprite sheet files (cards, roles, tokens, and optionally sprites.json). */
+function onLoadSpritesClicked(e) {
+	Sprites.promptLoad();
+}
+
+function onClearSpritesClicked(e) {
+	Sprites.promptClear();
+}
+
+
 /* =========================
    Initialization
    ========================= */
@@ -3300,6 +3184,9 @@ function initGUIListeners() {
 	document.getElementById("btn-speech-start").addEventListener("click", onSpeechStartClicked);
 	document.getElementById("btn-speech-overlay-pause").addEventListener("click", onSpeechOverlayPauseClicked);
 	document.getElementById("btn-speech-overlay-stop").addEventListener("click", onSpeechOverlayStopClicked);
+	
+	document.getElementById("btn-load-sprites").addEventListener("click", onLoadSpritesClicked);
+	document.getElementById("btn-clear-sprites").addEventListener("click", onClearSpritesClicked);
 }
 
 /**
@@ -3402,6 +3289,7 @@ function initGUI() {
 	const lang = Localization.getLanguage();
 	initLanguageSelector(lang);	
 	setGUILanguage(lang);
+	Sprites.init(lang);  // async: applies stored local sheets, otherwise hosted ones, with placeholder fallbacks; existing sprites are corrected when geometry changes
 
 	// Load configuration/stored values, no dependency
 	loadSelectedRoles();
