@@ -1002,8 +1002,8 @@ const Localization = (() => {
 			COMMON: "{Select:huntActive,true,PROMPT_ORACLE_HUNT_STARTED,false,PROMPT_ORACLE_HUNT_AVOIDED}",
 		},
 		PROMPT_ORACLE_HUNT_STARTED: {
-			ENG: "Wrong, you are clearly a terrible {ROLE_ORACLE}. All other players, regardless of previous role and team, now have only one win condition: find {ROLE_ORACLE_DEFINITE}. {ROLE_ORACLE}, good luck, you now only win if you are not voted out.",
-			SWE: "Fel, du är uppenbarligen ett uselt {ROLE_ORACLE}. Övriga spelare, oberoende av tidigare roll- och lagtillhörighet har ni nu endast ett vinstvillkor: hitta {ROLE_ORACLE_DEFINITE}. {ROLE_ORACLE}, lycka till, du vinner nu endast om du inte blir utröstad.",
+			ENG: "Wrong, you are clearly a terrible {ROLE_ORACLE}. All other players, regardless of previous role and team, now have only one win condition: find {ROLE_ORACLE_DEFINITE}. {ROLE_ORACLE}, you now win only if you are not voted out.",
+			SWE: "Fel, du är uppenbarligen ett uselt {ROLE_ORACLE}. Övriga spelare, oberoende av tidigare roll- och lagtillhörighet har ni nu endast ett vinstvillkor: hitta {ROLE_ORACLE_DEFINITE}. {ROLE_ORACLE}, du vinner nu endast om du inte blir utröstad.",
 		},
 		PROMPT_ORACLE_VIEW_CARD: {
 			COMMON: "{PROMPT_VIEW_CARD} {Pause:medium}",
